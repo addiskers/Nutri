@@ -2,8 +2,8 @@
 
 # Documentation
 *.md
-!README.md
-!DEPLOYMENT.md
+README.md
+DEPLOYMENT.md
 
 # Environment files
 .env
