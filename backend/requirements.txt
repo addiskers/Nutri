@@ -24,6 +24,9 @@ slowapi==0.1.9
 # Utilities
 pydantic-settings==2.6.1
 
+# Email
+aiosmtplib==3.0.1
+
 # AI/ML - Image Extraction
 google-genai>=1.0.0
 Pillow>=10.0.0
