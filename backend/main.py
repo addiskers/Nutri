@@ -112,6 +112,17 @@ async def root():
     }
 
 
+# API Health endpoint
+@app.get("/api/health")
+async def health():
+    """Health check endpoint for monitoring and Docker"""
+    return {
+        "status": "healthy",
+        "app": settings.APP_NAME,
+        "version": "1.0.0"
+    }
+
+
 # Global exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
