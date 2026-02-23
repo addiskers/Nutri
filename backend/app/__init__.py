@@ -1,0 +1,2 @@
+"""NutriEyeQ Backend Application"""
+

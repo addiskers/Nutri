@@ -1,0 +1,32 @@
+/* React Image Crop Styles */
+@import 'react-image-crop/dist/ReactCrop.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Ensure dropdowns appear above content */
+.z-50 {
+  z-index: 50;
+}
+
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: 'Poppins', sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+}
