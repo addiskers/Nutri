@@ -42,7 +42,7 @@ const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
       {/* Logo */}
       <div className="h-16 border-b border-[#134346] flex items-center justify-center px-4">
         <img
-          src="/src/assets/zydus-logo.png"
+          src="/assets/zydus-logo.png"
           alt="Zydus Wellness"
           className={`object-contain transition-all ${isCollapsed ? 'h-6' : 'h-9'}`}
         />

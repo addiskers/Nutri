@@ -85,7 +85,7 @@ const AuthCallback = () => {
           {/* Logo */}
           <div className="flex justify-center mb-6">
             <img
-              src="/src/assets/zydus-logo.png"
+              src="/assets/zydus-logo.png"
               alt="Zydus Wellness Logo"
               className="h-12 w-auto object-contain"
             />

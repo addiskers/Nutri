@@ -238,7 +238,7 @@ const Login = () => {
           {/* Logo */}
           <div className="flex justify-center">
             <img
-              src="/src/assets/zydus-logo.png"
+              src="/assets/zydus-logo.png"
               alt="Zydus Wellness Logo"
               className="h-12 md:h-14 w-auto object-contain"
             />

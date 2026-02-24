@@ -30,7 +30,7 @@ const FlashScreen = () => {
           {/* Logo */}
           <div className="h-[50px] w-[79px] sm:h-[63.807px] sm:w-[100.631px] relative">
             <img
-              src="/src/assets/zydus-logo-flash.png"
+              src="/assets/zydus-logo-flash.png"
               alt="Zydus Wellness Logo"
               className="w-full h-full object-cover"
             />
