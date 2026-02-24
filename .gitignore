@@ -59,3 +59,9 @@ Thumbs.db
 
 # Deployment artifacts (keep docker files)
 *.zip
+
+# SSL Certificates (NEVER commit private keys)
+nginx/ssl/*.key
+nginx/ssl/*.crt
+nginx/ssl/*.pem
+nginx/ssl/*.pfx
