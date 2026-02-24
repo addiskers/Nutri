@@ -65,3 +65,8 @@ nginx/ssl/*.key
 nginx/ssl/*.crt
 nginx/ssl/*.pem
 nginx/ssl/*.pfx
+*.key
+*.crt
+*.pem
+.env
+.env.*
