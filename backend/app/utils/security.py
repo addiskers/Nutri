@@ -16,15 +16,33 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 def hash_password(password: str) -> str:
     """Hash a password using bcrypt"""
     # Bcrypt has a 72 byte limit, truncate if necessary
-    password_bytes = password.encode('utf-8')[:72]
-    return pwd_context.hash(password_bytes.decode('utf-8', errors='ignore'))
+    if len(password.encode('utf-8')) > 72:
+        # Truncate to 72 bytes, ensuring we don't break UTF-8 sequences
+        password_bytes = password.encode('utf-8')[:72]
+        # Find the last valid UTF-8 character boundary
+        while len(password_bytes) > 0:
+            try:
+                password = password_bytes.decode('utf-8')
+                break
+            except UnicodeDecodeError:
+                password_bytes = password_bytes[:-1]
+    return pwd_context.hash(password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a password against its hash"""
     # Bcrypt has a 72 byte limit, truncate if necessary
-    password_bytes = plain_password.encode('utf-8')[:72]
-    return pwd_context.verify(password_bytes.decode('utf-8', errors='ignore'), hashed_password)
+    if len(plain_password.encode('utf-8')) > 72:
+        # Truncate to 72 bytes, ensuring we don't break UTF-8 sequences
+        password_bytes = plain_password.encode('utf-8')[:72]
+        # Find the last valid UTF-8 character boundary
+        while len(password_bytes) > 0:
+            try:
+                plain_password = password_bytes.decode('utf-8')
+                break
+            except UnicodeDecodeError:
+                password_bytes = password_bytes[:-1]
+    return pwd_context.verify(plain_password, hashed_password)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
