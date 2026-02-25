@@ -1,17 +1,9 @@
-"""
-Authentication request/response schemas
-"""
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
 from datetime import datetime
 
 
-# ============================================================
-# TRADITIONAL EMAIL/PASSWORD AUTHENTICATION SCHEMAS
-# ============================================================
-
 class UserRegister(BaseModel):
-    """Schema for user registration"""
     name: str = Field(..., min_length=2, max_length=100)
     email: EmailStr
     password: str = Field(..., min_length=8)
@@ -29,7 +21,6 @@ class UserRegister(BaseModel):
 
 
 class UserLogin(BaseModel):
-    """Schema for user login"""
     email: EmailStr
     password: str
     
@@ -43,7 +34,6 @@ class UserLogin(BaseModel):
 
 
 class VerifyLoginOTP(BaseModel):
-    """Schema for login OTP verification"""
     email: EmailStr
     otp: str = Field(..., min_length=6, max_length=6)
     
@@ -57,7 +47,6 @@ class VerifyLoginOTP(BaseModel):
 
 
 class ForgotPassword(BaseModel):
-    """Schema for forgot password request"""
     email: EmailStr
     
     class Config:
@@ -69,7 +58,6 @@ class ForgotPassword(BaseModel):
 
 
 class ResetPassword(BaseModel):
-    """Schema for password reset with OTP"""
     email: EmailStr
     otp: str = Field(..., min_length=6, max_length=6)
     new_password: str = Field(..., min_length=8)
@@ -85,7 +73,6 @@ class ResetPassword(BaseModel):
 
 
 class ChangePassword(BaseModel):
-    """Schema for password change (authenticated user)"""
     current_password: str
     new_password: str = Field(..., min_length=8)
     
@@ -98,12 +85,7 @@ class ChangePassword(BaseModel):
         }
 
 
-# ============================================================
-# AZURE AD AUTHENTICATION SCHEMAS
-# ============================================================
-
 class AzureAuthRequest(BaseModel):
-    """Schema for Azure AD callback request"""
     code: str = Field(..., description="Authorization code from Azure AD")
     state: Optional[str] = Field(None, description="CSRF protection state")
     
@@ -117,7 +99,6 @@ class AzureAuthRequest(BaseModel):
 
 
 class AzureAuthUrlResponse(BaseModel):
-    """Schema for Azure AD authorization URL response"""
     auth_url: str = Field(..., description="Azure AD authorization URL")
     state: str = Field(..., description="CSRF protection state")
     
@@ -130,12 +111,7 @@ class AzureAuthUrlResponse(BaseModel):
         }
 
 
-# ============================================================
-# SHARED RESPONSE SCHEMAS
-# ============================================================
-
 class TokenResponse(BaseModel):
-    """Schema for token response"""
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
@@ -144,7 +120,6 @@ class TokenResponse(BaseModel):
 
 
 class UserResponse(BaseModel):
-    """Schema for user response (public data)"""
     id: str
     name: str
     email: EmailStr
@@ -161,7 +136,6 @@ class UserResponse(BaseModel):
 
     @classmethod
     def from_user(cls, user):
-        """Create UserResponse from User document"""
         return cls(
             id=str(user.id),
             name=user.name,
@@ -196,7 +170,6 @@ class UserResponse(BaseModel):
 
 
 class MessageResponse(BaseModel):
-    """Generic message response"""
     message: str
     success: bool = True
     

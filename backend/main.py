@@ -1,7 +1,3 @@
-"""
-NutriEyeQ Dashboard - FastAPI Backend
-Main application entry point with Product Extraction
-"""
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
@@ -13,9 +9,6 @@ from config.settings import settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Lifespan context manager for startup and shutdown events
-    """
     # Startup
     print("=" * 60)
     print("Starting NutriEyeQ Backend...")
@@ -26,13 +19,11 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Shutdown
     print("\nShutting down...")
     await Database.close_db()
     print("Server stopped")
 
 
-# Create FastAPI application
 app = FastAPI(
     title=settings.APP_NAME,
     description="Product packaging data extraction and benchmarking API",
@@ -43,41 +34,28 @@ app = FastAPI(
 )
 
 
-# Configure security
 configure_cors(app)
 configure_rate_limiting(app)
 
 
-# Security Headers Middleware
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
-    """Add security headers to all responses"""
     response = await call_next(request)
     
-    # Prevent XSS attacks
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-XSS-Protection"] = "1; mode=block"
-    
-    # Prevent clickjacking
     response.headers["X-Frame-Options"] = "DENY"
-    
-    # HTTPS enforcement (only in production)
     if not settings.DEBUG:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     
-    # Referrer policy
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    
-    # Permissions policy
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
     
     return response
 
 
-# Request logging middleware
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """Log all incoming requests"""
     try:
         print(f"\n[REQUEST] {request.method} {request.url.path}")
         if request.method == "POST" and "extract" in request.url.path:
@@ -90,7 +68,6 @@ async def log_requests(request: Request, call_next):
         raise
 
 
-# Include routers
 app.include_router(auth.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(products.router, prefix="/api")
@@ -100,10 +77,8 @@ app.include_router(coa.router, prefix="/api")
 app.include_router(formulations.router, prefix="/api")
 
 
-# Root endpoint
 @app.get("/")
 async def root():
-    """Health check endpoint"""
     return {
         "app": settings.APP_NAME,
         "version": "1.0.0",
@@ -112,10 +87,8 @@ async def root():
     }
 
 
-# API Health endpoint
 @app.get("/api/health")
 async def health():
-    """Health check endpoint for monitoring and Docker"""
     return {
         "status": "healthy",
         "app": settings.APP_NAME,
@@ -123,12 +96,9 @@ async def health():
     }
 
 
-# Global exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Handle unexpected errors gracefully"""
     if settings.DEBUG:
-        # In debug mode, show full error
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
@@ -138,7 +108,6 @@ async def global_exception_handler(request: Request, exc: Exception):
             }
         )
     else:
-        # In production, hide error details
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"detail": "Internal server error"}

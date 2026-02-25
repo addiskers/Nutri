@@ -4,7 +4,7 @@ import Layout from '../components/Layout/Layout'
 
 import { Plus, Trash2, Loader2, Search, AlertCircle, Beaker, Download, X, ChevronDown } from 'lucide-react'
 
-import { coaService } from '../services/api'
+import { coaService, formulationService } from '../services/api'
 
 import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
@@ -49,6 +49,17 @@ const Formulation = () => {
   const [selectedRDACategories, setSelectedRDACategories] = useState([])
   const [serveSize, setServeSize] = useState(55)
   const [serveSizeUnit, setServeSizeUnit] = useState('g')
+
+  // Save Formulation Modal
+  const [showSaveModal, setShowSaveModal] = useState(false)
+  const [formulationName, setFormulationName] = useState('')
+  const [saveError, setSaveError] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+
+  // Tab management
+  const [activeTab, setActiveTab] = useState('formula') // 'formula' | 'saved'
+  const [savedFormulations, setSavedFormulations] = useState([])
+  const [isLoadingSaved, setIsLoadingSaved] = useState(false)
 
   
 
@@ -366,6 +377,13 @@ const Formulation = () => {
     loadCOAs()
 
   }, [])
+
+  // Load saved formulations when Saved tab is active
+  useEffect(() => {
+    if (activeTab === 'saved') {
+      loadSavedFormulations()
+    }
+  }, [activeTab])
 
   
 
@@ -737,6 +755,120 @@ const Formulation = () => {
 
   }
 
+  // Load saved formulations
+  const loadSavedFormulations = async () => {
+    setIsLoadingSaved(true)
+    try {
+      const result = await formulationService.getFormulations({ limit: 100 })
+      setSavedFormulations(result.formulations || [])
+    } catch (error) {
+      console.error('Failed to load saved formulations:', error)
+    } finally {
+      setIsLoadingSaved(false)
+    }
+  }
+
+  // Save current formulation
+  const handleSaveFormulation = async () => {
+    setSaveError('')
+    const name = formulationName.trim()
+    
+    if (!name) {
+      setSaveError('Please enter a formulation name')
+      return
+    }
+
+    if (ingredients.length === 0) {
+      setSaveError('Please add at least one ingredient')
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      const result = await formulationService.saveFormulation({
+        name: name,
+        ingredients: ingredients.map(ing => ({
+          coa_id: ing.coa_id,
+          coa_name: ing.coa_name,
+          percentage: ing.percentage,
+          nutritional_data: ing.nutritional_data
+        })),
+        nutrient_selections: nutrientSelections,
+        custom_values: customValues,
+        serve_size: serveSize,
+        created_by: localStorage.getItem('user_email') || 'admin'
+      })
+
+      if (result.success) {
+        alert(`Formulation "${name}" saved successfully!`)
+        setFormulationName('')
+        setShowSaveModal(false)
+        // Refresh saved list if on that tab
+        if (activeTab === 'saved') {
+          loadSavedFormulations()
+        }
+      } else {
+        setSaveError(result.error || 'Failed to save formulation')
+      }
+    } catch (error) {
+      setSaveError(error.message || 'Failed to save formulation')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  // Open/Load a saved formulation
+  const handleOpenFormulation = async (formulationId) => {
+    try {
+      const formulation = await formulationService.getFormulation(formulationId)
+      if (!formulation) {
+        alert('Failed to load formulation')
+        return
+      }
+
+      // Load ingredients with IDs
+      const loadedIngredients = formulation.ingredients.map((ing, index) => ({
+        id: index + 1,
+        coa_id: ing.coa_id,
+        coa_name: ing.coa_name,
+        percentage: ing.percentage,
+        nutritional_data: ing.nutritional_data || {}
+      }))
+
+      setIngredients(loadedIngredients)
+      setNextId(loadedIngredients.length + 1)
+      setNutrientSelections(formulation.nutrient_selections || {})
+      setCustomValues(formulation.custom_values || {})
+      setServeSize(formulation.serve_size || 55)
+      
+      // Switch to formula tab
+      setActiveTab('formula')
+      alert(`Loaded formulation: ${formulation.name}`)
+    } catch (error) {
+      console.error('Failed to open formulation:', error)
+      alert('Failed to open formulation')
+    }
+  }
+
+  // Delete a saved formulation
+  const handleDeleteFormulation = async (id, name) => {
+    if (!confirm(`Are you sure you want to delete "${name}"?`)) {
+      return
+    }
+
+    try {
+      const result = await formulationService.deleteFormulation(id)
+      if (result.success) {
+        alert('Formulation deleted successfully')
+        loadSavedFormulations()
+      } else {
+        alert(result.error || 'Failed to delete formulation')
+      }
+    } catch (error) {
+      alert('Failed to delete formulation')
+    }
+  }
+
   
 
   // Full nutrient list in regulatory order with indentation info
@@ -1000,30 +1132,34 @@ const Formulation = () => {
 
             </h1>
 
-            <p className="text-sm md:text-base font-ibm-plex text-[#65758b]">
-
-              Create product formulations and calculate nutritional values
-
-            </p>
-
           </div>
 
           <div className="flex gap-3">
 
             <button
-
-              onClick={() => setShowRDAModal(true)}
-
+              onClick={() => setShowSaveModal(true)}
               disabled={ingredients.length === 0}
-
-              className="bg-[#b455a0] flex items-center justify-center gap-2 h-10 px-4 py-2 rounded-md text-white font-ibm-plex font-medium text-sm hover:bg-[#a04890] transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
-
+              className={`flex items-center justify-center gap-2 h-10 px-4 py-2 rounded-md font-ibm-plex font-medium text-sm transition-colors whitespace-nowrap ${
+                ingredients.length === 0
+                  ? 'bg-[#f5f5f5] text-[#9e9e9e] cursor-not-allowed'
+                  : 'bg-[#e91e63] text-white hover:bg-[#c2185b]'
+              }`}
             >
-
               <Download className="w-4 h-4" />
+              Save
+            </button>
 
+            <button
+              onClick={() => setShowRDAModal(true)}
+              disabled={ingredients.length === 0}
+              className={`flex items-center justify-center gap-2 h-10 px-4 py-2 rounded-md font-ibm-plex font-medium text-sm transition-colors whitespace-nowrap ${
+                ingredients.length === 0
+                  ? 'bg-[#e1e7ef] text-[#65758b] cursor-not-allowed'
+                  : 'bg-[#009da5] border border-[#5bc4bf] text-white hover:bg-[#008891]'
+              }`}
+            >
+              <Download className="w-4 h-4" />
               Export to Excel
-
             </button>
 
             <button
@@ -1044,7 +1180,33 @@ const Formulation = () => {
 
         </div>
 
-        
+        {/* Tabs */}
+        <div className="flex gap-4 border-b border-[#e1e7ef] mb-6">
+          <button
+            onClick={() => setActiveTab('formula')}
+            className={`px-4 py-2 font-ibm-plex font-medium text-sm transition-colors border-b-2 ${
+              activeTab === 'formula'
+                ? 'border-[#009da5] text-[#009da5]'
+                : 'border-transparent text-[#65758b] hover:text-[#0f1729]'
+            }`}
+          >
+            Formula
+          </button>
+          <button
+            onClick={() => setActiveTab('saved')}
+            className={`px-4 py-2 font-ibm-plex font-medium text-sm transition-colors border-b-2 ${
+              activeTab === 'saved'
+                ? 'border-[#009da5] text-[#009da5]'
+                : 'border-transparent text-[#65758b] hover:text-[#0f1729]'
+            }`}
+          >
+            Saved Formulations
+          </button>
+        </div>
+
+        {/* Formula Tab Content */}
+        {activeTab === 'formula' && (
+        <>
 
         {/* Total Percentage Warning */}
 
@@ -1156,13 +1318,13 @@ const Formulation = () => {
 
             <div className="overflow-x-auto">
 
-              <table className="w-full">
+              <table className="w-full table-auto border-collapse">
 
                 <thead>
 
                   <tr className="bg-[#f1f5f9] border-b border-[#e1e7ef]">
 
-                    <th className="px-3 py-3 text-left sticky left-0 bg-[#f1f5f9] z-10 min-w-[200px]">
+                    <th className="px-3 py-3 text-left sticky left-0 bg-[#f1f5f9] z-10 min-w-[200px] w-[200px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
 
                       <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
 
@@ -1172,7 +1334,7 @@ const Formulation = () => {
 
                     </th>
 
-                    <th className="px-3 py-3 text-center min-w-[100px]">
+                    <th className="px-3 py-3 text-center min-w-[80px] w-[80px]">
 
                       <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
 
@@ -1184,7 +1346,7 @@ const Formulation = () => {
 
                     {nutrientNames.map(nutrient => (
 
-                      <th key={nutrient} className="px-2 py-3 text-right min-w-[120px]">
+                      <th key={nutrient} className="px-3 py-3 text-right min-w-[100px] w-[100px]">
 
                         <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider whitespace-nowrap">
 
@@ -1196,7 +1358,7 @@ const Formulation = () => {
 
                     ))}
 
-                    <th className="px-3 py-3 text-center w-16 sticky right-0 bg-[#f1f5f9]">
+                    <th className="px-3 py-3 text-center min-w-[80px] w-[80px] sticky right-0 bg-[#f1f5f9] z-10 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]">
 
                       <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
 
@@ -1218,7 +1380,7 @@ const Formulation = () => {
 
                     <tr key={ingredient.id} className="border-b border-[#e1e7ef] hover:bg-[#f9fafb]">
 
-                      <td className="px-3 py-3 sticky left-0 bg-white">
+                      <td className="px-3 py-3 sticky left-0 bg-white z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
 
                         <select
 
@@ -1552,17 +1714,123 @@ const Formulation = () => {
               <div>• SFA/MUFA/PUFA: 9 kcal/g</div>
 
             </div>
-
           </div>
-
+        )}
+        </>
         )}
 
-        
+        {/* Saved Formulations Tab Content */}
+        {activeTab === 'saved' && (
+          <div className="bg-white rounded-lg border border-[#e1e7ef] overflow-hidden">
+            {isLoadingSaved ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-[#009da5]" />
+              </div>
+            ) : savedFormulations.length === 0 ? (
+              <div className="text-center py-12">
+                <p className="text-[#65758b] font-ibm-plex">No saved formulations yet</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-[#f9fafb] border-b border-[#e1e7ef]">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Name</th>
+                      <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Ingredients</th>
+                      <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Serve Size</th>
+                      <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Created</th>
+                      <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {savedFormulations.map((formulation, idx) => (
+                      <tr key={formulation.id} className={idx !== savedFormulations.length - 1 ? 'border-b border-[#e1e7ef]' : ''}>
+                        <td className="px-4 py-3 text-sm font-ibm-plex font-medium text-[#0f1729]">{formulation.name}</td>
+                        <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">{formulation.ingredients_count} ingredients</td>
+                        <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">{formulation.serve_size}g</td>
+                        <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">
+                          {formulation.created_at ? new Date(formulation.created_at).toLocaleDateString() : '-'}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleOpenFormulation(formulation.id)}
+                              className="px-3 py-1 bg-[#009da5] text-white rounded text-sm font-ibm-plex font-medium hover:bg-[#008891] transition-colors"
+                            >
+                              Open
+                            </button>
+                            <button
+                              onClick={() => handleDeleteFormulation(formulation.id, formulation.name)}
+                              className="px-3 py-1 bg-red-500 text-white rounded text-sm font-ibm-plex font-medium hover:bg-red-600 transition-colors"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Save Formulation Modal */}
+        {showSaveModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+              <div className="p-6 border-b border-[#e1e7ef]">
+                <h2 className="text-xl font-ibm-plex font-bold text-[#0f1729]">Save Formulation</h2>
+              </div>
+              <div className="p-6">
+                <label className="block text-sm font-ibm-plex font-medium text-[#0f1729] mb-2">
+                  Formulation Name *
+                </label>
+                <input
+                  type="text"
+                  value={formulationName}
+                  onChange={(e) => setFormulationName(e.target.value)}
+                  placeholder="e.g., Protein Bar v1"
+                  className="w-full px-3 py-2 border border-[#e1e7ef] rounded-md font-ibm-plex text-sm focus:outline-none focus:ring-2 focus:ring-[#009da5]"
+                />
+                {saveError && (
+                  <p className="mt-2 text-sm text-red-600 font-ibm-plex">{saveError}</p>
+                )}
+              </div>
+              <div className="p-6 border-t border-[#e1e7ef] flex justify-end gap-3">
+                <button
+                  onClick={() => {
+                    setShowSaveModal(false)
+                    setFormulationName('')
+                    setSaveError('')
+                  }}
+                  className="px-4 py-2 text-sm font-ibm-plex font-medium text-[#65758b] hover:text-[#0f1729] transition-colors"
+                  disabled={isSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveFormulation}
+                  disabled={isSaving}
+                  className="bg-[#e91e63] flex items-center justify-center gap-2 px-4 py-2 rounded-md text-white font-ibm-plex font-medium text-sm hover:bg-[#c2185b] transition-colors disabled:opacity-50"
+                >
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    'Save'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* RDA Selection Modal */}
-
         {showRDAModal && (
-
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
 
             <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">

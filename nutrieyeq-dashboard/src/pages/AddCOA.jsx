@@ -13,9 +13,11 @@ const AddCOA = () => {
   const [lotNumber, setLotNumber] = useState('')
   const [manufacturingDate, setManufacturingDate] = useState('')
   const [expiryDate, setExpiryDate] = useState('')
+  const [shelfLife, setShelfLife] = useState('')
   const [supplierName, setSupplierName] = useState('')
   const [supplierAddress, setSupplierAddress] = useState('')
   const [storageCondition, setStorageCondition] = useState('')
+  const [analysisMethod, setAnalysisMethod] = useState('')
   
   const [dragActive, setDragActive] = useState(false)
   const [uploadedFiles, setUploadedFiles] = useState([])
@@ -150,9 +152,11 @@ const AddCOA = () => {
       setLotNumber(info.lot_number || '')
       setManufacturingDate(info.manufacturing_date || '')
       setExpiryDate(info.expiry_date || '')
+      setShelfLife(info.shelf_life || '')
       setSupplierName(info.supplier_name || '')
       setSupplierAddress(info.supplier_address || '')
       setStorageCondition(info.storage_condition || '')
+      setAnalysisMethod(data.analysis_method || '')
     }
     
     // Populate nutritional data
@@ -219,13 +223,14 @@ const AddCOA = () => {
         lot_number: lotNumber || null,
         manufacturing_date: manufacturingDate || null,
         expiry_date: expiryDate || null,
+        shelf_life: shelfLife || null,
         supplier_name: supplierName || null,
         supplier_address: supplierAddress || null,
         storage_condition: storageCondition || null,
+        analysis_method: analysisMethod || null,
         nutritional_data: nutritionalData,
         other_parameters: [],
         certifications: [],
-        analysis_method: null,
         additional_notes: [],
         document_images: documentImages,
         status: 'active'
@@ -530,6 +535,18 @@ const AddCOA = () => {
             </div>
             <div>
               <label className="block text-sm font-ibm-plex font-medium text-[#0f1729] mb-3">
+                Shelf Life
+              </label>
+              <input
+                type="text"
+                value={shelfLife}
+                onChange={(e) => setShelfLife(e.target.value)}
+                className="w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] focus:outline-none focus:ring-2 focus:ring-primary"
+                placeholder="e.g., 12 months, 18 months"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-ibm-plex font-medium text-[#0f1729] mb-3">
                 Storage Condition
               </label>
               <input
@@ -538,6 +555,18 @@ const AddCOA = () => {
                 onChange={(e) => setStorageCondition(e.target.value)}
                 className="w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] focus:outline-none focus:ring-2 focus:ring-primary"
                 placeholder="e.g. Store in cool dry place"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-ibm-plex font-medium text-[#0f1729] mb-3">
+                Analysis Method
+              </label>
+              <input
+                type="text"
+                value={analysisMethod}
+                onChange={(e) => setAnalysisMethod(e.target.value)}
+                className="w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] focus:outline-none focus:ring-2 focus:ring-primary"
+                placeholder="e.g. HPLC, AOAC, etc."
               />
             </div>
             <div className="col-span-2">

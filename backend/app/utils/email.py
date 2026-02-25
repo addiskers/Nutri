@@ -1,7 +1,3 @@
-"""
-Email utilities for authentication (OTP, password reset, notifications)
-Used for traditional email/password authentication alongside Azure AD SSO
-"""
 import aiosmtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -10,17 +6,6 @@ from config.settings import settings
 
 
 async def send_email(to_email: str, subject: str, html_content: str) -> bool:
-    """
-    Send an email using SMTP
-    
-    Args:
-        to_email: Recipient email address
-        subject: Email subject
-        html_content: HTML content of the email
-    
-    Returns:
-        True if sent successfully, False otherwise
-    """
     if not settings.SMTP_USER or not settings.SMTP_PASSWORD:
         print("[WARNING] Email configuration not set. Email not sent.")
         print(f"[DEBUG] SMTP_USER: {settings.SMTP_USER}")
@@ -61,17 +46,6 @@ async def send_email(to_email: str, subject: str, html_content: str) -> bool:
 
 
 async def send_password_reset_email(to_email: str, reset_token: str, user_name: str) -> bool:
-    """
-    Send password reset email with OTP
-    
-    Args:
-        to_email: User's email address
-        reset_token: 5-digit OTP code
-        user_name: User's name
-    
-    Returns:
-        True if sent successfully
-    """
     otp_code = reset_token  # Now this is a 5-digit OTP
     
     html_template = Template("""
@@ -144,17 +118,6 @@ async def send_password_reset_email(to_email: str, reset_token: str, user_name: 
 
 
 async def send_welcome_email(to_email: str, user_name: str, temp_password: str) -> bool:
-    """
-    Send welcome email to new user with temporary password
-    
-    Args:
-        to_email: User's email address
-        user_name: User's name
-        temp_password: Temporary password
-    
-    Returns:
-        True if sent successfully
-    """
     login_link = f"{settings.FRONTEND_URL}/login"
     
     html_template = Template("""
@@ -221,20 +184,6 @@ async def send_welcome_email(to_email: str, user_name: str, temp_password: str) 
 
 async def send_user_approval_email(admin_email: str, admin_name: str, new_user_name: str, 
                                    new_user_email: str, new_user_id: str, department: str) -> bool:
-    """
-    Send email to Super Admin for user approval
-    
-    Args:
-        admin_email: Super Admin's email
-        admin_name: Super Admin's name
-        new_user_name: New user's name
-        new_user_email: New user's email
-        new_user_id: New user's ID
-        department: New user's department
-    
-    Returns:
-        True if sent successfully
-    """
     approval_link = f"{settings.FRONTEND_URL}/users?approve={new_user_id}"
     
     html_template = Template("""
@@ -303,17 +252,6 @@ async def send_user_approval_email(admin_email: str, admin_name: str, new_user_n
 
 
 async def send_login_otp_email(to_email: str, otp_code: str, user_name: str) -> bool:
-    """
-    Send login OTP email for two-factor authentication
-    
-    Args:
-        to_email: User's email address
-        otp_code: 5-digit OTP code
-        user_name: User's name
-    
-    Returns:
-        True if sent successfully
-    """
     html_template = Template("""
     <!DOCTYPE html>
     <html>

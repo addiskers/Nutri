@@ -39,7 +39,6 @@ const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
 
   return (
     <aside className={`bg-[#0f2c2e] border-r border-[#134346] h-screen flex flex-col transition-all duration-300 ${isCollapsed ? 'w-16' : 'w-56'}`}>
-      {/* Logo */}
       <div className="h-16 border-b border-[#134346] flex items-center justify-center px-4">
         <img
           src="/assets/zydus-logo.png"
@@ -48,9 +47,7 @@ const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
         />
       </div>
 
-      {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-4 px-3 scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-        {/* Main Section */}
         <div className="mb-6">
           {!isCollapsed && (
             <div className="px-3 mb-2">
@@ -86,7 +83,6 @@ const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
           </div>
         </div>
 
-        {/* Management Section */}
         <div>
           {!isCollapsed && (
             <div className="px-3 mb-2">
@@ -123,7 +119,6 @@ const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
         </div>
       </nav>
 
-      {/* Collapse Button */}
       <div className="border-t border-[#134346] p-3">
         <button
           onClick={() => setIsCollapsed(!isCollapsed)}

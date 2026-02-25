@@ -1,6 +1,3 @@
-"""
-Quick start script for development
-"""
 import uvicorn
 
 if __name__ == "__main__":

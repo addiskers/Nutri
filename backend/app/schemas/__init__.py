@@ -1,4 +1,3 @@
-"""Pydantic schemas"""
 from app.schemas.auth import (
     UserRegister, UserLogin, VerifyLoginOTP, ForgotPassword, ResetPassword, ChangePassword,
     AzureAuthRequest, AzureAuthUrlResponse,

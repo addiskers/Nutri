@@ -136,6 +136,7 @@ const Compare = () => {
       packingFormat: p.packing_format || '',
       manufactured: p.manufacturing_date || '',
       expiry: p.expiry_date || '',
+      shelfLife: p.shelf_life || '',
       category: p.category || '',
       vegNonVeg: p.veg_nonveg || '',
       claims: Array.isArray(p.claims) ? p.claims : [],
@@ -143,7 +144,6 @@ const Compare = () => {
       nutrition,
       ingredients: ingredientsArr,
       allergens: allergensArr,
-      shelfLife: p.shelf_life || '',
       storageCondition: p.storage_instructions || '',
       instructionsToUse: p.instructions_to_use || '',
       marketedBy: marketedBy,
@@ -216,6 +216,7 @@ const Compare = () => {
       { label: 'Packing Format', key: 'packingFormat' },
       { label: 'Manufacturing Date', key: 'manufactured' },
       { label: 'Expiry Date', key: 'expiry' },
+      { label: 'Shelf Life', key: 'shelfLife' },
       { label: 'Category', key: 'category' },
       { label: 'Veg/Non-Veg', key: 'vegNonVeg' },
       { label: 'Claims on Pack', key: 'claims', isArray: true },
@@ -668,6 +669,7 @@ const Compare = () => {
                               { label: 'Packing Format', key: 'packingFormat' },
                               { label: 'Manufacturing Date', key: 'manufactured' },
                               { label: 'Expiry Date', key: 'expiry' },
+                              { label: 'Shelf Life', key: 'shelfLife' },
                               { label: 'Category', key: 'category' },
                               { label: 'Veg/Non-Veg', key: 'vegNonVeg' }
                             ].map((field) => (

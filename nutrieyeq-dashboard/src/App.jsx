@@ -23,7 +23,6 @@ function App() {
   return (
     <Router>
       <Routes>
-        {/* Public Routes */}
         <Route path="/" element={<FlashScreen />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
@@ -31,7 +30,6 @@ function App() {
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
         
-        {/* Protected Routes */}
         <Route path="/dashboard" element={
           <ProtectedRoute>
             <Dashboard />
@@ -74,7 +72,6 @@ function App() {
           </ProtectedRoute>
         } />
         
-        {/* Coming Soon Pages (Protected) */}
         <Route path="/add-coa" element={
           <ProtectedRoute>
             <AddCOA />
@@ -105,11 +102,7 @@ function App() {
           </ProtectedRoute>
         } />
         
-        {/* Old routes redirect */}
         <Route path="/categories" element={<Navigate to="/nomenclature" />} />
-        
-        {/* Redirect old analytics route */}
-        <Route path="/analytics" element={<Navigate to="/dashboard" />} />
       </Routes>
     </Router>
   )

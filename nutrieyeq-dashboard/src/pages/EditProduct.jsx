@@ -42,6 +42,7 @@ const EditProduct = () => {
     mrp: '',
     manufactured: '',
     expiry: '',
+    shelfLife: '',
     serveSize: '',
     category: '',
     vegNonVeg: '',
@@ -133,6 +134,7 @@ const EditProduct = () => {
           mrp: product.mrp || '',
           manufactured: product.manufacturing_date || '',
           expiry: product.expiry_date || '',
+          shelfLife: product.shelf_life || '',
           serveSize: product.serving_size || '',
           category: product.category || '',
           vegNonVeg: product.veg_nonveg || '',
@@ -335,7 +337,7 @@ const EditProduct = () => {
         claims: claims,
         storage_instructions: storageData.storageCondition || null,
         instructions_to_use: storageData.instructionsToUse || null,
-        shelf_life: storageData.shelfLife || null,
+        shelf_life: formData.shelfLife || storageData.shelfLife || null,
         manufacturer_details: manufacturerDetails,
         brand_owner: companyData.brandOwner || null,
         barcode: companyData.barcode || null,
@@ -616,7 +618,24 @@ const EditProduct = () => {
                     </div>
                   </div>
 
-                  {/* Category Dropdown */}
+                  {/* Shelf Life */}
+                  <div>
+                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
+                      Shelf Life
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="e.g., 12 months, 18 months"
+                        value={formData.shelfLife}
+                        onChange={(e) => setFormData({ ...formData, shelfLife: e.target.value })}
+                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
+                      />
+                      <CopyBtn value={formData.shelfLife} field="shelfLife" />
+                    </div>
+                  </div>
+
+                  {/* Category */}
                   <div>
                     <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
                       Category

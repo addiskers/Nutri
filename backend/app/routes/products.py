@@ -301,7 +301,12 @@ RULES:
 MANUFACTURER:
 - Type: "Manufactured by" | "Packed by" | "Marketed by"
 - Extract ALL manufacturer entries
-Date: in dd/mm/yyyy format
+
+DATES:
+- manufacturing_date: in dd/mm/yyyy format
+- expiry_date: in dd/mm/yyyy format  
+- shelf_life: Extract if printed on pack (e.g., "18 months", "2 years"). If not visible, calculate from manufacturing to expiry date difference and express in months (e.g., if mfg is 15/03/2023 and expiry is 14/09/2023, shelf_life is "6 months")
+
 JSON STRUCTURE:
 {
   "product_type": "single",
@@ -327,7 +332,7 @@ JSON STRUCTURE:
       {"type": "", "name": "", "address": "", "fssai": ""}
     ],
     "batch_codes": {"lot_number": "", "machine_code": ""},
-    "dates": {"manufacturing_date": "", "expiry_date": ""},
+    "dates": {"manufacturing_date": "", "expiry_date": "", "shelf_life": ""},
     "barcode": "",
     "certifications": [],
     "symbols": {"veg_nonveg": "", "recyclable": ""},
@@ -558,8 +563,8 @@ async def extract_product_from_images(
             if exp_date:
                 parent["dates"]["expiry_date"] = exp_date
         
-        # Calculate shelf life if not provided
-        shelf_life = parent.get("shelf_life", "")
+        # Get shelf life from extraction or calculate if not provided
+        shelf_life = parent.get("dates", {}).get("shelf_life", "") or parent.get("shelf_life", "")
         if not shelf_life or shelf_life == "not specified":
             if mfg_date and exp_date:
                 try:
@@ -572,14 +577,20 @@ async def extract_product_from_images(
                             days_diff = (exp - mfg).days
                             months = days_diff // 30
                             if months > 0:
-                                parent["shelf_life"] = f"{months} months"
+                                shelf_life = f"{months} months"
                             else:
-                                parent["shelf_life"] = f"{days_diff} days"
+                                shelf_life = f"{days_diff} days"
                             break
                         except ValueError:
                             continue
                 except:
                     pass
+        
+        # Store shelf_life in both locations for compatibility
+        if shelf_life:
+            parent["shelf_life"] = shelf_life
+            if "dates" in parent:
+                parent["dates"]["shelf_life"] = shelf_life
         
         # Extract FSSAI
         fssai_licenses = validate_fssai(raw_json)
@@ -599,6 +610,9 @@ async def extract_product_from_images(
                 "serveSize": parent.get("weight_and_size", {}).get("serving_size", ""),
                 "mrp": parent.get("pricing", {}).get("mrp", ""),
                 "packingFormat": parent.get("packing_format", ""),
+                "manufactured": parent.get("dates", {}).get("manufacturing_date", ""),
+                "expiry": parent.get("dates", {}).get("expiry_date", ""),
+                "shelfLife": parent.get("shelf_life", ""),
                 "vegNonVeg": parent.get("symbols", {}).get("veg_nonveg", ""),
             },
             "nutrition": parent.get("nutrition_table", []),

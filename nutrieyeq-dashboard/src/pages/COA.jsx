@@ -37,9 +37,11 @@ const COA = () => {
   const [lotNumber, setLotNumber] = useState('')
   const [manufacturingDate, setManufacturingDate] = useState('')
   const [expiryDate, setExpiryDate] = useState('')
+  const [shelfLife, setShelfLife] = useState('')
   const [supplierName, setSupplierName] = useState('')
   const [supplierAddress, setSupplierAddress] = useState('')
   const [storageCondition, setStorageCondition] = useState('')
+  const [analysisMethod, setAnalysisMethod] = useState('')
   const [nutrients, setNutrients] = useState([])
 
   // Load COAs on mount
@@ -116,24 +118,52 @@ const COA = () => {
   const handleDownloadCOA = (coa) => {
     if (!coa) return
     const lines = []
+    
+    // Basic info
     lines.push('=== COA Details ===')
     lines.push(`Ingredient Name,${coa.ingredient_name || ''}`)
-    lines.push(`Product Code,${coa.product_code || ''}`)
-    lines.push(`Lot Number,${coa.lot_number || ''}`)
-    lines.push(`Manufacturing Date,${coa.manufacturing_date || ''}`)
-    lines.push(`Expiry Date,${coa.expiry_date || ''}`)
-    lines.push(`Supplier Name,${coa.supplier_name || ''}`)
-    lines.push(`Supplier Address,"${(coa.supplier_address || '').replace(/"/g, '""')}"`)
-    lines.push(`Storage Condition,"${(coa.storage_condition || '').replace(/"/g, '""')}"`)
-    lines.push(`Analysis Method,${coa.analysis_method || ''}`)
+    if (coa.product_code) lines.push(`Product Code,${coa.product_code}`)
+    if (coa.lot_number) lines.push(`Lot Number,${coa.lot_number}`)
+    if (coa.manufacturing_date) lines.push(`Manufacturing Date,${coa.manufacturing_date}`)
+    if (coa.expiry_date) lines.push(`Expiry Date,${coa.expiry_date}`)
+    if (coa.shelf_life) lines.push(`Shelf Life,${coa.shelf_life}`)
+    if (coa.supplier_name) lines.push(`Supplier Name,${coa.supplier_name}`)
+    if (coa.supplier_address) lines.push(`Supplier Address,"${coa.supplier_address.replace(/"/g, '""')}"`)
+    if (coa.storage_condition) lines.push(`Storage Condition,"${coa.storage_condition.replace(/"/g, '""')}"`)
+    if (coa.analysis_method) lines.push(`Analysis Method,${coa.analysis_method}`)
     lines.push('')
-    lines.push('=== Nutritional Data ===')
-    lines.push('Nutrient,Actual,Min,Max,Average,Unit')
-    if (coa.nutritional_data) {
+    
+    // Nutritional data - dynamic columns based on what has data
+    if (coa.nutritional_data && coa.nutritional_data.length > 0) {
+      lines.push('=== Nutritional Data ===')
+      
+      // Check which columns have data
+      const hasActual = coa.nutritional_data.some(n => n.actual_value !== null && n.actual_value !== undefined)
+      const hasMin = coa.nutritional_data.some(n => n.min_value !== null && n.min_value !== undefined)
+      const hasMax = coa.nutritional_data.some(n => n.max_value !== null && n.max_value !== undefined)
+      const hasAverage = coa.nutritional_data.some(n => n.average_value !== null && n.average_value !== undefined)
+      
+      // Build header dynamically
+      const headers = ['Nutrient']
+      if (hasActual) headers.push('Actual')
+      if (hasMin) headers.push('Min')
+      if (hasMax) headers.push('Max')
+      if (hasAverage) headers.push('Average')
+      headers.push('Unit')
+      lines.push(headers.join(','))
+      
+      // Build rows with only columns that have data
       coa.nutritional_data.forEach(n => {
-        lines.push(`"${n.nutrient_name || ''}",${n.actual_value ?? ''},${n.min_value ?? ''},${n.max_value ?? ''},${n.average_value ?? ''},${n.unit || ''}`)
+        const row = [`"${n.nutrient_name || ''}"`]
+        if (hasActual) row.push(n.actual_value ?? '')
+        if (hasMin) row.push(n.min_value ?? '')
+        if (hasMax) row.push(n.max_value ?? '')
+        if (hasAverage) row.push(n.average_value ?? '')
+        row.push(n.unit || '')
+        lines.push(row.join(','))
       })
     }
+    
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -156,9 +186,11 @@ const COA = () => {
         setLotNumber(fullCOA.lot_number || '')
         setManufacturingDate(fullCOA.manufacturing_date || '')
         setExpiryDate(fullCOA.expiry_date || '')
+        setShelfLife(fullCOA.shelf_life || '')
         setSupplierName(fullCOA.supplier_name || '')
         setSupplierAddress(fullCOA.supplier_address || '')
         setStorageCondition(fullCOA.storage_condition || '')
+        setAnalysisMethod(fullCOA.analysis_method || '')
         
         // Convert nutritional data to form format
         const nutrientRows = (fullCOA.nutritional_data || []).map((item, index) => ({
@@ -259,13 +291,14 @@ const COA = () => {
         lot_number: lotNumber || null,
         manufacturing_date: manufacturingDate || null,
         expiry_date: expiryDate || null,
+        shelf_life: shelfLife || null,
         supplier_name: supplierName || null,
         supplier_address: supplierAddress || null,
         storage_condition: storageCondition || null,
+        analysis_method: analysisMethod || null,
         nutritional_data: nutritionalData,
         other_parameters: editingCOA?.other_parameters || [],
         certifications: editingCOA?.certifications || [],
-        analysis_method: editingCOA?.analysis_method || null,
         additional_notes: editingCOA?.additional_notes || [],
         document_images: editingCOA?.document_images || [],
         status: 'active'
@@ -682,6 +715,7 @@ const COA = () => {
                         { label: 'Supplier Name', value: viewingCOA.supplier_name },
                         { label: 'Manufacturing Date', value: viewingCOA.manufacturing_date },
                         { label: 'Expiry Date', value: viewingCOA.expiry_date },
+                        { label: 'Shelf Life', value: viewingCOA.shelf_life },
                         { label: 'Storage Condition', value: viewingCOA.storage_condition },
                         { label: 'Analysis Method', value: viewingCOA.analysis_method },
                       ].map((item, i) => (
@@ -908,6 +942,18 @@ const COA = () => {
                   </div>
                   <div>
                     <label className="block text-sm font-ibm-plex font-medium text-[#0f1729] mb-2">
+                      Shelf Life
+                    </label>
+                    <input
+                      type="text"
+                      value={shelfLife}
+                      onChange={(e) => setShelfLife(e.target.value)}
+                      className="w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] focus:outline-none focus:ring-2 focus:ring-primary"
+                      placeholder="e.g., 12 months, 18 months"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-ibm-plex font-medium text-[#0f1729] mb-2">
                       Storage Condition
                     </label>
                     <input
@@ -916,6 +962,18 @@ const COA = () => {
                       onChange={(e) => setStorageCondition(e.target.value)}
                       className="w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] focus:outline-none focus:ring-2 focus:ring-primary"
                       placeholder="e.g. Store in cool dry place"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-ibm-plex font-medium text-[#0f1729] mb-2">
+                      Analysis Method
+                    </label>
+                    <input
+                      type="text"
+                      value={analysisMethod}
+                      onChange={(e) => setAnalysisMethod(e.target.value)}
+                      className="w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] focus:outline-none focus:ring-2 focus:ring-primary"
+                      placeholder="e.g. HPLC, AOAC, etc."
                     />
                   </div>
                   <div className="col-span-2">

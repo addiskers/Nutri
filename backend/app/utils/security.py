@@ -1,6 +1,3 @@
-"""
-Security utilities for password hashing and JWT tokens
-"""
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 from passlib.context import CryptContext
@@ -9,31 +6,18 @@ from config.settings import settings
 import secrets
 
 
-# Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:
-    """Hash a password using bcrypt"""
     return pwd_context.hash(password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash"""
     return pwd_context.verify(plain_password, hashed_password)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    """
-    Create a JWT access token
-    
-    Args:
-        data: Dictionary containing user data (user_id, email, role)
-        expires_delta: Optional custom expiration time
-    
-    Returns:
-        Encoded JWT token
-    """
     to_encode = data.copy()
     
     if expires_delta:
@@ -52,15 +36,6 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 def create_refresh_token(data: dict) -> str:
-    """
-    Create a JWT refresh token
-    
-    Args:
-        data: Dictionary containing user data (user_id, email)
-    
-    Returns:
-        Encoded JWT refresh token
-    """
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     
@@ -75,15 +50,6 @@ def create_refresh_token(data: dict) -> str:
 
 
 def decode_token(token: str) -> Optional[Dict]:
-    """
-    Decode and verify a JWT token
-    
-    Args:
-        token: JWT token string
-    
-    Returns:
-        Decoded token payload or None if invalid
-    """
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         return payload
@@ -92,22 +58,14 @@ def decode_token(token: str) -> Optional[Dict]:
 
 
 def generate_password_reset_token() -> str:
-    """Generate a secure random token for password reset"""
     return secrets.token_urlsafe(32)
 
 
 def generate_otp() -> str:
-    """Generate a 6-digit OTP for password reset"""
     return ''.join([str(secrets.randbelow(10)) for _ in range(6)])
 
 
 def validate_password_strength(password: str) -> tuple[bool, str]:
-    """
-    Validate password strength
-    
-    Returns:
-        (is_valid, error_message)
-    """
     if len(password) < 8:
         return False, "Password must be at least 8 characters long"
     
@@ -120,7 +78,6 @@ def validate_password_strength(password: str) -> tuple[bool, str]:
     if not any(c.isdigit() for c in password):
         return False, "Password must contain at least one number"
     
-    # Check for special characters (SECURITY: Now enabled)
     special_chars = "!@#$%^&*()_+-=[]{}|;:,.<>?"
     if not any(c in special_chars for c in password):
         return False, "Password must contain at least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)"

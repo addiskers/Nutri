@@ -1,16 +1,7 @@
-/**
- * API Service for NutriEyeQ Backend
- * Handles all HTTP requests to the FastAPI backend
- */
-
-// Use environment variable or default to localhost
-// For ngrok testing, you can set VITE_API_URL in .env file
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
-// Get stored token
 const getToken = () => localStorage.getItem('access_token')
 
-// Generic API request helper
 async function apiRequest(endpoint, options = {}) {
   const token = getToken()
   
@@ -18,7 +9,7 @@ async function apiRequest(endpoint, options = {}) {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      'ngrok-skip-browser-warning': '69420', // Skip ngrok warning page for API requests
+      'ngrok-skip-browser-warning': '69420',
       'User-Agent': 'CustomClient',
       ...options.headers,
       ...(token && { 'Authorization': `Bearer ${token}` })
@@ -28,16 +19,12 @@ async function apiRequest(endpoint, options = {}) {
   try {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, config)
     
-    // Handle token expiration
     if (response.status === 401 && token) {
-      // Try to refresh token
       const refreshed = await refreshAccessToken()
       if (refreshed) {
-        // Retry request with new token
         config.headers['Authorization'] = `Bearer ${getToken()}`
         return fetch(`${API_BASE_URL}${endpoint}`, config)
       } else {
-        // Redirect to login
         localStorage.clear()
         window.location.href = '/login'
         throw new Error('Session expired. Please login again.')
@@ -80,23 +67,16 @@ async function refreshAccessToken() {
   return false
 }
 
-// Authentication Service
-// Product Service
 export const productService = {
-  /**
-   * Extract product data from images using AI
-   */
   async extractFromImages(images) {
     console.log('[FRONTEND] Starting extraction with', images.length, 'images')
     try {
       const formData = new FormData()
       
-      // Add each image to form data
       for (let i = 0; i < images.length; i++) {
         const image = images[i]
         console.log(`[FRONTEND] Processing image ${i + 1}/${images.length}`)
         
-        // Convert base64 to blob if needed
         if (typeof image === 'string' && image.startsWith('data:')) {
           const response = await fetch(image)
           const blob = await response.blob()
@@ -117,7 +97,6 @@ export const productService = {
         headers: {
           'ngrok-skip-browser-warning': '69420',
           ...(token && { 'Authorization': `Bearer ${token}` })
-          // Don't set Content-Type - let browser set it with boundary for FormData
         },
         body: formData
       })

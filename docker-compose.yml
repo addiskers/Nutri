@@ -7,13 +7,13 @@ services:
     restart: unless-stopped
     environment:
       MONGO_INITDB_DATABASE: ${DATABASE_NAME:-nutrieyeq}
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-changeme}
     volumes:
       - mongodb_data:/data/db
       - mongodb_config:/data/configdb
     networks:
       - nutrieyeq-network
-    ports:
-      - "27017:27017"
     healthcheck:
       test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
       interval: 10s

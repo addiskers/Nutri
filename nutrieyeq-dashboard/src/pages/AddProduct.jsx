@@ -62,12 +62,14 @@ const AddProduct = () => {
     mrp: '',
     manufactured: '',
     expiry: '',
+    shelfLife: '',
     serveSize: '',
     category: '',
     vegNonVeg: '',
     categoryInfo: '',
     variantDetails: '',
-    packingFormat: ''
+    packingFormat: '',
+    barcode: ''
   })
 
   const [copiedField, setCopiedField] = useState(null)
@@ -201,18 +203,27 @@ const AddProduct = () => {
         serveSize: data.basic.serveSize || prev.serveSize,
         mrp: data.basic.mrp || prev.mrp,
         packingFormat: data.basic.packingFormat || prev.packingFormat,
+        manufactured: data.basic.manufactured || prev.manufactured,
+        expiry: data.basic.expiry || prev.expiry,
+        shelfLife: data.basic.shelfLife || prev.shelfLife,
         vegNonVeg: data.basic.vegNonVeg === 'Vegetarian' ? 'veg' : 
                    data.basic.vegNonVeg === 'Non-Vegetarian' ? 'non-veg' : 
                    data.basic.vegNonVeg?.toLowerCase() || prev.vegNonVeg,
       }))
     }
     
-    // Populate dates
+    // Populate category
+    if (data.basic?.category) {
+      setFormData(prev => ({ ...prev, category: data.basic.category }))
+    }
+    
+    // Also populate dates from dates object if present (fallback)
     if (data.dates) {
       setFormData(prev => ({
         ...prev,
         manufactured: data.dates.manufacturing_date || prev.manufactured,
-        expiry: data.dates.expiry_date || prev.expiry
+        expiry: data.dates.expiry_date || prev.expiry,
+        shelfLife: data.dates.shelf_life || prev.shelfLife
       }))
     }
     
@@ -830,6 +841,23 @@ const AddProduct = () => {
                         className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] focus:outline-none focus:ring-2 focus:ring-primary"
                       />
                       <CopyBtn value={formData.expiry} field="add_expiry" />
+                    </div>
+                  </div>
+
+                  {/* Shelf Life */}
+                  <div>
+                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
+                      Shelf Life
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="e.g., 12 months, 18 months"
+                        value={formData.shelfLife}
+                        onChange={(e) => setFormData({ ...formData, shelfLife: e.target.value })}
+                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
+                      />
+                      <CopyBtn value={formData.shelfLife} field="add_shelfLife" />
                     </div>
                   </div>
 

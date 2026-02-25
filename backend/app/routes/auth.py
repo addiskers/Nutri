@@ -1,6 +1,3 @@
-"""
-Authentication Routes - Dual Authentication (Azure AD SSO + Email/Password)
-"""
 from fastapi import APIRouter, HTTPException, status, Depends
 from datetime import datetime, timedelta
 import secrets
@@ -19,25 +16,13 @@ from app.utils.email import send_login_otp_email, send_password_reset_email, sen
 from app.dependencies.auth import get_current_user
 from config.settings import settings
 
-# Initialize Azure AD authentication
 azure_auth = AzureADAuth()
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-# ============================================================
-# TRADITIONAL EMAIL/PASSWORD AUTHENTICATION
-# ============================================================
-
 @router.post("/register", response_model=MessageResponse)
 async def register(user_data: UserRegister):
-    """
-    Register new user with email and password
-    
-    - Creates user account (pending admin approval)
-    - Sends approval notification to admins
-    """
-    # Check if user already exists
     existing_user = await User.find_one(User.email == user_data.email.lower())
     if existing_user:
         raise HTTPException(
@@ -45,7 +30,6 @@ async def register(user_data: UserRegister):
             detail="User with this email already exists"
         )
     
-    # Validate password strength
     is_valid, error_msg = validate_password_strength(user_data.password)
     if not is_valid:
         raise HTTPException(
@@ -53,7 +37,6 @@ async def register(user_data: UserRegister):
             detail=error_msg
         )
     
-    # Create new user
     new_user = User(
         name=user_data.name,
         email=user_data.email.lower(),
@@ -63,7 +46,7 @@ async def register(user_data: UserRegister):
         role=UserRole.RESEARCHER,
         is_active=True,
         is_verified=True,
-        is_approved=False,  # Requires admin approval
+        is_approved=False,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow()
     )
@@ -71,7 +54,6 @@ async def register(user_data: UserRegister):
     new_user.update_permissions_by_role()
     await new_user.insert()
     
-    # Send approval email to all super admins
     try:
         super_admins = await User.find(User.role == UserRole.SUPER_ADMIN, User.is_active == True).to_list()
         print(f"[INFO] Found {len(super_admins)} super admins to notify")
@@ -102,13 +84,6 @@ async def register(user_data: UserRegister):
 
 @router.post("/login")
 async def login(credentials: UserLogin):
-    """
-    Login with email and password
-    
-    - Verifies credentials
-    - Sends OTP to email for 2FA
-    """
-    # Find user
     user = await User.find_one(User.email == credentials.email.lower())
     if not user or not user.hashed_password:
         raise HTTPException(
@@ -116,14 +91,12 @@ async def login(credentials: UserLogin):
             detail="Invalid email or password"
         )
     
-    # Verify password
     if not verify_password(credentials.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
         )
     
-    # Check if account is approved
     if not user.is_approved:
         print(f"[WARNING] User {user.email} not approved yet")
         return MessageResponse(
@@ -131,21 +104,18 @@ async def login(credentials: UserLogin):
             success=False
         )
     
-    # Check if account is active
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your account has been deactivated"
         )
     
-    # Generate and store OTP
     print(f"[INFO] Generating OTP for {user.email}")
     otp = generate_otp()
     user.reset_token = otp
     user.reset_token_expires = datetime.utcnow() + timedelta(minutes=10)
     await user.save()
     
-    # Send OTP email
     try:
         await send_login_otp_email(user.email, otp, user.name)
         print(f"[SUCCESS] OTP email sent to {user.email}")
@@ -166,10 +136,6 @@ async def login(credentials: UserLogin):
 
 @router.post("/verify-otp", response_model=TokenResponse)
 async def verify_login_otp(otp_data: VerifyLoginOTP):
-    """
-    Verify login OTP and issue JWT tokens
-    """
-    # Find user
     user = await User.find_one(User.email == otp_data.email.lower())
     if not user:
         raise HTTPException(
@@ -177,21 +143,18 @@ async def verify_login_otp(otp_data: VerifyLoginOTP):
             detail="User not found"
         )
     
-    # Verify OTP
     if not user.reset_token or user.reset_token != otp_data.otp:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid OTP"
         )
     
-    # Check OTP expiration
     if not user.reset_token_expires or user.reset_token_expires < datetime.utcnow():
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="OTP expired. Please request a new one."
         )
     
-    # Clear OTP
     user.reset_token = None
     user.reset_token_expires = None
     user.last_login = datetime.utcnow()

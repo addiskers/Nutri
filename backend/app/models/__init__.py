@@ -1,4 +1,3 @@
-"""Database models"""
 from app.models.user import User, UserRole, UserPermissions, ROLE_PERMISSIONS
 from app.models.product import Product
 from app.models.category import Category
