@@ -70,3 +70,7 @@ nginx/ssl/*.pfx
 *.pem
 .env
 .env.*
+.env
+.env.uat
+backend/.env
+backend/.env.uat

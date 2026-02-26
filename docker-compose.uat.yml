@@ -1,0 +1,87 @@
+services:
+  uat-mongodb:
+    image: mongo:7.0
+    container_name: uat-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: ${DATABASE_NAME:-nutrieyeq_uat}
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:27018:27017"
+    volumes:
+      - uat_mongodb_data:/data/db
+      - uat_mongodb_config:/data/configdb
+    networks:
+      - uat-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  uat-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: uat-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    depends_on:
+      uat-mongodb:
+        condition: service_healthy
+    networks:
+      - uat-network
+    volumes:
+      - ./backend/uploads-uat:/app/uploads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  uat-frontend:
+    build:
+      context: ./nutrieyeq-dashboard
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080/api}
+    container_name: uat-frontend
+    restart: unless-stopped
+    depends_on:
+      - uat-backend
+    networks:
+      - uat-network
+
+  uat-nginx:
+    image: nginx:alpine
+    container_name: uat-nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - ./nginx/nginx.uat.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - uat-backend
+      - uat-frontend
+    networks:
+      - uat-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  uat-network:
+    driver: bridge
+
+volumes:
+  uat_mongodb_data:
+    driver: local
+  uat_mongodb_config:
+    driver: local
