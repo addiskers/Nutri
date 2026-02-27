@@ -47,7 +47,7 @@ services:
       context: ./nutrieyeq-dashboard
       dockerfile: Dockerfile
       args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080/api}
+        VITE_API_URL: https://uatnutrieyeq.zyduswellness.com/api
     container_name: uat-frontend
     restart: unless-stopped
     depends_on:
