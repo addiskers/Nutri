@@ -196,7 +196,7 @@ async def forgot_password(request: ForgotPassword):
     
     # Send email
     try:
-        await send_password_reset_email(user.email, user.name, otp)
+        await send_password_reset_email(user.email, otp, user.name)
     except Exception as e:
         print(f"[ERROR] Failed to send password reset email: {e}")
     
