@@ -85,32 +85,6 @@ class ChangePassword(BaseModel):
         }
 
 
-class AzureAuthRequest(BaseModel):
-    code: str = Field(..., description="Authorization code from Azure AD")
-    state: Optional[str] = Field(None, description="CSRF protection state")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "code": "0.AXoA...",
-                "state": "random-state-string"
-            }
-        }
-
-
-class AzureAuthUrlResponse(BaseModel):
-    auth_url: str = Field(..., description="Azure AD authorization URL")
-    state: str = Field(..., description="CSRF protection state")
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "auth_url": "https://login.microsoftonline.com/...",
-                "state": "random-state-string"
-            }
-        }
-
-
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -130,7 +104,6 @@ class UserResponse(BaseModel):
     is_active: bool
     is_verified: bool
     is_approved: bool
-    auth_provider: str
     created_at: datetime
     last_login: Optional[datetime]
 
@@ -147,7 +120,6 @@ class UserResponse(BaseModel):
             is_active=user.is_active,
             is_verified=user.is_verified,
             is_approved=user.is_approved,
-            auth_provider=user.auth_provider,
             created_at=user.created_at,
             last_login=user.last_login
         )

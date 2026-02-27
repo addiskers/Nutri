@@ -11,12 +11,6 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-    AZURE_CLIENT_ID: str = ""
-    AZURE_CLIENT_SECRET: str = ""
-    AZURE_TENANT_ID: str = "common"
-    AZURE_REDIRECT_URI: str = "http://localhost:5173/auth/callback"
-    AZURE_AUTHORITY: Optional[str] = None
-    ALLOWED_EMAIL_DOMAINS: str = ""
     SUPER_ADMIN_EMAILS: str = ""
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
@@ -43,16 +37,6 @@ class Settings(BaseSettings):
             elif v.lower() in ('false', '0', 'no', 'off', 'warn', 'info', 'error'):
                 return False
         return bool(v)
-    
-    def get_azure_authority(self) -> str:
-        if self.AZURE_AUTHORITY:
-            return self.AZURE_AUTHORITY
-        return f"https://login.microsoftonline.com/{self.AZURE_TENANT_ID}"
-    
-    def get_allowed_domains(self) -> list:
-        if not self.ALLOWED_EMAIL_DOMAINS:
-            return []
-        return [d.strip() for d in self.ALLOWED_EMAIL_DOMAINS.split(',') if d.strip()]
     
     def get_super_admin_emails(self) -> list:
         if not self.SUPER_ADMIN_EMAILS:

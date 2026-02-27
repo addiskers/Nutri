@@ -5,7 +5,7 @@ import { authService } from '../services/api'
 
 const Login = () => {
   const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState('sso') // 'sso' or 'email'
+  const [activeTab, setActiveTab] = useState('email') // email login only
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -17,27 +17,6 @@ const Login = () => {
     email: '',
     password: ''
   })
-
-  const handleMicrosoftLogin = async () => {
-    setError('')
-    setLoading(true)
-
-    try {
-      const result = await authService.getAzureLoginUrl()
-      
-      if (result.success) {
-        sessionStorage.setItem('azure_state', result.state)
-        window.location.href = result.auth_url
-      } else {
-        setError(result.error || 'Failed to initiate login. Please try again.')
-        setLoading(false)
-      }
-    } catch (err) {
-      setError('An error occurred. Please try again.')
-      console.error('Login error:', err)
-      setLoading(false)
-    }
-  }
 
   const handleEmailLogin = async (e) => {
     e.preventDefault()
@@ -256,30 +235,6 @@ const Login = () => {
               </p>
             </div>
 
-            {/* Tabs */}
-            <div className="flex border-b border-gray-200 mb-6">
-              <button
-                onClick={() => { setActiveTab('sso'); setStep('credentials'); setError('') }}
-                className={`flex-1 py-3 text-sm font-medium transition-colors ${
-                  activeTab === 'sso'
-                    ? 'border-b-2 border-blue-600 text-blue-600'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Organization SSO
-              </button>
-              <button
-                onClick={() => { setActiveTab('email'); setStep('credentials'); setError('') }}
-                className={`flex-1 py-3 text-sm font-medium transition-colors ${
-                  activeTab === 'email'
-                    ? 'border-b-2 border-blue-600 text-blue-600'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Email & Password
-              </button>
-            </div>
-
             {/* Error Message */}
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm font-poppins mb-5">
@@ -287,39 +242,8 @@ const Login = () => {
               </div>
             )}
 
-            {/* SSO Tab Content */}
-            {activeTab === 'sso' && (
-              <>
-                <button
-                  onClick={handleMicrosoftLogin}
-                  disabled={loading}
-                  className="w-full h-12 bg-white border-2 border-[#8c8c8c] text-[#0f1729] rounded-xl font-poppins font-medium text-base shadow-sm hover:bg-[#f9fafb] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
-                >
-                  {loading ? (
-                    <span>Redirecting...</span>
-                  ) : (
-                    <>
-                      <svg className="w-5 h-5" viewBox="0 0 23 23" fill="none">
-                        <path d="M11 11H0V0h11v11z" fill="#F25022"/>
-                        <path d="M23 11H12V0h11v11z" fill="#00A4EF"/>
-                        <path d="M11 23H0V12h11v11z" fill="#7FBA00"/>
-                        <path d="M23 23H12V12h11v11z" fill="#FFB900"/>
-                      </svg>
-                      <span>Sign in with Microsoft</span>
-                    </>
-                  )}
-                </button>
-
-                <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <p className="text-xs font-poppins text-blue-900 text-center">
-                    <strong>For organization members:</strong> Your account will be approved by admin after sign-in.
-                  </p>
-                </div>
-              </>
-            )}
-
-            {/* Email/Password Tab Content */}
-            {activeTab === 'email' && step === 'credentials' && (
+            {/* Email/Password Login */}
+            {step === 'credentials' && (
               <>
                 <form onSubmit={handleEmailLogin} className="space-y-4">
                   <div>
@@ -388,7 +312,7 @@ const Login = () => {
             )}
 
             {/* OTP Verification */}
-            {activeTab === 'email' && step === 'otp' && (
+            {step === 'otp' && (
               <>
                 <div className="text-center mb-6">
                   <p className="text-sm text-gray-600">

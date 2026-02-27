@@ -5,11 +5,6 @@ from pydantic import EmailStr, Field
 from enum import Enum
 
 
-class AuthProvider(str, Enum):
-    AZURE_AD = "azure_ad"
-    LOCAL = "local"
-
-
 class UserRole(str, Enum):
     SUPER_ADMIN = "Super Admin"
     ADMIN = "Admin"
@@ -62,8 +57,6 @@ ROLE_PERMISSIONS = {
 class User(Document):
     name: str = Field(..., min_length=2, max_length=100)
     email: EmailStr = Field(..., unique=True, index=True)
-    azure_id: Optional[str] = Field(default=None, unique=True, index=True)
-    auth_provider: AuthProvider = Field(default=AuthProvider.AZURE_AD)
     hashed_password: Optional[str] = None
     reset_token: Optional[str] = None
     reset_token_expires: Optional[datetime] = None
@@ -82,11 +75,9 @@ class User(Document):
         name = "users"
         indexes = [
             "email",
-            "azure_id",
             "role",
             "is_active",
-            "is_approved",
-            "auth_provider"
+            "is_approved"
         ]
     
     class Config:
