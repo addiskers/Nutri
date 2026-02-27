@@ -13,10 +13,8 @@ const EditProduct = () => {
   const [activeTab, setActiveTab] = useState('basic')
   const [claims, setClaims] = useState([])
   const [newClaim, setNewClaim] = useState('')
-  const [ingredients, setIngredients] = useState([])
-  const [newIngredient, setNewIngredient] = useState('')
-  const [allergens, setAllergens] = useState([])
-  const [newAllergen, setNewAllergen] = useState('')
+  const [ingredients, setIngredients] = useState('')
+  const [allergens, setAllergens] = useState('')
   const [storageData, setStorageData] = useState({
     shelfLife: '',
     storageCondition: '',
@@ -160,18 +158,12 @@ const EditProduct = () => {
 
         // Populate ingredients
         if (product.ingredients) {
-          const ingredientsArray = typeof product.ingredients === 'string' 
-            ? product.ingredients.split(',').map(i => i.trim())
-            : Array.isArray(product.ingredients) ? product.ingredients : []
-          setIngredients(ingredientsArray)
+          setIngredients(typeof product.ingredients === 'string' ? product.ingredients : '')
         }
 
         // Populate allergens
         if (product.allergen_info) {
-          const allergensArray = typeof product.allergen_info === 'string'
-            ? product.allergen_info.split(',').map(a => a.trim())
-            : Array.isArray(product.allergen_info) ? product.allergen_info : []
-          setAllergens(allergensArray)
+          setAllergens(typeof product.allergen_info === 'string' ? product.allergen_info : '')
         }
 
         // Populate claims
@@ -227,28 +219,6 @@ const EditProduct = () => {
 
   const handleRemoveClaim = (index) => {
     setClaims(claims.filter((_, i) => i !== index))
-  }
-
-  const handleAddIngredient = () => {
-    if (newIngredient.trim()) {
-      setIngredients([...ingredients, newIngredient.trim()])
-      setNewIngredient('')
-    }
-  }
-
-  const handleRemoveIngredient = (index) => {
-    setIngredients(ingredients.filter((_, i) => i !== index))
-  }
-
-  const handleAddAllergen = () => {
-    if (newAllergen.trim()) {
-      setAllergens([...allergens, newAllergen.trim()])
-      setNewAllergen('')
-    }
-  }
-
-  const handleRemoveAllergen = (index) => {
-    setAllergens(allergens.filter((_, i) => i !== index))
   }
 
   const handleAddNutritionRow = () => {
@@ -332,8 +302,8 @@ const EditProduct = () => {
         veg_nonveg: formData.vegNonVeg || null,
         category: formData.category || null,
         nutrition_table: nutritionTable,
-        ingredients: ingredients.join(', ') || null,
-        allergen_info: allergens.join(', ') || null,
+        ingredients: ingredients || null,
+        allergen_info: allergens || null,
         claims: claims,
         storage_instructions: storageData.storageCondition || null,
         instructions_to_use: storageData.instructionsToUse || null,
@@ -893,48 +863,18 @@ const EditProduct = () => {
                   <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729]">
                     Ingredients
                   </h3>
-                  {ingredients.length > 0 && (
-                    <CopyBtnStandalone value={ingredients.join(', ')} field="ingredients" />
+                  {ingredients && (
+                    <CopyBtnStandalone value={ingredients} field="ingredients" />
                   )}
                 </div>
                 
-                <div className="flex gap-2 mb-4">
-                  <input
-                    type="text"
-                    placeholder="Add an ingredient"
-                    value={newIngredient}
-                    onChange={(e) => setNewIngredient(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAddIngredient()}
-                    className="flex-1 h-10 px-3 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                  />
-                  <button
-                    onClick={handleAddIngredient}
-                    className="bg-[#b455a0] h-10 px-4 py-2 rounded-md font-ibm-plex font-medium text-sm text-white hover:bg-[#a04890] transition-colors"
-                  >
-                    Add
-                  </button>
-                </div>
-
-                {ingredients.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {ingredients.map((ingredient, index) => (
-                      <div
-                        key={index}
-                        className="bg-gray-100 border border-[#e1e7ef] px-3 py-1.5 rounded-full flex items-center gap-2"
-                      >
-                        <span className="text-sm font-ibm-plex text-[#0f1729]">
-                          {ingredient}
-                        </span>
-                        <button
-                          onClick={() => handleRemoveIngredient(index)}
-                          className="hover:bg-gray-200 rounded-full p-0.5"
-                        >
-                          <X className="w-3 h-3 text-[#0f1729]" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <textarea
+                  placeholder="Enter ingredients as continuous text (e.g., Sugar, Liquid Glucose, Refined Wheat Flour (Maida), Invert Sugar, Acidity Regulators (INS 350 (ii), INS 296, INS 330)...)"
+                  value={ingredients}
+                  onChange={(e) => setIngredients(e.target.value)}
+                  rows={4}
+                  className="w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary resize-y"
+                />
               </div>
 
               {/* Allergens */}
@@ -943,48 +883,18 @@ const EditProduct = () => {
                   <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729]">
                     Allergens
                   </h3>
-                  {allergens.length > 0 && (
-                    <CopyBtnStandalone value={allergens.join(', ')} field="allergens" />
+                  {allergens && (
+                    <CopyBtnStandalone value={allergens} field="allergens" />
                   )}
                 </div>
                 
-                <div className="flex gap-2 mb-4">
-                  <input
-                    type="text"
-                    placeholder="Add an allergen"
-                    value={newAllergen}
-                    onChange={(e) => setNewAllergen(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAddAllergen()}
-                    className="flex-1 h-10 px-3 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                  />
-                  <button
-                    onClick={handleAddAllergen}
-                    className="bg-[#b455a0] h-10 px-4 py-2 rounded-md font-ibm-plex font-medium text-sm text-white hover:bg-[#a04890] transition-colors"
-                  >
-                    Add
-                  </button>
-                </div>
-
-                {allergens.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {allergens.map((allergen, index) => (
-                      <div
-                        key={index}
-                        className="bg-red-50 border border-red-200 px-3 py-1.5 rounded-full flex items-center gap-2"
-                      >
-                        <span className="text-sm font-ibm-plex text-red-900">
-                          {allergen}
-                        </span>
-                        <button
-                          onClick={() => handleRemoveAllergen(index)}
-                          className="hover:bg-red-100 rounded-full p-0.5"
-                        >
-                          <X className="w-3 h-3 text-red-900" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <textarea
+                  placeholder="Enter allergen information (e.g., Contains Wheat (Gluten), May contain traces of nuts)"
+                  value={allergens}
+                  onChange={(e) => setAllergens(e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary resize-y"
+                />
               </div>
 
               {/* Storage & Usage */}

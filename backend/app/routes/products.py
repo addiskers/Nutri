@@ -49,13 +49,17 @@ NOMENCLATURE_MAP = {
     "lipids": "Total Fat",
     "total fat (g)": "Total Fat",
     "saturated fat": "Saturated Fat",
+    "saturated fat (g)": "Saturated Fat",
     "saturated fatty acids": "Saturated Fat",
     "sfa": "Saturated Fat",
     "monounsaturated fat": "Monounsaturated Fat",
+    "monounsaturated fat (g)": "Monounsaturated Fat",
     "mufa": "Monounsaturated Fat",
     "polyunsaturated fat": "Polyunsaturated Fat",
+    "polyunsaturated fat (g)": "Polyunsaturated Fat",
     "pufa": "Polyunsaturated Fat",
     "trans fat": "Trans Fat",
+    "trans fat (g)": "Trans Fat",
     "carbohydrate": "Total Carbohydrates",
     "total carbohydrate": "Total Carbohydrates",
     "carbs": "Total Carbohydrates",
@@ -86,13 +90,27 @@ NOMENCLATURE_MAP = {
     "calories": "Energy (kcal)",
     "sodium": "Sodium (Na)",
     "sodium (mg)": "Sodium (Na)",
+    "sodium (na)": "Sodium (Na)",
     "potassium": "Potassium (K)",
+    "potassium (mg)": "Potassium (K)",
+    "potassium (k)": "Potassium (K)",
     "calcium": "Calcium (Ca)",
+    "calcium (mg)": "Calcium (Ca)",
+    "calcium (ca)": "Calcium (Ca)",
     "iron": "Iron (Fe)",
+    "iron (mg)": "Iron (Fe)",
+    "iron (fe)": "Iron (Fe)",
     "zinc": "Zinc (Zn)",
+    "zinc (mg)": "Zinc (Zn)",
+    "zinc (zn)": "Zinc (Zn)",
     "magnesium": "Magnesium (Mg)",
+    "magnesium (mg)": "Magnesium (Mg)",
     "phosphorus": "Phosphorus (P)",
+    "phosphorus (mg)": "Phosphorus (P)",
+    "phosphorus (p)": "Phosphorus (P)",
     "chloride": "Chloride (Cl)",
+    "chloride (mg)": "Chloride (Cl)",
+    "chloride (cl)": "Chloride (Cl)",
     "vitamin a": "Vitamin A",
     "vitamin a (mcg)": "Vitamin A",
     "vitamin d": "Vitamin D",
@@ -263,22 +281,23 @@ PRICING:
 PACKING FORMAT:
 sachet, bottle, pouch, jar, can, tetra pack, carton, box, tub, pack
 
-NUTRITION TABLE - CRITICAL:
+NUTRITION TABLE - **EXTREMELY CRITICAL - PAY EXTRA ATTENTION**:
 
-**YOU MUST EXTRACT THE NUTRITION TABLE IF IT EXISTS with all the nutrients and values**
+**YOU MUST EXTRACT THE COMPLETE NUTRITION TABLE IF IT EXISTS - DO NOT MISS ANY NUTRIENTS**
 
 Look for:
 - "Nutritional Information" or "Approximate Composition Per 100 g"
 - Table with nutrient names and values
 - Usually on back/side of pack
+- May have multiple columns for different serving sizes
 
 Table structure:
-- Column 1: Nutrient name
-- Column 2: Per 100g values
+- Column 1: Nutrient name (e.g., "Protein", "Total Fat", "Saturated Fat")
+- Column 2: Per 100g values (most common)
 - Column 3: Per Serve values (if present)
-- Column 4: % RDA (if present)
+- Column 4: % RDA or % Daily Value (if present)
 
-Extract EVERY nutrient row:
+Extract EVERY nutrient row EXACTLY as shown:
 [
   {
     "nutrient_name": "Energy (kcal)",
@@ -287,16 +306,32 @@ Extract EVERY nutrient row:
       "Per Serve (15g)": "75 kcal",
       "% RDA": "4%"
     }
+  },
+  {
+    "nutrient_name": "Protein",
+    "values": {
+      "Per 100g": "6.4 g",
+      "Per Serve (15g)": "1 g",
+      "% RDA": "not specified"
+    }
   }
 ]
 
-RULES:
-1. NEVER return [] for nutrition_table if you see a table
-2. Extract ALL nutrient rows
-3. Each entry MUST have non-null nutrient_name
-4. Keep units exactly as printed
-5. If RDA empty: "not specified"
-6. Energy in kJ AND kcal: TWO separate entries
+**CRITICAL RULES**:
+1. NEVER return [] for nutrition_table if you see a table - this is the most important data
+2. Extract EVERY SINGLE nutrient row - do not skip any
+3. If a nutrient appears with units in parentheses like "Saturated fat (g)", use ONLY "Saturated fat" as nutrient_name
+4. DO NOT create duplicate entries - if you see "Saturated Fat" in one row, don't create another row for "Saturated fat (g)"
+5. Each entry MUST have non-null nutrient_name
+6. Keep ALL values with units exactly as printed (e.g., "32.1 g", "6.4 g", "29%")
+7. If a cell is empty or says "Not specified": use "not specified"
+8. **ENERGY EXTRACTION**: ONLY extract what is actually printed on the package:
+   - If ONLY "Energy (kcal)" is shown, create ONE entry for "Energy (kcal)"
+   - If ONLY "Energy (kJ)" is shown, create ONE entry for "Energy (kJ)"
+   - If BOTH are shown in separate rows, create TWO separate entries
+   - DO NOT calculate or create missing energy values
+9. Pay extra attention to micronutrients (vitamins, minerals) - don't miss them
+10. If a nutrient has multiple values across columns, capture ALL of them in the values object
 
 MANUFACTURER:
 - Type: "Manufactured by" | "Packed by" | "Marketed by"
@@ -341,6 +376,12 @@ JSON STRUCTURE:
   },
   "child_variants": []
 }
+
+**OTHER IMPORTANT TEXT**:
+- This field captures ALL other important text visible on the package that doesn't fit in other categories
+- Include: warnings, disclaimers, quality statements, brand slogans, legal text, etc.
+- This will map to "Additional Notes" or "Other Notes" in the frontend
+- Extract as an array of strings, each string being a distinct piece of text
 
 Return ONLY the JSON."""
 
