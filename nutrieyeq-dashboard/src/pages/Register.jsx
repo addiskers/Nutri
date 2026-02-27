@@ -269,32 +269,6 @@ const Register = () => {
               </button>
             </form>
 
-            {/* Divider */}
-            <div className="relative my-6">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-[#e1e7ef]"></div>
-              </div>
-              <div className="relative flex justify-center text-xs">
-                <span className="bg-white px-4 text-[#65758b] font-poppins font-medium uppercase">
-                  Or continue with
-                </span>
-              </div>
-            </div>
-
-            {/* Microsoft Button */}
-            <button
-              type="button"
-              className="w-full h-12 bg-white border border-[#e1e7ef] text-[#0f1729] rounded-xl font-poppins font-medium text-base hover:bg-[#f9fafb] transition-colors flex items-center justify-center gap-3"
-            >
-              <svg className="w-5 h-5" viewBox="0 0 23 23" fill="none">
-                <path d="M11 11H0V0h11v11z" fill="#F25022"/>
-                <path d="M23 11H12V0h11v11z" fill="#00A4EF"/>
-                <path d="M11 23H0V12h11v11z" fill="#7FBA00"/>
-                <path d="M23 23H12V12h11v11z" fill="#FFB900"/>
-              </svg>
-              <span>Continue with Microsoft</span>
-            </button>
-
             {/* Terms */}
             <p className="text-[11px] sm:text-xs font-poppins text-[#65758b] text-center mt-5 md:mt-6 px-2">
               By continuing, you agree to our{' '}
