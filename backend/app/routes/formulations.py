@@ -54,16 +54,30 @@ async def save_formulation(data: dict):
 
 
 @router.get("/list")
-async def list_formulations(skip: int = 0, limit: int = 100):
-    """List all saved formulations"""
+async def list_formulations(
+    skip: int = 0, 
+    limit: int = 100,
+    created_by: Optional[str] = None,
+    current_user_email: Optional[str] = None,
+    is_super_admin: bool = False
+):
+    """
+    List saved formulations
+    - Super Admin: sees all formulations, can filter by user
+    - Other users: see only their own formulations
+    """
     try:
-        formulations = await SavedFormulation.find(
-            SavedFormulation.status == "active"
-        ).sort("-created_at").skip(skip).limit(limit).to_list()
+        query_filters = [SavedFormulation.status == "active"]
         
-        total = await SavedFormulation.find(
-            SavedFormulation.status == "active"
-        ).count()
+        # If Super Admin and filtering by specific user
+        if is_super_admin and created_by:
+            query_filters.append(SavedFormulation.created_by == created_by)
+        # If not Super Admin, only show user's own formulations
+        elif not is_super_admin and current_user_email:
+            query_filters.append(SavedFormulation.created_by == current_user_email)
+        
+        formulations = await SavedFormulation.find(*query_filters).sort("-created_at").skip(skip).limit(limit).to_list()
+        total = await SavedFormulation.find(*query_filters).count()
         
         result = []
         for f in formulations:
@@ -134,4 +148,68 @@ async def delete_formulation(formulation_id: str):
         raise
     except Exception as e:
         print(f"[ERROR] Delete formulation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{formulation_id}/transfer")
+async def transfer_formulation(formulation_id: str, data: dict):
+    """
+    Transfer formulation ownership to another user or multiple users
+    
+    Request body:
+    {
+        "target_users": ["user_email1@example.com", "user_email2@example.com"],
+        "transfer_type": "copy"  # or "move"
+    }
+    """
+    try:
+        from bson import ObjectId
+        
+        target_users = data.get("target_users", [])
+        transfer_type = data.get("transfer_type", "copy")
+        
+        if not target_users:
+            raise HTTPException(status_code=400, detail="At least one target user is required")
+        
+        if transfer_type not in ["copy", "move"]:
+            raise HTTPException(status_code=400, detail="Transfer type must be 'copy' or 'move'")
+        
+        formulation = await SavedFormulation.get(ObjectId(formulation_id))
+        
+        if not formulation:
+            raise HTTPException(status_code=404, detail="Formulation not found")
+        
+        transferred_count = 0
+        
+        for target_user in target_users:
+            new_formulation = SavedFormulation(
+                name=formulation.name,
+                ingredients=formulation.ingredients,
+                nutrient_selections=formulation.nutrient_selections or {},
+                custom_values=formulation.custom_values or {},
+                serve_size=formulation.serve_size,
+                created_by=target_user,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+                status="active"
+            )
+            
+            await new_formulation.insert()
+            transferred_count += 1
+        
+        if transfer_type == "move":
+            await formulation.delete()
+            message = f"Formulation '{formulation.name}' moved to {transferred_count} user(s)"
+        else:
+            message = f"Formulation '{formulation.name}' copied to {transferred_count} user(s)"
+        
+        return {
+            "success": True,
+            "message": message,
+            "transferred_count": transferred_count
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] Transfer formulation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

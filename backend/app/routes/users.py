@@ -284,12 +284,12 @@ async def approve_user(
     """
     Approve a pending user
     
-    Requires: Super Admin role
+    Requires: Super Admin or Admin role
     """
-    if current_user.role != UserRole.SUPER_ADMIN:
+    if current_user.role not in [UserRole.SUPER_ADMIN, UserRole.ADMIN]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only Super Admins can approve users"
+            detail="Only Super Admins and Admins can approve users"
         )
     
     # Get user to approve

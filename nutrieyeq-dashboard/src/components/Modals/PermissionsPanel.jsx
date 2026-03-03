@@ -1,76 +1,37 @@
 import { useState, useEffect } from 'react'
-import { X, Shield, CheckCircle, AlertCircle } from 'lucide-react'
+import { X, Shield, CheckCircle, AlertCircle, CheckSquare, Square } from 'lucide-react'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
+// All 14 available permissions
+const ALL_PERMISSIONS = [
+  'view_products',
+  'add_products',
+  'edit_products',
+  'delete_products',
+  'view_users',
+  'add_users',
+  'edit_users',
+  'delete_users',
+  'manage_permissions',
+  'view_nomenclature',
+  'edit_nomenclature',
+  'run_comparisons',
+  'view_analytics',
+  'export_data'
+]
+
 const PermissionsPanel = ({ isOpen, onClose, user, currentUserRole, onUpdate }) => {
-  const [permissions, setPermissions] = useState({
-    products: false,
-    addProduct: false,
-    editProduct: false,
-    deleteProduct: false,
-    compare: false,
-    users: false,
-    nomenclature: false,
-    exportData: false
-  })
+  const [selectedPermissions, setSelectedPermissions] = useState([])
   const [selectedRole, setSelectedRole] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
 
-  // Map backend permissions to frontend keys
-  const backendToFrontendMap = {
-    'view_products': 'products',
-    'add_products': 'addProduct',
-    'edit_products': 'editProduct',
-    'delete_products': 'deleteProduct',
-    'run_comparisons': 'compare',
-    'view_users': 'users',
-    'add_users': 'users',
-    'edit_users': 'users',
-    'delete_users': 'users',
-    'manage_permissions': 'users',
-    'view_nomenclature': 'nomenclature',
-    'edit_nomenclature': 'nomenclature',
-    'export_data': 'exportData'
-  }
-
-  // Map frontend keys to backend permissions
-  const frontendToBackendMap = {
-    'products': 'view_products',
-    'addProduct': 'add_products',
-    'editProduct': 'edit_products',
-    'deleteProduct': 'delete_products',
-    'compare': 'run_comparisons',
-    'users': 'view_users',
-    'nomenclature': 'view_nomenclature',
-    'exportData': 'export_data'
-  }
-
-  // Load permissions and role from user data
+  // Load permissions from user data
   useEffect(() => {
     if (user && user.permissions) {
-      const frontendPerms = {
-        products: false,
-        addProduct: false,
-        editProduct: false,
-        deleteProduct: false,
-        compare: false,
-        users: false,
-        nomenclature: false,
-        exportData: false
-      }
-
-      // Convert backend permissions to frontend format
-      user.permissions.forEach(perm => {
-        const frontendKey = backendToFrontendMap[perm]
-        if (frontendKey) {
-          frontendPerms[frontendKey] = true
-        }
-      })
-
-      setPermissions(frontendPerms)
+      setSelectedPermissions(user.permissions)
       setSelectedRole(user.role)
     }
   }, [user])
@@ -82,10 +43,29 @@ const PermissionsPanel = ({ isOpen, onClose, user, currentUserRole, onUpdate }) 
       return
     }
 
-    setPermissions({
-      ...permissions,
-      [permission]: !permissions[permission]
+    setSelectedPermissions(prev => {
+      if (prev.includes(permission)) {
+        return prev.filter(p => p !== permission)
+      } else {
+        return [...prev, permission]
+      }
     })
+  }
+
+  const handleSelectAll = () => {
+    if (currentUserRole !== 'Super Admin') {
+      setError('Only Super Admins can modify permissions')
+      return
+    }
+    setSelectedPermissions([...ALL_PERMISSIONS])
+  }
+
+  const handleDeselectAll = () => {
+    if (currentUserRole !== 'Super Admin') {
+      setError('Only Super Admins can modify permissions')
+      return
+    }
+    setSelectedPermissions([])
   }
 
   const handleSave = async () => {
@@ -95,45 +75,8 @@ const PermissionsPanel = ({ isOpen, onClose, user, currentUserRole, onUpdate }) 
     try {
       const token = localStorage.getItem('access_token')
       
-      // Convert frontend permissions to backend format
-      const backendPermissions = []
-      Object.keys(permissions).forEach(key => {
-        if (permissions[key]) {
-          // Add base permission
-          const backendPerm = frontendToBackendMap[key]
-          if (backendPerm && !backendPermissions.includes(backendPerm)) {
-            backendPermissions.push(backendPerm)
-          }
-          
-          // Add related permissions based on role
-          if (key === 'users' && permissions.users) {
-            if (!backendPermissions.includes('view_users')) backendPermissions.push('view_users')
-            if (!backendPermissions.includes('add_users')) backendPermissions.push('add_users')
-            if (!backendPermissions.includes('edit_users')) backendPermissions.push('edit_users')
-            if (selectedRole === 'Super Admin') {
-              if (!backendPermissions.includes('delete_users')) backendPermissions.push('delete_users')
-              if (!backendPermissions.includes('manage_permissions')) backendPermissions.push('manage_permissions')
-            }
-          }
-          
-          if (key === 'editProduct' && permissions.editProduct) {
-            if (!backendPermissions.includes('view_products')) backendPermissions.push('view_products')
-          }
-          
-          if (key === 'deleteProduct' && permissions.deleteProduct) {
-            if (!backendPermissions.includes('view_products')) backendPermissions.push('view_products')
-            if (!backendPermissions.includes('edit_products')) backendPermissions.push('edit_products')
-          }
-          
-          if (key === 'nomenclature' && permissions.nomenclature) {
-            if (!backendPermissions.includes('view_nomenclature')) backendPermissions.push('view_nomenclature')
-            if (!backendPermissions.includes('edit_nomenclature')) backendPermissions.push('edit_nomenclature')
-          }
-        }
-      })
-
       const updateData = {
-        permissions: backendPermissions
+        permissions: selectedPermissions
       }
 
       // Include role if it has changed
@@ -183,46 +126,41 @@ const PermissionsPanel = ({ isOpen, onClose, user, currentUserRole, onUpdate }) 
     }
   }
 
-  const permissionItems = [
+  // Categorized permissions for better organization
+  const permissionCategories = [
     {
-      key: 'products',
-      title: 'Access Products Page',
-      description: 'Allows viewing product and ingredient data.'
+      category: 'Products & COA',
+      permissions: [
+        { key: 'view_products', title: 'View Products', description: 'View product and COA data' },
+        { key: 'add_products', title: 'Add Products', description: 'Create new products and COAs' },
+        { key: 'edit_products', title: 'Edit Products', description: 'Modify existing products and COAs' },
+        { key: 'delete_products', title: 'Delete Products', description: 'Remove products and COAs from system' }
+      ]
     },
     {
-      key: 'addProduct',
-      title: 'Access Add Product Page',
-      description: 'Allows adding new products and drafting nutrition inputs.'
+      category: 'User Management',
+      permissions: [
+        { key: 'view_users', title: 'View Users', description: 'View user list and details' },
+        { key: 'add_users', title: 'Add Users', description: 'Create new user accounts' },
+        { key: 'edit_users', title: 'Edit Users', description: 'Modify user information' },
+        { key: 'delete_users', title: 'Delete Users', description: 'Remove users from system' },
+        { key: 'manage_permissions', title: 'Manage Permissions', description: 'Assign and modify user permissions' }
+      ]
     },
     {
-      key: 'editProduct',
-      title: 'Edit Products',
-      description: 'Allows modifying existing products.'
+      category: 'Nomenclature',
+      permissions: [
+        { key: 'view_nomenclature', title: 'View Nomenclature', description: 'View nomenclature mappings' },
+        { key: 'edit_nomenclature', title: 'Edit Nomenclature', description: 'Modify nomenclature mappings' }
+      ]
     },
     {
-      key: 'deleteProduct',
-      title: 'Delete Products',
-      description: 'Allows removing products from system.'
-    },
-    {
-      key: 'compare',
-      title: 'Access Compare Page',
-      description: 'Allows running comparisons between products and COAs.'
-    },
-    {
-      key: 'users',
-      title: 'Manage Users',
-      description: 'Allows user management and permissions.'
-    },
-    {
-      key: 'nomenclature',
-      title: 'Manage Nomenclature',
-      description: 'Allows editing nomenclature mappings.'
-    },
-    {
-      key: 'exportData',
-      title: 'Export Data',
-      description: 'Allows exporting reports and data.'
+      category: 'Analysis & Reporting',
+      permissions: [
+        { key: 'run_comparisons', title: 'Run Comparisons', description: 'Access comparison features' },
+        { key: 'view_analytics', title: 'View Analytics', description: 'Access analytics dashboard' },
+        { key: 'export_data', title: 'Export Data', description: 'Export reports and data' }
+      ]
     }
   ]
 
@@ -350,59 +288,73 @@ const PermissionsPanel = ({ isOpen, onClose, user, currentUserRole, onUpdate }) 
           )}
 
           {/* Permissions Section - All Roles */}
-          <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 space-y-2">
-            <div className="flex items-center gap-2 mb-4">
-              <Shield className="w-4 h-4 text-[#0f1729]" />
-              <h3 className="text-sm font-ibm-plex font-semibold text-[#0f1729]">
-                {user.role} Permissions
-              </h3>
-            </div>
-
-            {permissionItems.map((item, index) => (
-              <div key={item.key}>
-                <div className="flex items-start justify-between py-3">
-                  <div className="flex-1">
-                    <div className="text-sm font-ibm-plex font-medium text-[#0f1729] mb-0.5">
-                      {item.title}
-                    </div>
-                    <div className="text-xs font-ibm-plex text-[#65758b]">
-                      {item.description}
-                    </div>
-                  </div>
+          <div className="bg-white border border-[#e1e7ef] rounded-lg p-4">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-[#0f1729]" />
+                <h3 className="text-sm font-ibm-plex font-semibold text-[#0f1729]">
+                  Permissions ({selectedPermissions.length}/{ALL_PERMISSIONS.length})
+                </h3>
+              </div>
+              {currentUserRole === 'Super Admin' && (
+                <div className="flex gap-2">
                   <button
-                    onClick={() => handleTogglePermission(item.key)}
-                    className={`relative w-11 h-6 rounded-full transition-colors ml-4 ${
-                      permissions[item.key] ? 'bg-[#009da5]' : 'bg-[#e1e7ef]'
-                    }`}
-                    disabled={currentUserRole !== 'Super Admin'}
-                    title={currentUserRole !== 'Super Admin' ? 'Only Super Admins can modify permissions' : ''}
+                    onClick={handleSelectAll}
+                    className="text-xs text-[#009da5] hover:underline font-medium"
                   >
-                    <div
-                      className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform ${
-                        permissions[item.key] ? 'translate-x-[22px]' : 'translate-x-0.5'
-                      }`}
-                    />
+                    Select All
+                  </button>
+                  <span className="text-xs text-[#65758b]">|</span>
+                  <button
+                    onClick={handleDeselectAll}
+                    className="text-xs text-[#65758b] hover:text-[#0f1729] hover:underline font-medium"
+                  >
+                    Deselect All
                   </button>
                 </div>
-                {index !== permissionItems.length - 1 && (
-                  <div className="h-px bg-[#e1e7ef]" />
+              )}
+            </div>
+
+            {permissionCategories.map((category, catIndex) => (
+              <div key={category.category} className="mb-4">
+                <h4 className="text-xs font-ibm-plex font-semibold text-[#65758b] mb-2 uppercase tracking-wider">
+                  {category.category}
+                </h4>
+                <div className="space-y-1">
+                  {category.permissions.map((perm) => (
+                    <label
+                      key={perm.key}
+                      className={`flex items-start gap-3 p-3 rounded-lg transition-colors ${
+                        currentUserRole === 'Super Admin' ? 'hover:bg-gray-50 cursor-pointer' : ''
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedPermissions.includes(perm.key)}
+                        onChange={() => handleTogglePermission(perm.key)}
+                        disabled={currentUserRole !== 'Super Admin'}
+                        className="mt-0.5 w-4 h-4 text-[#009da5] border-gray-300 rounded focus:ring-[#009da5] disabled:opacity-50"
+                      />
+                      <div className="flex-1">
+                        <div className="text-sm font-ibm-plex font-medium text-[#0f1729] mb-0.5">
+                          {perm.title}
+                        </div>
+                        <div className="text-xs font-ibm-plex text-[#65758b]">
+                          {perm.description}
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+                {catIndex !== permissionCategories.length - 1 && (
+                  <div className="h-px bg-[#e1e7ef] my-3" />
                 )}
               </div>
             ))}
 
             {currentUserRole !== 'Super Admin' && (
-              <p className="text-xs font-ibm-plex text-[#65758b] pt-2">
+              <p className="text-xs font-ibm-plex text-[#65758b] pt-2 border-t border-[#e1e7ef]">
                 Only Super Admins can modify permissions.
-              </p>
-            )}
-            {currentUserRole === 'Super Admin' && user.role !== 'Super Admin' && (
-              <p className="text-xs font-ibm-plex text-[#65758b] pt-2">
-                {user.role} permissions are configured at the role level and applied to all {user.role} users.
-              </p>
-            )}
-            {user.role === 'Super Admin' && (
-              <p className="text-xs font-ibm-plex text-[#65758b] pt-2">
-                Super Admins have full access to all features and can manage all users, roles, and permissions.
               </p>
             )}
           </div>

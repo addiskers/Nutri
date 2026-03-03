@@ -14,7 +14,7 @@ from PIL import Image
 
 from app.models.user import User
 from app.models.coa import COA
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, require_permission
 from config.settings import settings
 
 router = APIRouter(prefix="/coa", tags=["COA"])
@@ -713,9 +713,9 @@ async def extract_coa_from_images(
 @router.post("", response_model=dict)
 async def create_coa(
     coa: COACreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("add_products"))
 ):
-    """Create a new COA entry"""
+    """Create a new COA entry (requires add_products permission)"""
     try:
         # Build master entry for formulation calculations
         master_entry = {
@@ -778,9 +778,10 @@ async def list_coas(
     skip: int = 0,
     limit: int = 50,
     search: Optional[str] = None,
-    status: Optional[str] = None
+    status: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
 ):
-    """List all COA entries with optional filters"""
+    """List all COA entries with optional filters (requires authentication)"""
     try:
         query = {}
         
@@ -870,9 +871,9 @@ async def get_coa(
 async def update_coa(
     coa_id: str,
     coa_update: COACreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("edit_products"))
 ):
-    """Update a COA entry"""
+    """Update a COA entry (requires edit_products permission)"""
     try:
         from bson import ObjectId
         coa = await COA.get(ObjectId(coa_id))
@@ -925,9 +926,9 @@ async def update_coa(
 @router.delete("/{coa_id}", response_model=dict)
 async def delete_coa(
     coa_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("delete_products"))
 ):
-    """Delete a COA entry"""
+    """Delete a COA entry (requires delete_products permission)"""
     try:
         from bson import ObjectId
         coa = await COA.get(ObjectId(coa_id))

@@ -3,6 +3,8 @@ Product Routes - Including AI-Powered Image Extraction
 """
 import os
 import re
+import unicodedata
+from rapidfuzz import fuzz
 import json
 import base64
 from io import BytesIO
@@ -10,8 +12,7 @@ from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from pydantic import BaseModel
-from PIL import Image
-
+from PIL import Image, ImageEnhance, ImageFilter
 from app.models.user import User
 from app.models.product import Product
 from app.dependencies.auth import get_current_user
@@ -37,136 +38,243 @@ PRICING = {
 # ============================================================
 NOMENCLATURE_MAP = {
     "protein": "Protein",
-    "proteins": "Protein",
     "crude protein": "Protein",
     "total protein": "Protein",
-    "protein (n x 6.25)": "Protein",
     "protein content": "Protein",
-    "protein (g)": "Protein",
     "fat": "Total Fat",
     "total fat": "Total Fat",
     "crude fat": "Total Fat",
     "lipids": "Total Fat",
-    "total fat (g)": "Total Fat",
     "saturated fat": "Saturated Fat",
-    "saturated fat (g)": "Saturated Fat",
     "saturated fatty acids": "Saturated Fat",
     "sfa": "Saturated Fat",
+    "unsaturated fat": "Unsaturated Fat",
     "monounsaturated fat": "Monounsaturated Fat",
-    "monounsaturated fat (g)": "Monounsaturated Fat",
     "mufa": "Monounsaturated Fat",
     "polyunsaturated fat": "Polyunsaturated Fat",
-    "polyunsaturated fat (g)": "Polyunsaturated Fat",
     "pufa": "Polyunsaturated Fat",
     "trans fat": "Trans Fat",
-    "trans fat (g)": "Trans Fat",
     "carbohydrate": "Total Carbohydrates",
     "total carbohydrate": "Total Carbohydrates",
     "carbs": "Total Carbohydrates",
-    "carbohydrate (g)": "Total Carbohydrates",
     "available carbohydrates": "Available Carbohydrates",
     "sugar": "Total Sugars",
     "total sugar": "Total Sugars",
-    "total sugars": "Total Sugars",
-    "total sugars (g)": "Total Sugars",
     "added sugar": "Added Sugars",
-    "added sugars": "Added Sugars",
-    "added sugars (g)": "Added Sugars",
-    "sucrose": "Sucrose",
     "dietary fiber": "Dietary Fiber",
-    "fiber": "Dietary Fiber",
     "soluble fiber": "Soluble Fiber",
     "insoluble fiber": "Insoluble Fiber",
     "fos": "FOS",
     "moisture": "Moisture",
-    "moisture content": "Moisture",
     "ash": "Ash",
-    "total ash": "Ash",
     "cholesterol": "Cholesterol",
-    "cholesterol (mg)": "Cholesterol",
-    "energy (kcal)": "Energy (kcal)",
-    "energy (kj)": "Energy (kJ)",
     "energy": "Energy (kcal)",
     "calories": "Energy (kcal)",
     "sodium": "Sodium (Na)",
-    "sodium (mg)": "Sodium (Na)",
-    "sodium (na)": "Sodium (Na)",
     "potassium": "Potassium (K)",
-    "potassium (mg)": "Potassium (K)",
-    "potassium (k)": "Potassium (K)",
     "calcium": "Calcium (Ca)",
-    "calcium (mg)": "Calcium (Ca)",
-    "calcium (ca)": "Calcium (Ca)",
     "iron": "Iron (Fe)",
-    "iron (mg)": "Iron (Fe)",
-    "iron (fe)": "Iron (Fe)",
     "zinc": "Zinc (Zn)",
-    "zinc (mg)": "Zinc (Zn)",
-    "zinc (zn)": "Zinc (Zn)",
     "magnesium": "Magnesium (Mg)",
-    "magnesium (mg)": "Magnesium (Mg)",
     "phosphorus": "Phosphorus (P)",
-    "phosphorus (mg)": "Phosphorus (P)",
-    "phosphorus (p)": "Phosphorus (P)",
     "chloride": "Chloride (Cl)",
-    "chloride (mg)": "Chloride (Cl)",
-    "chloride (cl)": "Chloride (Cl)",
     "vitamin a": "Vitamin A",
-    "vitamin a (mcg)": "Vitamin A",
     "vitamin d": "Vitamin D",
     "vitamin d₂": "Vitamin D2",
     "vitamin d2": "Vitamin D2",
-    "vitamin d₂ (mcg)": "Vitamin D2",
     "vitamin d3": "Vitamin D3",
     "vitamin e": "Vitamin E",
-    "vitamin e (mg)": "Vitamin E",
     "vitamin c": "Vitamin C",
     "vitamin b1": "Vitamin B1",
+    "thiamine": "Vitamin B1",
     "vitamin b2": "Vitamin B2",
+    "riboflavin": "Vitamin B2",
     "vitamin b3": "Vitamin B3",
+    "niacin": "Vitamin B3",
     "vitamin b5": "Vitamin B5",
+    "pantothenic acid": "Vitamin B5",
     "vitamin b6": "Vitamin B6",
-    "vitamin b7": "Vitamin B7",
-    "vitamin b9": "Vitamin B9",
+    "pyridoxine": "Vitamin B6",
+    "vitamin b7": "Biotin",
+    "biotin": "Biotin",
+    "vitamin b9": "Folic Acid",
+    "folic acid": "Folic Acid",
+    "folate": "Folic Acid",
     "vitamin b12": "Vitamin B12",
+    "cobalamin": "Vitamin B12",
     "vitamin k": "Vitamin K",
+    "omega 3": "Omega 3 Fatty Acid",
+    "omega 3 fatty acid": "Omega 3 Fatty Acid",
+    "omega-3": "Omega 3 Fatty Acid",
+    "dha": "DHA",
+    "docosahexaenoic acid": "DHA",
+    "omega 6": "Omega 6 Fatty Acid",
+    "omega 6 fatty acid": "Omega 6 Fatty Acid",
+    "omega-6": "Omega 6 Fatty Acid",
+    "monounsaturated fatty acid": "Monounsaturated Fatty Acid",
+    "polyunsaturated fatty acid": "Polyunsaturated Fatty Acid",
+    "iodine": "Iodine",
+    "copper": "Copper",
+    "chromium": "Chromium",
+    "manganese": "Manganese",
+    "molybdenum": "Molybdenum",
+    "selenium": "Selenium",
+    "carnitine": "Carnitine",
+    "choline": "Choline",
+    "inositol": "Inositol",
+    "nucleotides": "Nucleotides",
+    "taurine": "Taurine",
 }
-
 
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
-def standardize_nutrition_table(nutrition_table):
-    """Standardize nutrient names using NOMENCLATURE_MAP"""
-    if not nutrition_table:
-        return []
+FUZZY_THRESHOLD = 85
 
+def preprocess_image_for_ocr(pil_image, save_path=None):
+    """
+    Enhance image quality for better OCR/AI extraction
+    - Aggressive upscaling (2x zoom minimum)
+    - Strong sharpening for text clarity
+    - Contrast enhancement
+    - Noise reduction
+    """
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            try:
+                print(msg.encode('ascii', 'replace').decode('ascii'))
+            except:
+                print("[IMAGE] (message contains special characters)")
+    
+    if pil_image.mode != 'RGB':
+        pil_image = pil_image.convert('RGB')
+    
+    width, height = pil_image.size
+    
+    # AGGRESSIVE UPSCALING: Always upscale by 2x (like zooming in)
+    # This helps AI see small text in nutrition tables better
+    new_width = int(width * 2)
+    new_height = int(height * 2)
+    pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+    safe_print(f"[IMAGE] Upscaled 2x: {width}x{height} → {new_width}x{new_height}")
+    
+    # Enhance brightness slightly for faded text
+    enhancer = ImageEnhance.Brightness(pil_image)
+    pil_image = enhancer.enhance(1.1)
+    safe_print("[IMAGE] Enhanced brightness (1.1x)")
+    
+    # Strong contrast for better text separation
+    enhancer = ImageEnhance.Contrast(pil_image)
+    pil_image = enhancer.enhance(1.8)
+    safe_print("[IMAGE] Enhanced contrast (1.8x)")
+    
+    # Reduce noise before sharpening
+    pil_image = pil_image.filter(ImageFilter.MedianFilter(size=3))
+    safe_print("[IMAGE] Applied noise reduction")
+    
+    # STRONG sharpening for crisp text
+    enhancer = ImageEnhance.Sharpness(pil_image)
+    pil_image = enhancer.enhance(3.0)
+    safe_print("[IMAGE] Applied strong sharpening (3.0x)")
+    
+    # Final edge enhancement for nutrition table borders
+    pil_image = pil_image.filter(ImageFilter.EDGE_ENHANCE_MORE)
+    safe_print("[IMAGE] Applied edge enhancement")
+    
+    if save_path:
+        pil_image.save(save_path, quality=95)
+        safe_print(f"[IMAGE] Saved processed image to: {save_path}")
+    
+    return pil_image
+
+def convert_energy_kj_to_kcal(nutrition_table):
+    for row in nutrition_table:
+        name = row.get("nutrient_name", "")
+        if re.search(r"\bkj\b", name, flags=re.IGNORECASE):
+            values = row.get("values", {})
+            amount = values.get("amount")
+            if amount is not None:
+                kcal = round(amount / 4.184, 2)  
+                values["amount"] = kcal
+                row["nutrient_name"] = "Energy (kcal)"  
+
+def canonicalize(label):
+    label = unicodedata.normalize("NFKC", label)
+    label = label.lower()
+    SPELLING_MAP = {
+        "fibre": "fiber",
+    }
+
+    for wrong, correct in SPELLING_MAP.items():
+        label = re.sub(rf"\b{wrong}\b", correct, label)
+
+    label = re.sub(r"^-+", "", label)
+    label = re.sub(r"\(.*?\)", "", label)
+    label = re.sub(r"[^\w\s:\-]", " ", label)
+    label = re.sub(r"\b(kcal|kj|mg|g|mcg|ug|[μµ]g|%)\b", "", label)
+    label = re.sub(r"^of which\s+", "", label)
+    label = re.sub(r"\s+", " ", label).strip()
+    words = label.split()
+    normalized_words = []
+    for w in words:
+        if len(w) > 3 and w.endswith("s") and not w.endswith(("ss", "us", "ns")):
+            normalized_words.append(w[:-1])
+        else:
+            normalized_words.append(w)
+    return " ".join(normalized_words)
+
+def standardize_nutrition(nutrition_table, nomenclature_map):
     standardized = []
-    for nutrient in nutrition_table:
-        original_name_raw = nutrient.get("nutrient_name", "")
+    canonical_nomenclature = {canonicalize(k): v for k, v in nomenclature_map.items()}
+    for row in nutrition_table:
+        original = row.get("nutrient_name")
+        if not original:
+            continue
+
+        canon = canonicalize(original)
+        standard_name = None
+        if canon in canonical_nomenclature:
+            standard_name = canonical_nomenclature[canon]
+            print(f"Mapping '{original}' → '{standard_name}' (exact match)")
+
+        else:
+            best_match = None
+            best_score = 0
+            for key, value in canonical_nomenclature.items():
+                score = fuzz.token_sort_ratio(canon, key)
+                if score > best_score:
+                    best_score = score
+                    best_match = value
+
+            if best_score >= FUZZY_THRESHOLD:
+                standard_name = best_match
+                print(f"Mapping '{original}' → '{standard_name}' (fuzzy match {best_score:.2f}%)")
+
+        if not standard_name:
+            print(f"Adding new nutrient: {original}")
+            standard_name = original
+
+        values = row.get("values", {})
+        cleaned_values = {}
+        for key, value in values.items():
+            if value is None or value == "" or value == "null" or value == "-":
+                cleaned_values[key] = "not specified"
+            else:
+                cleaned_values[key] = value
         
-        if not original_name_raw or not isinstance(original_name_raw, str):
+        # Skip rows with no meaningful data
+        if not any(v != "not specified" for v in cleaned_values.values()):
             continue
-            
-        original_name = original_name_raw.strip().lower()
-        if not original_name:
-            continue
-            
-        standardized_name = NOMENCLATURE_MAP.get(original_name, original_name_raw)
-        
-        values = nutrient.get("values", {})
-        if not values or not any(values.values()):
-            continue
-            
+
         standardized.append({
-            "nutrient_name": standardized_name,
-            "values": values,
-            "original_name": original_name_raw,
+            "nutrient_name": standard_name,
+            "values": cleaned_values,
+            "original_name": original
         })
 
     return standardized
-
-
 def extract_numeric_mrp(mrp_value):
     """Extract numeric MRP from string"""
     if not mrp_value or mrp_value == "not specified":
@@ -241,6 +349,10 @@ def validate_fssai(text):
 
 def calculate_cost(input_tokens, output_tokens):
     """Calculate API cost"""
+      # Handle None values
+    input_tokens = input_tokens or 0
+    output_tokens = output_tokens or 0
+    
     input_cost = (input_tokens / 1_000_000) * PRICING["input"]
     output_cost = (output_tokens / 1_000_000) * PRICING["output"]
     return {
@@ -314,24 +426,43 @@ Extract EVERY nutrient row EXACTLY as shown:
       "Per Serve (15g)": "1 g",
       "% RDA": "not specified"
     }
+  },
+  {
+    "nutrient_name": "Total Fat",
+    "values": {
+      "Per 100g": "32.1 g",
+      "Per Serve (15g)": "4.8 g",
+      "% RDA": "not specified"
+    }
+  },
+  {
+    "nutrient_name": "Saturated Fat",
+    "values": {
+      "Per 100g": "14.2 g",
+      "Per Serve (15g)": "2.1 g",
+      "% RDA": "not specified"
+    }
   }
 ]
 
 **CRITICAL RULES**:
-1. NEVER return [] for nutrition_table if you see a table - this is the most important data
-2. Extract EVERY SINGLE nutrient row - do not skip any
+1. NEVER return [] for nutrition_table if you see a table - this is the MOST IMPORTANT data
+2. Extract EVERY SINGLE nutrient row - don't skip any, including vitamins, minerals, and sub-nutrients
 3. If a nutrient appears with units in parentheses like "Saturated fat (g)", use ONLY "Saturated fat" as nutrient_name
 4. DO NOT create duplicate entries - if you see "Saturated Fat" in one row, don't create another row for "Saturated fat (g)"
 5. Each entry MUST have non-null nutrient_name
-6. Keep ALL values with units exactly as printed (e.g., "32.1 g", "6.4 g", "29%")
-7. If a cell is empty or says "Not specified": use "not specified"
-8. **ENERGY EXTRACTION**: ONLY extract what is actually printed on the package:
+6. Keep ALL values with units EXACTLY as printed (e.g., "32.1 g", "6.4 g", "29%", "< 0.1 g")
+7. If a cell is empty, has "-", or is unclear: use "not specified"
+8. **ENERGY EXTRACTION**: ONLY extract what is actually printed:
    - If ONLY "Energy (kcal)" is shown, create ONE entry for "Energy (kcal)"
    - If ONLY "Energy (kJ)" is shown, create ONE entry for "Energy (kJ)"
    - If BOTH are shown in separate rows, create TWO separate entries
    - DO NOT calculate or create missing energy values
-9. Pay extra attention to micronutrients (vitamins, minerals) - don't miss them
+9. Pay EXTRA attention to micronutrients (all B vitamins, minerals like Iodine, Copper, Selenium, etc.) - don't miss them
 10. If a nutrient has multiple values across columns, capture ALL of them in the values object
+11. Handle "less than" values: "< 0.1 g" or "< 1 mg" - extract exactly as shown
+12. For ranges: "5-10 mg" - extract exactly as shown
+13. If text is blurry/unclear but you can partially read it, extract what you can see and note uncertainty
 
 MANUFACTURER:
 - Type: "Manufactured by" | "Packed by" | "Marketed by"
@@ -497,14 +628,28 @@ async def extract_product_from_images(
         
         safe_print(f"[EXTRACTION] Processing {len(images)} images")
         
+        # Create temp directory for processed images
+        import tempfile
+        temp_dir = tempfile.mkdtemp(prefix="nutri_processed_")
+        safe_print(f"[EXTRACTION] Processed images will be saved to: {temp_dir}")
+        
         # Load and validate images
         pil_images = []
+        processed_image_paths = []
         for idx, img in enumerate(images):
             try:
                 safe_print(f"[EXTRACTION] Loading image {idx + 1}/{len(images)}: {img.filename}")
                 content = await img.read()
                 pil_img = Image.open(BytesIO(content))
                 safe_print(f"[EXTRACTION] Image {idx + 1} loaded: {pil_img.size} pixels")
+                
+                # Preprocess image for better OCR accuracy
+                safe_print(f"[EXTRACTION] Preprocessing image {idx + 1} for OCR...")
+                processed_path = os.path.join(temp_dir, f"processed_{idx + 1}_{img.filename}")
+                pil_img = preprocess_image_for_ocr(pil_img, save_path=processed_path)
+                processed_image_paths.append(processed_path)
+                safe_print(f"[EXTRACTION] Image {idx + 1} preprocessed: {pil_img.size} pixels")
+                
                 pil_images.append(pil_img)
             except Exception as e:
                 safe_print(f"[ERROR] Failed to load image {img.filename}: {str(e)}")
@@ -579,10 +724,14 @@ async def extract_product_from_images(
         safe_print("[EXTRACTION] Post-processing extracted data...")
         parent = product_data.get("parent_product", {})
         
-        # Standardize nutrition
         if "nutrition_table" in parent:
+            safe_print("[EXTRACTION] Converting energy from kJ to kcal if needed...")
+            convert_energy_kj_to_kcal(parent["nutrition_table"])
             safe_print("[EXTRACTION] Standardizing nutrition table...")
-            parent["nutrition_table"] = standardize_nutrition_table(parent["nutrition_table"])
+            parent["nutrition_table"] = standardize_nutrition(
+                parent["nutrition_table"], 
+                NOMENCLATURE_MAP
+            )
         
         # Extract numeric MRP
         if "pricing" in parent:
@@ -674,9 +823,11 @@ async def extract_product_from_images(
             "dates": parent.get("dates", {}),
             "other": parent.get("other_important_text", []),
             "raw": product_data,  # Keep raw data for reference
+            "processed_images": processed_image_paths,  # Paths to view enhanced images
         }
         
         safe_print("[EXTRACTION] SUCCESS - Extraction completed successfully!")
+        safe_print(f"[EXTRACTION] View processed images at: {temp_dir}")
         return ExtractedProductData(
             success=True,
             data=transformed_data,

@@ -32,15 +32,23 @@ async def register(user_data: UserRegister):
             detail=error_msg
         )
     
+    # Check if this is the first user in the system
+    user_count = await User.count()
+    is_first_user = (user_count == 0)
+    
+    # First user becomes Super Admin automatically
+    user_role = UserRole.SUPER_ADMIN if is_first_user else UserRole.RESEARCHER
+    is_approved = True if is_first_user else False
+    
     new_user = User(
         name=user_data.name,
         email=user_data.email.lower(),
         hashed_password=hash_password(user_data.password),
         department=user_data.department,
-        role=UserRole.RESEARCHER,
+        role=user_role,
         is_active=True,
         is_verified=True,
-        is_approved=False,
+        is_approved=is_approved,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow()
     )
@@ -48,6 +56,14 @@ async def register(user_data: UserRegister):
     new_user.update_permissions_by_role()
     await new_user.insert()
     
+    if is_first_user:
+        print(f"[INFO] First user registered as Super Admin: {new_user.email}")
+        return MessageResponse(
+            message="Welcome! You are the first user and have been granted Super Admin privileges.",
+            success=True
+        )
+    
+    # Send approval emails to existing admins for non-first users
     try:
         super_admins = await User.find(User.role == UserRole.SUPER_ADMIN, User.is_active == True).to_list()
         print(f"[INFO] Found {len(super_admins)} super admins to notify")

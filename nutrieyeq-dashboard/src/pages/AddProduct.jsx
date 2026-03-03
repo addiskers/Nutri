@@ -253,8 +253,31 @@ const AddProduct = () => {
       if (data.composition.ingredients) {
         const ingredientStr = data.composition.ingredients
         if (typeof ingredientStr === 'string' && ingredientStr.length > 0) {
-          // Split by comma and clean up
-          const ingredientList = ingredientStr.split(',').map(i => i.trim()).filter(i => i)
+
+          const ingredientList = (() => {
+            const result = []
+            let current = ''
+            let depth = 0
+
+            for (let char of ingredientStr) {
+              if (char === '(') depth++
+              if (char === ')') depth--
+
+              if (char === ',' && depth === 0) {
+                result.push(current.trim())
+                current = ''
+              } else {
+                current += char
+              }
+            }
+
+            if (current.trim()) {
+              result.push(current.trim())
+            }
+
+            return result
+          })()
+
           setIngredients(ingredientList)
         }
       }

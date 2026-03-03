@@ -2,16 +2,21 @@ import { useState, useEffect } from 'react'
 
 import Layout from '../components/Layout/Layout'
 
-import { Plus, Trash2, Loader2, Search, AlertCircle, Beaker, Download, X, ChevronDown } from 'lucide-react'
+import { Plus, Trash2, Loader2, Search, AlertCircle, Beaker, Download, X, ChevronDown, Users } from 'lucide-react'
 
 import { coaService, formulationService } from '../services/api'
-
+import authService from '../services/api'
+import TransferFormulationModal from '../components/Modals/TransferFormulationModal'
 import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
 
 
 
 const Formulation = () => {
+
+  // Get current user role
+  const currentUser = authService.getCurrentUser()
+  const isSuperAdmin = currentUser?.role === 'Super Admin'
 
   // COA list for ingredient selection
 
@@ -60,6 +65,18 @@ const Formulation = () => {
   const [activeTab, setActiveTab] = useState('formula') // 'formula' | 'saved'
   const [savedFormulations, setSavedFormulations] = useState([])
   const [isLoadingSaved, setIsLoadingSaved] = useState(false)
+
+  // Saved formulations search and filter
+  const [formulationSearch, setFormulationSearch] = useState('')
+  const [userFilter, setUserFilter] = useState('All')
+  const [availableUsers, setAvailableUsers] = useState([])
+
+  // Bulk selection for formulations
+  const [selectedFormulations, setSelectedFormulations] = useState([])
+
+  // Transfer modal
+  const [showTransferModal, setShowTransferModal] = useState(false)
+  const [selectedFormulation, setSelectedFormulation] = useState(null)
 
   
 
@@ -378,12 +395,19 @@ const Formulation = () => {
 
   }, [])
 
-  // Load saved formulations when Saved tab is active
+  // Load saved formulations when Saved tab is active or filters change
   useEffect(() => {
     if (activeTab === 'saved') {
       loadSavedFormulations()
     }
-  }, [activeTab])
+  }, [activeTab, userFilter])
+
+  // Load users for filter when component mounts (Super Admin only)
+  useEffect(() => {
+    if (isSuperAdmin) {
+      loadUsersForFilter()
+    }
+  }, [])
 
   
 
@@ -759,13 +783,90 @@ const Formulation = () => {
   const loadSavedFormulations = async () => {
     setIsLoadingSaved(true)
     try {
-      const result = await formulationService.getFormulations({ limit: 100 })
+      const params = {
+        limit: 100,
+        current_user_email: currentUser?.email,
+        is_super_admin: isSuperAdmin
+      }
+      
+      // Add user filter if Super Admin is filtering by specific user
+      if (isSuperAdmin && userFilter !== 'All') {
+        params.created_by = userFilter
+      }
+      
+      const result = await formulationService.getFormulations(params)
       setSavedFormulations(result.formulations || [])
     } catch (error) {
       console.error('Failed to load saved formulations:', error)
     } finally {
       setIsLoadingSaved(false)
     }
+  }
+
+  // Load users for filter (Super Admin only)
+  const loadUsersForFilter = async () => {
+    if (!isSuperAdmin) return
+    
+    try {
+      const token = localStorage.getItem('access_token')
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api'}/users?page=1&page_size=100`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': '69420'
+        }
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setAvailableUsers(data.users || [])
+      }
+    } catch (error) {
+      console.error('Failed to load users:', error)
+    }
+  }
+
+  // Filter formulations by search query
+  const getFilteredFormulations = () => {
+    return savedFormulations.filter(formulation => {
+      const matchesSearch = formulationSearch === '' ||
+        formulation.name.toLowerCase().includes(formulationSearch.toLowerCase()) ||
+        (formulation.created_by && formulation.created_by.toLowerCase().includes(formulationSearch.toLowerCase()))
+      
+      return matchesSearch
+    })
+  }
+
+  // Handle checkbox selection for formulations
+  const handleFormulationSelect = (formulation) => {
+    setSelectedFormulations(prev => {
+      const isSelected = prev.find(f => f.id === formulation.id)
+      if (isSelected) {
+        return prev.filter(f => f.id !== formulation.id)
+      } else {
+        return [...prev, formulation]
+      }
+    })
+  }
+
+  // Select all filtered formulations
+  const handleSelectAllFormulations = () => {
+    const filtered = getFilteredFormulations()
+    setSelectedFormulations(filtered)
+  }
+
+  // Deselect all formulations
+  const handleDeselectAllFormulations = () => {
+    setSelectedFormulations([])
+  }
+
+  // Bulk transfer selected formulations
+  const handleBulkTransfer = () => {
+    if (selectedFormulations.length === 0) {
+      alert('Please select at least one formulation to transfer')
+      return
+    }
+    setShowTransferModal(true)
   }
 
   // Save current formulation
@@ -1722,53 +1823,155 @@ const Formulation = () => {
         {/* Saved Formulations Tab Content */}
         {activeTab === 'saved' && (
           <div className="bg-white rounded-lg border border-[#e1e7ef] overflow-hidden">
+            {/* Search and Filter Bar */}
+            <div className="p-4 border-b border-[#e1e7ef] space-y-3">
+              <div className="flex flex-col md:flex-row gap-3">
+                {/* Search */}
+                <div className="flex-1 relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[#60758a]" />
+                  <input
+                    type="text"
+                    placeholder="Search formulations by name or creator..."
+                    value={formulationSearch}
+                    onChange={(e) => setFormulationSearch(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-[#e1e7ef] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#009da5] text-sm font-ibm-plex"
+                  />
+                </div>
+
+                {/* User Filter (Super Admin only) */}
+                {isSuperAdmin && (
+                  <div className="w-full md:w-64">
+                    <select
+                      value={userFilter}
+                      onChange={(e) => setUserFilter(e.target.value)}
+                      className="w-full px-3 py-2 border border-[#e1e7ef] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#009da5] text-sm font-ibm-plex"
+                    >
+                      <option value="All">All Users</option>
+                      {availableUsers.map(user => (
+                        <option key={user.id} value={user.email}>{user.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Bulk Actions (Super Admin only) */}
+              {isSuperAdmin && getFilteredFormulations().length > 0 && (
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    onClick={handleSelectAllFormulations}
+                    className="text-xs text-[#009da5] hover:underline font-medium"
+                  >
+                    Select All ({getFilteredFormulations().length})
+                  </button>
+                  <span className="text-xs text-[#60758a]">|</span>
+                  <button
+                    onClick={handleDeselectAllFormulations}
+                    className="text-xs text-[#60758a] hover:text-[#0f1729] hover:underline font-medium"
+                  >
+                    Deselect All
+                  </button>
+                  {selectedFormulations.length > 0 && (
+                    <>
+                      <span className="text-xs text-[#60758a]">|</span>
+                      <button
+                        onClick={handleBulkTransfer}
+                        className="px-3 py-1 bg-blue-500 text-white rounded text-xs font-ibm-plex font-medium hover:bg-blue-600 transition-colors flex items-center gap-1"
+                      >
+                        <Users className="w-3 h-3" />
+                        Transfer Selected ({selectedFormulations.length})
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Table */}
             {isLoadingSaved ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-8 h-8 animate-spin text-[#009da5]" />
               </div>
-            ) : savedFormulations.length === 0 ? (
+            ) : getFilteredFormulations().length === 0 ? (
               <div className="text-center py-12">
-                <p className="text-[#65758b] font-ibm-plex">No saved formulations yet</p>
+                <p className="text-[#65758b] font-ibm-plex">
+                  {formulationSearch || userFilter !== 'All' ? 'No formulations match your search' : 'No saved formulations yet'}
+                </p>
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead className="bg-[#f9fafb] border-b border-[#e1e7ef]">
                     <tr>
+                      {isSuperAdmin && (
+                        <th className="px-4 py-3 w-12">
+                          <input
+                            type="checkbox"
+                            checked={selectedFormulations.length === getFilteredFormulations().length && getFilteredFormulations().length > 0}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                handleSelectAllFormulations()
+                              } else {
+                                handleDeselectAllFormulations()
+                              }
+                            }}
+                            className="w-4 h-4 text-[#009da5] border-gray-300 rounded focus:ring-[#009da5]"
+                          />
+                        </th>
+                      )}
                       <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Name</th>
                       <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Ingredients</th>
                       <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Serve Size</th>
+                      {isSuperAdmin && (
+                        <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Created By</th>
+                      )}
                       <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Created</th>
                       <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {savedFormulations.map((formulation, idx) => (
-                      <tr key={formulation.id} className={idx !== savedFormulations.length - 1 ? 'border-b border-[#e1e7ef]' : ''}>
-                        <td className="px-4 py-3 text-sm font-ibm-plex font-medium text-[#0f1729]">{formulation.name}</td>
-                        <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">{formulation.ingredients_count} ingredients</td>
-                        <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">{formulation.serve_size}g</td>
-                        <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">
-                          {formulation.created_at ? new Date(formulation.created_at).toLocaleDateString() : '-'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleOpenFormulation(formulation.id)}
-                              className="px-3 py-1 bg-[#009da5] text-white rounded text-sm font-ibm-plex font-medium hover:bg-[#008891] transition-colors"
-                            >
-                              Open
-                            </button>
-                            <button
-                              onClick={() => handleDeleteFormulation(formulation.id, formulation.name)}
-                              className="px-3 py-1 bg-red-500 text-white rounded text-sm font-ibm-plex font-medium hover:bg-red-600 transition-colors"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {getFilteredFormulations().map((formulation, idx) => {
+                      const isSelected = selectedFormulations.find(f => f.id === formulation.id)
+                      return (
+                        <tr key={formulation.id} className={`${idx !== getFilteredFormulations().length - 1 ? 'border-b border-[#e1e7ef]' : ''} ${isSelected ? 'bg-blue-50' : ''}`}>
+                          {isSuperAdmin && (
+                            <td className="px-4 py-3">
+                              <input
+                                type="checkbox"
+                                checked={!!isSelected}
+                                onChange={() => handleFormulationSelect(formulation)}
+                                className="w-4 h-4 text-[#009da5] border-gray-300 rounded focus:ring-[#009da5]"
+                              />
+                            </td>
+                          )}
+                          <td className="px-4 py-3 text-sm font-ibm-plex font-medium text-[#0f1729]">{formulation.name}</td>
+                          <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">{formulation.ingredients_count} ingredients</td>
+                          <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">{formulation.serve_size}g</td>
+                          {isSuperAdmin && (
+                            <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">{formulation.created_by || 'N/A'}</td>
+                          )}
+                          <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">
+                            {formulation.created_at ? new Date(formulation.created_at).toLocaleDateString() : '-'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleOpenFormulation(formulation.id)}
+                                className="px-3 py-1 bg-[#009da5] text-white rounded text-sm font-ibm-plex font-medium hover:bg-[#008891] transition-colors"
+                              >
+                                Open
+                              </button>
+                              <button
+                                onClick={() => handleDeleteFormulation(formulation.id, formulation.name)}
+                                className="px-3 py-1 bg-red-500 text-white rounded text-sm font-ibm-plex font-medium hover:bg-red-600 transition-colors"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -2022,6 +2225,21 @@ const Formulation = () => {
           </div>
 
         )}
+
+        {/* Transfer Formulation Modal */}
+        <TransferFormulationModal
+          isOpen={showTransferModal}
+          onClose={() => {
+            setShowTransferModal(false)
+            setSelectedFormulation(null)
+            setSelectedFormulations([])
+          }}
+          formulations={selectedFormulations.length > 0 ? selectedFormulations : (selectedFormulation ? [selectedFormulation] : [])}
+          onTransferComplete={() => {
+            loadSavedFormulations()
+            setSelectedFormulations([])
+          }}
+        />
 
       </div>
 
