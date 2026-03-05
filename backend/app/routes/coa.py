@@ -713,9 +713,9 @@ async def extract_coa_from_images(
 @router.post("", response_model=dict)
 async def create_coa(
     coa: COACreate,
-    current_user: User = Depends(require_permission("add_products"))
+    current_user: User = Depends(require_permission("add_coa"))
 ):
-    """Create a new COA entry (requires add_products permission)"""
+    """Create a new COA entry (requires add_coa permission)"""
     try:
         # Build master entry for formulation calculations
         master_entry = {
@@ -779,9 +779,9 @@ async def list_coas(
     limit: int = 50,
     search: Optional[str] = None,
     status: Optional[str] = None,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("view_coa"))
 ):
-    """List all COA entries with optional filters (requires authentication)"""
+    """List all COA entries with optional filters (requires view_coa permission)"""
     try:
         query = {}
         
@@ -829,9 +829,9 @@ async def list_coas(
 @router.get("/{coa_id}", response_model=dict)
 async def get_coa(
     coa_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("view_coa"))
 ):
-    """Get a single COA by ID"""
+    """Get a single COA by ID (requires view_coa permission)"""
     try:
         from bson import ObjectId
         coa = await COA.get(ObjectId(coa_id))
@@ -871,9 +871,9 @@ async def get_coa(
 async def update_coa(
     coa_id: str,
     coa_update: COACreate,
-    current_user: User = Depends(require_permission("edit_products"))
+    current_user: User = Depends(require_permission("edit_coa"))
 ):
-    """Update a COA entry (requires edit_products permission)"""
+    """Update a COA entry (requires edit_coa permission)"""
     try:
         from bson import ObjectId
         coa = await COA.get(ObjectId(coa_id))
@@ -926,9 +926,9 @@ async def update_coa(
 @router.delete("/{coa_id}", response_model=dict)
 async def delete_coa(
     coa_id: str,
-    current_user: User = Depends(require_permission("delete_products"))
+    current_user: User = Depends(require_permission("delete_coa"))
 ):
-    """Delete a COA entry (requires delete_products permission)"""
+    """Delete a COA entry (requires delete_coa permission)"""
     try:
         from bson import ObjectId
         coa = await COA.get(ObjectId(coa_id))

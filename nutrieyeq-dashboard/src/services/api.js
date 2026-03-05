@@ -982,13 +982,7 @@ export const coaService = {
       if (params.search) queryParams.append('search', params.search)
       if (params.status) queryParams.append('status', params.status)
 
-      const response = await fetch(`${API_BASE_URL}/coa?${queryParams.toString()}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        }
-      })
+      const response = await apiRequest(`/coa?${queryParams.toString()}`)
 
       if (response.ok) {
         return await response.json()

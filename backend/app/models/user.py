@@ -16,6 +16,11 @@ class UserPermissions(str, Enum):
     ADD_PRODUCTS = "add_products"
     EDIT_PRODUCTS = "edit_products"
     DELETE_PRODUCTS = "delete_products"
+    VIEW_COA = "view_coa"
+    ADD_COA = "add_coa"
+    EDIT_COA = "edit_coa"
+    DELETE_COA = "delete_coa"
+    USE_COA_IN_FORMULATION = "use_coa_in_formulation"
     VIEW_USERS = "view_users"
     ADD_USERS = "add_users"
     EDIT_USERS = "edit_users"
@@ -35,6 +40,11 @@ ROLE_PERMISSIONS = {
         UserPermissions.ADD_PRODUCTS,
         UserPermissions.EDIT_PRODUCTS,
         UserPermissions.DELETE_PRODUCTS,
+        UserPermissions.VIEW_COA,
+        UserPermissions.ADD_COA,
+        UserPermissions.EDIT_COA,
+        UserPermissions.DELETE_COA,
+        UserPermissions.USE_COA_IN_FORMULATION,
         UserPermissions.VIEW_USERS,
         UserPermissions.ADD_USERS,
         UserPermissions.EDIT_USERS,
@@ -46,6 +56,7 @@ ROLE_PERMISSIONS = {
     ],
     UserRole.RESEARCHER: [
         UserPermissions.VIEW_PRODUCTS,
+        UserPermissions.VIEW_COA,
         UserPermissions.VIEW_USERS,
         UserPermissions.VIEW_NOMENCLATURE,
         UserPermissions.RUN_COMPARISONS,

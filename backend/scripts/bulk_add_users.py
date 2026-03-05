@@ -13,11 +13,12 @@ from bson import ObjectId
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # MongoDB connection
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-DB_NAME = os.getenv("MONGO_DB_NAME", "nutrieyeq")
+# Default to SSH tunnel connection (localhost:27018 with auth)
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://admin:admin%403129%40ksdn@localhost:27018/?authSource=admin")
+DB_NAME = os.getenv("MONGO_DB_NAME", "nutrieyeq_uat")
 
 # Common password for all test users
-COMMON_PASSWORD = "Test@12"
+COMMON_PASSWORD = "Test@1231"
 
 # User data
 USERS = [
@@ -48,6 +49,7 @@ USERS = [
 # Researcher permissions (view-only)
 RESEARCHER_PERMISSIONS = [
     "view_products",
+    "view_coa",
     "view_users",
     "view_nomenclature",
     "run_comparisons",

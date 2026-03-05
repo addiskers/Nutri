@@ -3,12 +3,17 @@ import { X, Shield, CheckCircle, AlertCircle, CheckSquare, Square } from 'lucide
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
-// All 14 available permissions
+// All 19 available permissions (14 original + 5 new COA permissions)
 const ALL_PERMISSIONS = [
   'view_products',
   'add_products',
   'edit_products',
   'delete_products',
+  'view_coa',
+  'add_coa',
+  'edit_coa',
+  'delete_coa',
+  'use_coa_in_formulation',
   'view_users',
   'add_users',
   'edit_users',
@@ -96,6 +101,29 @@ const PermissionsPanel = ({ isOpen, onClose, user, currentUserRole, onUpdate }) 
 
       if (response.ok) {
         setSuccessMessage(selectedRole !== user.role ? 'Role and permissions updated successfully!' : 'Permissions updated successfully!')
+        
+        // Immediately refresh current user's data if they modified their own permissions
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}')
+        if (currentUser.id === user.id) {
+          try {
+            const meResponse = await fetch(`${API_BASE_URL}/auth/me`, {
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'ngrok-skip-browser-warning': '69420'
+              }
+            })
+            if (meResponse.ok) {
+              const updatedUser = await meResponse.json()
+              localStorage.setItem('user', JSON.stringify(updatedUser))
+              // Trigger a custom event to notify Layout component
+              window.dispatchEvent(new CustomEvent('permissionsChanged'))
+            }
+          } catch (err) {
+            console.error('Failed to refresh user data:', err)
+          }
+        }
+        
         if (onUpdate) await onUpdate()
         setTimeout(() => {
           setSuccessMessage('')
@@ -129,12 +157,22 @@ const PermissionsPanel = ({ isOpen, onClose, user, currentUserRole, onUpdate }) 
   // Categorized permissions for better organization
   const permissionCategories = [
     {
-      category: 'Products & COA',
+      category: 'Products',
       permissions: [
-        { key: 'view_products', title: 'View Products', description: 'View product and COA data' },
-        { key: 'add_products', title: 'Add Products', description: 'Create new products and COAs' },
-        { key: 'edit_products', title: 'Edit Products', description: 'Modify existing products and COAs' },
-        { key: 'delete_products', title: 'Delete Products', description: 'Remove products and COAs from system' }
+        { key: 'view_products', title: 'View Products', description: 'View product data' },
+        { key: 'add_products', title: 'Add Products', description: 'Create new products' },
+        { key: 'edit_products', title: 'Edit Products', description: 'Modify existing products' },
+        { key: 'delete_products', title: 'Delete Products', description: 'Remove products from system' }
+      ]
+    },
+    {
+      category: 'COA (Certificate of Analysis)',
+      permissions: [
+        { key: 'view_coa', title: 'View COA Database', description: 'View COA list and details' },
+        { key: 'add_coa', title: 'Add COA', description: 'Create new COA entries' },
+        { key: 'edit_coa', title: 'Edit COA', description: 'Modify existing COA entries' },
+        { key: 'delete_coa', title: 'Delete COA', description: 'Remove COA entries from system' },
+        { key: 'use_coa_in_formulation', title: 'Use in Formulation', description: 'Use COA data in formulation calculations' }
       ]
     },
     {

@@ -2,17 +2,22 @@
 Saved Formulations API Routes
 CRUD operations for saved formulation configurations
 """
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from typing import Optional
 from datetime import datetime
 from app.models.formulation import SavedFormulation
+from app.models.user import User
+from app.dependencies.auth import get_current_user, require_permission
 
 router = APIRouter(prefix="/formulations", tags=["Formulations"])
 
 
 @router.post("/save")
-async def save_formulation(data: dict):
-    """Save a new formulation"""
+async def save_formulation(
+    data: dict,
+    current_user: User = Depends(require_permission("use_coa_in_formulation"))
+):
+    """Save a new formulation (requires use_coa_in_formulation permission)"""
     try:
         name = data.get("name", "").strip()
         if not name:
