@@ -448,7 +448,6 @@ const Products = () => {
           </div>
         )}
       </div>
-      </div>
       )}
 
       {/* Modals */}
