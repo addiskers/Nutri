@@ -1,5 +1,10 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 from datetime import datetime, timedelta, timezone
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """Coerce a naive datetime (assumed UTC) to aware. Handles old DB documents."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 from app.models.user import User, UserRole
 from app.schemas.auth import (
     UserRegister, UserLogin, VerifyLoginOTP, ForgotPassword, ResetPassword, ChangePassword,
@@ -159,7 +164,7 @@ async def verify_login_otp(otp_data: VerifyLoginOTP):
             detail="Invalid OTP"
         )
     
-    if not user.reset_token_expires or user.reset_token_expires < datetime.now(timezone.utc):
+    if not user.reset_token_expires or _as_utc(user.reset_token_expires) < datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="OTP expired. Please request a new one."
@@ -244,7 +249,7 @@ async def reset_password(request: ResetPassword):
         )
     
     # Check expiration
-    if not user.reset_token_expires or user.reset_token_expires < datetime.now(timezone.utc):
+    if not user.reset_token_expires or _as_utc(user.reset_token_expires) < datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="OTP expired"
