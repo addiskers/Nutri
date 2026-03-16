@@ -67,14 +67,9 @@ const Products = () => {
           }
         })
 
-        // Sort by latest created (newest first)
-        const sortedProducts = mappedProducts.sort((a, b) => {
-          return new Date(b.createdAt) - new Date(a.createdAt)
-        })
-
-        console.log('Mapped products:', sortedProducts.length)
-        setAllProducts(sortedProducts)
-        setFilteredProducts(sortedProducts)
+        console.log('Mapped products:', mappedProducts.length)
+        setAllProducts(mappedProducts)
+        setFilteredProducts(mappedProducts)
       } else {
         console.warn('No products in response:', response)
         setError('No products found in the database.')

@@ -184,7 +184,27 @@ export const productService = {
       throw error
     }
   },
-  
+
+  /**
+   * Get dashboard stats (counts + recent products + category breakdown)
+   */
+  async getDashboardStats() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/products/stats`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': '69420'
+        }
+      })
+      if (response.ok) return await response.json()
+      throw new Error(`Failed to fetch stats: ${response.statusText}`)
+    } catch (error) {
+      console.error('Failed to fetch dashboard stats:', error)
+      throw error
+    }
+  },
+
   /**
    * Get single product
    */
@@ -537,6 +557,26 @@ export const authService = {
       }
     } catch (error) {
       console.error('Failed to fetch products:', error)
+      throw error
+    }
+  },
+
+  /**
+   * Get dashboard stats (counts + recent products + category breakdown)
+   */
+  async getDashboardStats() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/products/stats`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': '69420'
+        }
+      })
+      if (response.ok) return await response.json()
+      throw new Error(`Failed to fetch stats: ${response.statusText}`)
+    } catch (error) {
+      console.error('Failed to fetch dashboard stats:', error)
       throw error
     }
   },

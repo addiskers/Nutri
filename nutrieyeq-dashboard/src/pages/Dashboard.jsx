@@ -12,7 +12,6 @@ const Dashboard = () => {
   const [previewProduct, setPreviewProduct] = useState(null)
   const [deleteProduct, setDeleteProduct] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [products, setProducts] = useState([])
   const [categories, setCategories] = useState([])
   const [users, setUsers] = useState([])
   const [userMap, setUserMap] = useState({})
@@ -32,117 +31,54 @@ const Dashboard = () => {
   const fetchDashboardData = async () => {
     setLoading(true)
     try {
-      // Fetch products, categories, and users in parallel
-      const [productsResult, categoriesResult, usersResult] = await Promise.all([
-        productService.getProducts({ limit: 1000 }),
+      const [statsResult, categoriesResult, usersResult] = await Promise.all([
+        productService.getDashboardStats(),
         categoryService.getCategories({ limit: 100 }),
-        userService.getUsers({ page_size: 100 }).catch(() => ({ users: [] })) // Graceful fallback if no permission
+        userService.getUsers({ page_size: 100 }).catch(() => ({ users: [] }))
       ])
 
-      const allProducts = productsResult.products || []
       const allCategories = categoriesResult.categories || []
       const allUsers = usersResult.users || []
 
-      setProducts(allProducts)
       setCategories(allCategories)
       setUsers(allUsers)
 
-      // Create user ID to name mapping
       const userIdMap = {}
-      allUsers.forEach(user => {
-        userIdMap[user.id] = user.name
-      })
+      allUsers.forEach(user => { userIdMap[user.id] = user.name })
       setUserMap(userIdMap)
 
-      // Calculate date 7 days ago
-      const sevenDaysAgo = new Date()
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+      setRecentProducts(statsResult.recent_products || [])
 
-      // Filter products from last 7 days for stats
-      const last7DaysProducts = allProducts.filter(product => {
-        const createdDate = new Date(product.created_at)
-        return createdDate >= sevenDaysAgo
-      })
+      // Percentage changes
+      const recentCount  = statsResult.products_last_7_days
+      const prevCount    = statsResult.products_prev_7_days
+      const olderCount   = statsResult.total_products - recentCount
+      const recentlyAddedPercentage   = prevCount > 0 ? Math.round(((recentCount - prevCount) / prevCount) * 100) : (recentCount > 0 ? 100 : 0)
+      const totalProductsPercentage   = olderCount > 0 ? Math.round((recentCount / olderCount) * 100) : (recentCount > 0 ? 100 : 0)
 
-      // Get 7 latest products (regardless of date) for table
-      const sortedAllProducts = [...allProducts].sort((a, b) => {
-        return new Date(b.created_at) - new Date(a.created_at)
-      })
-      const latest7Products = sortedAllProducts.slice(0, 7)
-
-      setRecentProducts(latest7Products)
-
-      // Calculate stats
-      // Previous week products for comparison
-      const fourteenDaysAgo = new Date()
-      fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14)
-      const previousWeekProducts = allProducts.filter(product => {
-        const createdDate = new Date(product.created_at)
-        return createdDate >= fourteenDaysAgo && createdDate < sevenDaysAgo
-      })
-
-      // Calculate percentage change for recently added
-      const recentCount = last7DaysProducts.length
-      const previousCount = previousWeekProducts.length
-      const recentlyAddedPercentage = previousCount > 0 
-        ? Math.round(((recentCount - previousCount) / previousCount) * 100)
-        : (recentCount > 0 ? 100 : 0)
-
-      // Calculate total products percentage (comparing current total with total from 7 days ago)
-      const productsFrom7DaysAgo = allProducts.filter(product => {
-        const createdDate = new Date(product.created_at)
-        return createdDate < sevenDaysAgo
-      }).length
-      const totalProductsPercentage = productsFrom7DaysAgo > 0
-        ? Math.round((last7DaysProducts.length / productsFrom7DaysAgo) * 100)
-        : (last7DaysProducts.length > 0 ? 100 : 0)
-
-      // Calculate categories added in last 7 days
-      const last7DaysCategories = allCategories.filter(category => {
-        const createdDate = new Date(category.created_at)
-        return createdDate >= sevenDaysAgo
-      })
+      const last7DaysCategories = allCategories.filter(c => new Date(c.created_at) >= new Date(Date.now() - 7 * 86400000))
       const categoriesFrom7DaysAgo = allCategories.length - last7DaysCategories.length
-      const totalCategoriesPercentage = categoriesFrom7DaysAgo > 0
-        ? Math.round((last7DaysCategories.length / categoriesFrom7DaysAgo) * 100)
-        : (last7DaysCategories.length > 0 ? 100 : 0)
+      const totalCategoriesPercentage = categoriesFrom7DaysAgo > 0 ? Math.round((last7DaysCategories.length / categoriesFrom7DaysAgo) * 100) : (last7DaysCategories.length > 0 ? 100 : 0)
 
       setStats({
-        totalProducts: allProducts.length,
-        totalProductsChange: totalProductsPercentage > 0 ? `${totalProductsPercentage}%` : null,
-        totalCategories: allCategories.length,
-        totalCategoriesChange: totalCategoriesPercentage > 0 ? `${totalCategoriesPercentage}%` : null,
-        recentlyAdded: last7DaysProducts.length,
-        recentlyAddedChange: recentlyAddedPercentage > 0 ? `${recentlyAddedPercentage}%` : null,
-        comparisons: 0 // Placeholder for now
+        totalProducts:          statsResult.total_products,
+        totalProductsChange:    totalProductsPercentage > 0 ? `${totalProductsPercentage}%` : null,
+        totalCategories:        allCategories.length,
+        totalCategoriesChange:  totalCategoriesPercentage > 0 ? `${totalCategoriesPercentage}%` : null,
+        recentlyAdded:          recentCount,
+        recentlyAddedChange:    recentlyAddedPercentage > 0 ? `${recentlyAddedPercentage}%` : null,
       })
 
-      // Calculate products by category for pie chart
-      // Use categories from backend and count products in each
-      const categoryColors = [
-        '#2463eb', // Blue
-        '#16a249', // Green
-        '#f59e0b', // Orange
-        '#ef4444', // Red
-        '#8b5cf6', // Purple
-        '#ec4899', // Pink
-        '#14b8a6', // Teal
-        '#f97316', // Deep Orange
-      ]
-
-      const chartData = allCategories.map((category, index) => {
-        // Count products in this category
-        const productCount = allProducts.filter(
-          product => product.category === category.name
-        ).length
-
-        return {
-          name: category.name,
-          value: productCount,
-          color: categoryColors[index % categoryColors.length]
-        }
-      }).filter(item => item.value > 0) // Only show categories with products
-
+      // Pie chart from server-side category breakdown
+      const categoryColors = ['#2463eb', '#16a249', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
+      const breakdown = statsResult.category_breakdown || {}
+      const chartData = Object.entries(breakdown)
+        .filter(([, count]) => count > 0)
+        .map(([name, count], index) => ({
+          name,
+          value: count,
+          color: categoryColors[index % categoryColors.length],
+        }))
       setCategoryChartData(chartData)
 
     } catch (error) {

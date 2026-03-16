@@ -146,6 +146,12 @@ class Product(Document):
 
     class Settings:
         name = "products"
+        indexes = [
+            "status",
+            "category",
+            "product_name",
+            [("status", 1), ("category", 1)],
+        ]
 
     class Config:
         json_schema_extra = {

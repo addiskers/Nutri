@@ -9,7 +9,7 @@ from rapidfuzz import fuzz
 import json
 from io import BytesIO
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel
@@ -1358,6 +1358,55 @@ async def create_product(
         raise HTTPException(status_code=500, detail=f"Failed to create product: {e}")
 
 
+@router.get("/stats", response_model=dict)
+async def get_product_stats():
+    """Dashboard stats: counts, recent 7 products, category breakdown — all in one DB round-trip."""
+    try:
+        now = datetime.now(timezone.utc)
+        seven_days_ago    = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=7)
+        fourteen_days_ago = seven_days_ago - timedelta(days=7)
+
+        total, last7, prev7, recent, category_agg = await asyncio.gather(
+            Product.find().count(),
+            Product.find({"created_at": {"$gte": seven_days_ago}}).count(),
+            Product.find({"created_at": {"$gte": fourteen_days_ago, "$lt": seven_days_ago}}).count(),
+            Product.find().sort("-created_at").limit(7).to_list(),
+            Product.find().aggregate([
+                {"$group": {"_id": "$category", "count": {"$sum": 1}}},
+                {"$sort": {"count": -1}}
+            ]).to_list(),
+        )
+
+        return {
+            "total_products": total,
+            "products_last_7_days": last7,
+            "products_prev_7_days": prev7,
+            "category_breakdown": {
+                (item["_id"] or "Uncategorized"): item["count"]
+                for item in category_agg
+            },
+            "recent_products": [
+                {
+                    "id":                 str(p.id),
+                    "product_name":       p.product_name,
+                    "parent_brand":       p.parent_brand,
+                    "variant":            p.variant,
+                    "category":           p.category,
+                    "mrp":                p.mrp,
+                    "pack_size":          p.pack_size,
+                    "net_weight":         p.net_weight,
+                    "manufacturing_date": p.manufacturing_date,
+                    "expiry_date":        p.expiry_date,
+                    "created_at":         p.created_at.isoformat(),
+                    "images":             p.images if p.images else [],
+                }
+                for p in recent
+            ],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch stats: {e}")
+
+
 @router.get("", response_model=dict)
 async def list_products(
     skip: int = 0,
@@ -1380,8 +1429,10 @@ async def list_products(
                 {"variant":       {"$regex": search, "$options": "i"}},
             ]
         
-        products = await Product.find(query).skip(skip).limit(limit).to_list()
-        total    = await Product.find(query).count()
+        products, total = await asyncio.gather(
+            Product.find(query).sort("-created_at").skip(skip).limit(limit).to_list(),
+            Product.find(query).count(),
+        )
 
         return {
             "products": [
