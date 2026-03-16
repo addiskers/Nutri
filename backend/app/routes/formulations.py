@@ -4,7 +4,7 @@ CRUD operations for saved formulation configurations
 """
 from fastapi import APIRouter, HTTPException, status, Depends
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from app.models.formulation import SavedFormulation
 from app.models.user import User
 from app.dependencies.auth import get_current_user, require_permission
@@ -39,8 +39,8 @@ async def save_formulation(
             custom_values=custom_values,
             serve_size=serve_size,
             created_by=created_by,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
             status="active"
         )
         
@@ -194,8 +194,8 @@ async def transfer_formulation(formulation_id: str, data: dict):
                 custom_values=formulation.custom_values or {},
                 serve_size=formulation.serve_size,
                 created_by=target_user,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
                 status="active"
             )
             

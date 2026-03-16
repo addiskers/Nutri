@@ -3,7 +3,7 @@ Bulk Add Users Script for UAT Testing
 Adds multiple users to MongoDB with a common password
 """
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
 from passlib.context import CryptContext
 import os
@@ -106,8 +106,8 @@ async def bulk_add_users():
             "is_active": True,
             "is_verified": True,
             "is_approved": True,  # Auto-approved for UAT testing
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc),
             "last_login": None
         }
         

@@ -527,18 +527,18 @@ export const authService = {
 
   // Product methods
   /**
-   * Get all products
+   * Get products (server-side filtered + paginated)
    */
   async getProducts(params = {}) {
     try {
       const queryParams = new URLSearchParams()
-      if (params.skip) queryParams.append('skip', params.skip)
-      if (params.limit) queryParams.append('limit', params.limit)
-      if (params.category) queryParams.append('category', params.category)
-      if (params.status) queryParams.append('status', params.status)
-      if (params.search) queryParams.append('search', params.search)
+      if (params.skip  != null) queryParams.append('skip',     params.skip)
+      if (params.limit != null) queryParams.append('limit',    params.limit)
+      if (params.category)      queryParams.append('category', params.category)
+      if (params.status)        queryParams.append('status',   params.status)
+      if (params.brand)         queryParams.append('brand',    params.brand)
+      if (params.search)        queryParams.append('search',   params.search)
 
-      // Direct fetch without auth for public endpoint
       const response = await fetch(`${API_BASE_URL}/products?${queryParams.toString()}`, {
         method: 'GET',
         headers: {
@@ -550,14 +550,29 @@ export const authService = {
       if (response.ok) {
         return await response.json()
       } else {
-        console.error('API response not OK:', response.status, response.statusText)
         const errorData = await response.json().catch(() => ({}))
-        console.error('Error details:', errorData)
-        throw new Error(`Failed to fetch products: ${response.statusText}`)
+        throw new Error(errorData.detail || `Failed to fetch products: ${response.statusText}`)
       }
     } catch (error) {
       console.error('Failed to fetch products:', error)
       throw error
+    }
+  },
+
+  /**
+   * Get all distinct brand names (for filter dropdown)
+   */
+  async getBrands() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/products/brands`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '69420' }
+      })
+      if (response.ok) return await response.json()
+      throw new Error('Failed to fetch brands')
+    } catch (error) {
+      console.error('Failed to fetch brands:', error)
+      return { brands: [] }
     }
   },
 

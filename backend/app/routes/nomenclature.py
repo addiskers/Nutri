@@ -3,7 +3,7 @@ Nomenclature Mapping Routes - CRUD operations for nutrition name standardization
 """
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel
 from app.models.nomenclature import NomenclatureMapping
 from app.models.user import User
@@ -194,7 +194,7 @@ async def update_nomenclature(
         if nomenclature_update.raw_names is not None:
             mapping.raw_names = nomenclature_update.raw_names
         
-        mapping.updated_at = datetime.utcnow()
+        mapping.updated_at = datetime.now(timezone.utc)
         await mapping.save()
         
         return {
@@ -236,7 +236,7 @@ async def add_synonym(
         
         # Add synonym
         mapping.raw_names.append(synonym_data.raw_name)
-        mapping.updated_at = datetime.utcnow()
+        mapping.updated_at = datetime.now(timezone.utc)
         await mapping.save()
         
         return {
@@ -278,7 +278,7 @@ async def remove_synonym(
         
         # Remove synonym
         mapping.raw_names.remove(raw_name)
-        mapping.updated_at = datetime.utcnow()
+        mapping.updated_at = datetime.now(timezone.utc)
         await mapping.save()
         
         return {

@@ -3,7 +3,7 @@ User Management Routes - CRUD operations for user management
 """
 from fastapi import APIRouter, HTTPException, status, Depends
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel, EmailStr
 from app.models.user import User, UserRole, ROLE_PERMISSIONS
 from app.schemas.auth import UserResponse, MessageResponse
@@ -201,8 +201,8 @@ async def create_user(
         is_active=True,
         is_verified=True,
         is_approved=True,  # Admin-created users are auto-approved
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc)
     )
     
     # Set permissions based on role
@@ -268,7 +268,7 @@ async def update_user(
             )
         user.permissions = user_data.permissions
     
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now(timezone.utc)
     await user.save()
     
     print(f"[INFO] User updated by {current_user.email}: {user.email}")
@@ -308,7 +308,7 @@ async def approve_user(
     
     # Approve user
     user.is_approved = True
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now(timezone.utc)
     await user.save()
     
     print(f"[INFO] User approved by {current_user.email}: {user.email}")
@@ -354,7 +354,7 @@ async def toggle_user_status(
     
     # Toggle status
     user.is_active = not user.is_active
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now(timezone.utc)
     await user.save()
     
     print(f"[INFO] User {'activated' if user.is_active else 'deactivated'} by {current_user.email}: {user.email}")

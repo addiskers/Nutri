@@ -7,7 +7,7 @@ import json
 import fitz  # PyMuPDF for PDF handling
 from io import BytesIO
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel
 from PIL import Image
@@ -753,12 +753,12 @@ async def create_coa(
             analysis_method=coa.analysis_method,
             additional_notes=coa.additional_notes,
             document_images=coa.document_images,
-            extraction_date=datetime.utcnow().strftime("%Y-%m-%d"),
+            extraction_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             master_entry=master_entry,
             status=coa.status,
             created_by=str(current_user.id),
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
         
         await new_coa.insert()
@@ -882,7 +882,7 @@ async def update_coa(
             raise HTTPException(status_code=404, detail="COA not found")
         
         update_data = coa_update.model_dump(exclude_unset=True)
-        update_data["updated_at"] = datetime.utcnow()
+        update_data["updated_at"] = datetime.now(timezone.utc)
         
         # Rebuild master entry
         master_entry = {

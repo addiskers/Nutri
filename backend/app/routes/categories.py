@@ -3,7 +3,7 @@ Category Management Routes - CRUD operations for product categories
 """
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel
 from app.models.category import Category
 from app.models.user import User
@@ -159,7 +159,7 @@ async def update_category(
         if category_update.description is not None:
             category.description = category_update.description
         
-        category.updated_at = datetime.utcnow()
+        category.updated_at = datetime.now(timezone.utc)
         await category.save()
         
         return {

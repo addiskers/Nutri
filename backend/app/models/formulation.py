@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from beanie import Document
 from pydantic import Field
 
@@ -18,12 +18,16 @@ class SavedFormulation(Document):
     custom_values: Dict[str, float] = Field(default_factory=dict)
     serve_size: float = 30.0
     created_by: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     status: str = "active"
-    
+
     class Settings:
         name = "saved_formulations"
+        indexes = [
+            "status",
+            "created_by",
+        ]
         
     class Config:
         json_schema_extra = {

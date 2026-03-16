@@ -1407,21 +1407,38 @@ async def get_product_stats():
         raise HTTPException(status_code=500, detail=f"Failed to fetch stats: {e}")
 
 
+@router.get("/brands", response_model=dict)
+async def get_brands():
+    """Return all distinct parent_brand values (for filter dropdown)."""
+    try:
+        results = await Product.find().aggregate([
+            {"$group": {"_id": "$parent_brand"}},
+            {"$match": {"_id": {"$ne": None, "$ne": ""}}},
+            {"$sort": {"_id": 1}},
+        ]).to_list()
+        return {"brands": [r["_id"] for r in results if r["_id"]]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch brands: {e}")
+
+
 @router.get("", response_model=dict)
 async def list_products(
     skip: int = 0,
     limit: int = 50,
     category: Optional[str] = None,
     status: Optional[str] = None,
+    brand: Optional[str] = None,
     search: Optional[str] = None,
 ):
-    """List all products with optional filters"""
+    """List products with server-side filtering, sorting, and pagination."""
     try:
         query = {}
         if category:
             query["category"] = category
         if status:
             query["status"] = status
+        if brand:
+            query["parent_brand"] = brand
         if search:
             query["$or"] = [
                 {"product_name":  {"$regex": search, "$options": "i"}},

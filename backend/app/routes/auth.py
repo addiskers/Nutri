@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, status, Depends
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.models.user import User, UserRole
 from app.schemas.auth import (
     UserRegister, UserLogin, VerifyLoginOTP, ForgotPassword, ResetPassword, ChangePassword,
@@ -49,8 +49,8 @@ async def register(user_data: UserRegister):
         is_active=True,
         is_verified=True,
         is_approved=is_approved,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc)
     )
     
     new_user.update_permissions_by_role()
@@ -123,7 +123,7 @@ async def login(credentials: UserLogin):
     print(f"[INFO] Generating OTP for {user.email}")
     otp = generate_otp()
     user.reset_token = otp
-    user.reset_token_expires = datetime.utcnow() + timedelta(minutes=10)
+    user.reset_token_expires = datetime.now(timezone.utc) + timedelta(minutes=10)
     await user.save()
     
     try:
@@ -159,7 +159,7 @@ async def verify_login_otp(otp_data: VerifyLoginOTP):
             detail="Invalid OTP"
         )
     
-    if not user.reset_token_expires or user.reset_token_expires < datetime.utcnow():
+    if not user.reset_token_expires or user.reset_token_expires < datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="OTP expired. Please request a new one."
@@ -167,7 +167,7 @@ async def verify_login_otp(otp_data: VerifyLoginOTP):
     
     user.reset_token = None
     user.reset_token_expires = None
-    user.last_login = datetime.utcnow()
+    user.last_login = datetime.now(timezone.utc)
     await user.save()
     
     # Create JWT tokens
@@ -207,7 +207,7 @@ async def forgot_password(request: ForgotPassword):
     # Generate OTP
     otp = generate_otp()
     user.reset_token = otp
-    user.reset_token_expires = datetime.utcnow() + timedelta(hours=settings.PASSWORD_RESET_TOKEN_EXPIRE_HOURS)
+    user.reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=settings.PASSWORD_RESET_TOKEN_EXPIRE_HOURS)
     await user.save()
     
     # Send email
@@ -244,7 +244,7 @@ async def reset_password(request: ResetPassword):
         )
     
     # Check expiration
-    if not user.reset_token_expires or user.reset_token_expires < datetime.utcnow():
+    if not user.reset_token_expires or user.reset_token_expires < datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="OTP expired"
@@ -262,7 +262,7 @@ async def reset_password(request: ResetPassword):
     user.hashed_password = hash_password(request.new_password)
     user.reset_token = None
     user.reset_token_expires = None
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now(timezone.utc)
     await user.save()
     
     print(f"[INFO] Password reset for: {user.email}")
@@ -298,7 +298,7 @@ async def change_password(
     
     # Update password
     current_user.hashed_password = hash_password(request.new_password)
-    current_user.updated_at = datetime.utcnow()
+    current_user.updated_at = datetime.now(timezone.utc)
     await current_user.save()
     
     print(f"[INFO] Password changed for: {current_user.email}")
