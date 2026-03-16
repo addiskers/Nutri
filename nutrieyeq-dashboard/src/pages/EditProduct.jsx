@@ -5,7 +5,6 @@ import { ArrowLeft, Save, X, Copy, Check } from 'lucide-react'
 import { mockCategories } from '../utils/mockData'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
-
 const EditProduct = () => {
   const navigate = useNavigate()
   const { id }   = useParams()
