@@ -9,7 +9,7 @@ from rapidfuzz import fuzz
 import json
 from io import BytesIO
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel
@@ -1031,12 +1031,47 @@ async def extract_product_from_images(
         
         from google import genai
 
-        client = genai.Client(api_key=api_key)
-        safe_print("[EXTRACTION] Gemini client initialized")
+        # Vertex AI client — required for gemini-3-flash-preview / gemini-3.1-flash-lite-preview
+        client = genai.Client(vertexai=True, api_key=api_key)
+        safe_print("[EXTRACTION] Gemini client initialized (Vertex AI)")
 
         # ── Token accumulators ──────────────────────────────────────────────
         ocr_tokens       = {"input": 0, "output": 0}
         structure_tokens = {"input": 0, "output": 0}
+
+        # ── Exponential-backoff retry wrapper for 429 / quota errors ────────
+        async def gemini_call_with_retry(fn, *args, timeout_s=90, max_retries=5, **kwargs):
+            """
+            Runs a synchronous Gemini call in a thread with:
+              - per-call timeout
+              - exponential backoff on 429 / ResourceExhausted
+            """
+            delay = 2.0
+            for attempt in range(1, max_retries + 1):
+                try:
+                    return await asyncio.wait_for(
+                        asyncio.to_thread(fn, *args, **kwargs),
+                        timeout=timeout_s,
+                    )
+                except asyncio.TimeoutError:
+                    raise  # bubble up — caller decides what to do
+                except Exception as exc:
+                    err_str = str(exc).lower()
+                    is_429 = (
+                        "429" in err_str
+                        or "resource_exhausted" in err_str
+                        or "quota" in err_str
+                        or "rate limit" in err_str
+                    )
+                    if is_429 and attempt < max_retries:
+                        safe_print(
+                            f"[RETRY] 429 rate-limit hit (attempt {attempt}/{max_retries}). "
+                            f"Waiting {delay:.1f}s before retry..."
+                        )
+                        await asyncio.sleep(delay)
+                        delay = min(delay * 2, 64)  # cap at 64 s
+                        continue
+                    raise  # non-429 or max retries exhausted
 
         # ══════════════════════════════════════════════════════════════════════
         # STEP 1 — OCR each image
@@ -1053,21 +1088,20 @@ async def extract_product_from_images(
                     pil_img = pil_img.convert("RGB")
                 safe_print(f"[OCR] Image {idx + 1} size: {pil_img.size}")
 
-                # Run sync Gemini call in a thread so it doesn't block the event loop.
-                # 60-second per-image timeout prevents indefinite hangs.
-                ocr_response = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        client.models.generate_content,
-                        model=OCR_MODEL,
-                        contents=[OCR_PROMPT, pil_img],
-                        config={"temperature": 0, "top_p": 0},
-                    ),
-                    timeout=60,
+                ocr_response = await gemini_call_with_retry(
+                    client.models.generate_content,
+                    model=OCR_MODEL,
+                    contents=[OCR_PROMPT, pil_img],
+                    config={
+                        "temperature": 0,
+                        "top_p": 0,
+                        "thinking_config": {"thinking_budget": 0},
+                    },
+                    timeout_s=60,
                 )
 
                 if hasattr(ocr_response, "usage_metadata") and ocr_response.usage_metadata:
                     um = ocr_response.usage_metadata
-                    # use `or 0` because the attribute may exist but hold None
                     ocr_tokens["input"]  += (getattr(um, "prompt_token_count",    None) or 0)
                     ocr_tokens["output"] += (getattr(um, "candidates_token_count", None) or 0)
 
@@ -1094,15 +1128,15 @@ async def extract_product_from_images(
 
         structure_prompt = STRUCTURE_PROMPT_TEMPLATE.format(raw_text=combined_raw_text)
 
-        # 120-second timeout for the structuring step (prompt can be large)
-        struct_response = await asyncio.wait_for(
-            asyncio.to_thread(
-                client.models.generate_content,
-                model=STRUCTURE_MODEL,
-                contents=structure_prompt,
-                config={"temperature": 0},
-            ),
-            timeout=120,
+        struct_response = await gemini_call_with_retry(
+            client.models.generate_content,
+            model=STRUCTURE_MODEL,
+            contents=structure_prompt,
+            config={
+                "temperature": 0,
+                "thinking_config": {"thinking_budget": 0},
+            },
+            timeout_s=120,
         )
 
         if hasattr(struct_response, "usage_metadata") and struct_response.usage_metadata:
@@ -1314,8 +1348,8 @@ async def create_product(
             images=product.images,
             status=product.status,
             created_by=str(current_user.id),
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
         )
         await new_product.insert()
         return {"success": True, "message": "Product created successfully", "product_id": str(new_product.id)}
@@ -1471,7 +1505,7 @@ async def update_product(
             raise HTTPException(status_code=404, detail="Product not found")
         
         update_data = product_update.model_dump(exclude_unset=True)
-        update_data["updated_at"] = datetime.utcnow()
+        update_data["updated_at"] = datetime.now(timezone.utc)
         for field, value in update_data.items():
             setattr(product, field, value)
         
