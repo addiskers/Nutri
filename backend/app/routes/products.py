@@ -1398,7 +1398,6 @@ async def get_product_stats():
                     "manufacturing_date": p.manufacturing_date,
                     "expiry_date":        p.expiry_date,
                     "created_at":         p.created_at.isoformat(),
-                    "images":             p.images if p.images else [],
                 }
                 for p in recent
             ],
@@ -1468,7 +1467,6 @@ async def list_products(
                     "created_at":       p.created_at.isoformat(),
                     "manufacturing_date": p.manufacturing_date,
                     "expiry_date":      p.expiry_date,
-                    "images":           p.images if p.images else [],
                 }
                 for p in products
             ],

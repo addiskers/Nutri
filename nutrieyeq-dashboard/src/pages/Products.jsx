@@ -4,9 +4,9 @@ import Layout from '../components/Layout/Layout'
 import ProductPreviewModal from '../components/Modals/ProductPreviewModal'
 import DeleteConfirmModal from '../components/Modals/DeleteConfirmModal'
 import NoPermissionContent from '../components/NoPermissionContent'
-import { Search, Filter, Eye, Edit2, Trash2, Plus, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Search, Filter, Eye, Edit2, Trash2, Plus, ChevronDown, ChevronLeft, ChevronRight, Download } from 'lucide-react'
 import { mockCategories } from '../utils/mockData'
-import authService from '../services/api'
+import authService, { productService } from '../services/api'
 
 const PAGE_SIZE = 50
 
@@ -133,6 +133,20 @@ const Products = () => {
     setSelectedBrand(brand)
     setShowBrandDropdown(false)
     setPage(1)
+  }
+
+  const handlePreviewProduct = async (product) => {
+    try {
+      const fullProductData = await productService.getProduct(product.id)
+      setPreviewProduct({
+        ...product,
+        rawData: fullProductData,
+        images: fullProductData?.images || [],
+      })
+    } catch (error) {
+      console.error('Failed to fetch product details:', error)
+      setPreviewProduct(product)
+    }
   }
 
   const uniqueBrands = ['All Brands', ...brands]
@@ -381,7 +395,7 @@ const Products = () => {
                         <td className="px-4 py-4 whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1">
                             <button
-                              onClick={() => setPreviewProduct(product)}
+                              onClick={() => handlePreviewProduct(product)}
                               className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-200 transition-colors"
                               title="View"
                             >

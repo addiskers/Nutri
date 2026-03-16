@@ -109,6 +109,30 @@ const Dashboard = () => {
     }
   }
 
+  const handlePreviewProduct = async (product) => {
+    try {
+      // Fetch full product details including images from the single-product endpoint
+      const fullProductData = await productService.getProduct(product.id)
+      
+      if (fullProductData) {
+        // Dashboard products use snake_case from API, wrap for modal
+        const fullProduct = {
+          productName: product.product_name,
+          rawData: fullProductData,
+          images: fullProductData.images || []
+        }
+        setPreviewProduct(fullProduct)
+      } else {
+        // Fallback to showing without images
+        setPreviewProduct({ productName: product.product_name, rawData: product, images: [] })
+      }
+    } catch (error) {
+      console.error('Failed to fetch product details:', error)
+      // Fallback to showing without images
+      setPreviewProduct({ productName: product.product_name, rawData: product, images: [] })
+    }
+  }
+
   const formatDate = (dateString) => {
     const date = new Date(dateString)
     return date.toLocaleDateString('en-US', { 
@@ -360,7 +384,7 @@ const Dashboard = () => {
                         <td className="px-4 py-4">
                           <div className="flex items-center justify-end gap-1">
                             <button
-                              onClick={() => setPreviewProduct(product)}
+                              onClick={() => handlePreviewProduct(product)}
                               className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-200 transition-colors"
                               title="View"
                             >
