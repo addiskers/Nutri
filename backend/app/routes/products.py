@@ -1,36 +1,36 @@
 """
-Product Routes - Including AI-Powered Image Extraction
+Product Routes - Two-Step OCR + Structure Pipeline
 """
+import asyncio
 import os
 import re
 import unicodedata
 from rapidfuzz import fuzz
 import json
-import base64
 from io import BytesIO
 from typing import List, Optional
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from dateutil.relativedelta import relativedelta
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image
 from app.models.user import User
 from app.models.product import Product
 from app.dependencies.auth import get_current_user
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
-# Import settings
 from config.settings import settings
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
-GEMINI_MODEL = "gemini-2.5-flash"
+OCR_MODEL       = "gemini-3-flash-preview"
+STRUCTURE_MODEL = "gemini-3.1-flash-lite-preview"
 
-# Pricing (for cost tracking)
 PRICING = {
-    "input": 0.30,
-    "output": 2.50,
+    "ocr":       {"input": 0.50, "output": 3.00},
+    "structure": {"input": 0.25, "output": 1.50},
 }
 
 # ============================================================
@@ -127,67 +127,620 @@ NOMENCLATURE_MAP = {
 }
 
 # ============================================================
+# OCR PROMPT
+# ============================================================
+OCR_PROMPT = """
+Extract all text exactly as visible in the image.
+
+ANTI-HALLUCINATION RULE (CRITICAL):
+You are a strict OCR engine.
+
+- Extract ONLY characters that are physically visible.
+- Never infer, reconstruct, or complete missing words, numbers, or table rows.
+- If text is partially visible → extract only the visible part.
+- If a value is unclear → write NA.
+
+Never generate nutrition values, ingredients, or numbers that are not visible.
+Never use food knowledge to complete nutrition tables.
+
+--------------------------------------------------
+NUMERIC AUTHENTICITY RULE (CRITICAL):
+
+Long numeric sequences (8+ digits) must be copied ONLY if every digit is clearly visible.
+
+Rules:
+- Do NOT guess or complete digits.
+- If any digit is unclear → output NA.
+- Never generate regulatory numbers (FSSAI, GST, barcode, batch, phone) from context.
+
+--------------------------------------------------
+CROSSED-OUT / CANCELLED TEXT DETECTION:
+
+Mark text as:
+[CROSSED: text]
+
+ONLY when clearly cancelled by:
+1. Horizontal strike line through text
+2. Two diagonal lines forming X
+3. Marker/pen cancellation line across text
+
+Strict rules:
+- Line must visibly cross the text
+- Line must be separate from characters
+- Symbols like *, #, ^ near a price are NOT cancellation
+- Dot-matrix printing or random dots are NOT strikethrough
+- If unsure → treat as normal text
+
+Examples:
+₹50 with strike line → [CROSSED: ₹50]
+MRP ₹120 with X mark → [CROSSED: MRP ₹120]
+
+--------------------------------------------------
+TABLE EXTRACTION:
+
+Apply table formatting ONLY if a table is clearly visible.
+
+For visible tables (nutrition or ingredients):
+
+<label> | <value1> | <value2> | <value3>
+
+Rules:
+- Extract ONLY visible rows
+- If a value cell is unreadable → NA
+- NEVER create new rows
+- NEVER fill missing values
+
+--------------------------------------------------
+NUTRITION EXTRACTION GATE:
+
+Output nutrition rows ONLY if the image contains one of these headers:
+
+- Nutrition
+- Nutrition Facts
+- Nutritional Information
+
+If none are visible → DO NOT output nutrition rows.
+
+--------------------------------------------------
+SYMBOL EXTRACTION RULES:
+
+Capture ALL symbols exactly as printed.
+
+Must extract symbols such as:
+*, #, ^, ~, †, ‡, ※, ⁂, °, +, ', ", •, ·
+
+Rules:
+- Preserve symbol placement exactly
+- Extract even faint or tiny symbols
+- Do NOT ignore superscripts or micro-marks
+- Do NOT remove symbols near claims, ingredients, or nutrition values
+
+--------------------------------------------------
+GRAPHICAL ICON RULE:
+- If an icon appears on the packaging:
+    • Identify the symbol and its color/meaning, if applicable.
+    • Map recognized symbols to standard text as follows:
+        - Green Dot symbol → [GREEN DOT]
+        - Brown Dot symbol → [BROWN DOT]
+        - Recycle / ♻ symbol → [RECYCLABLE]
+- If the icon is not recognized or has no clear meaning, extract the visible symbol as-is (e.g., ●, ♻) and include a placeholder.
+- Preserve the symbol exactly as printed in the OCR text, and store the mapped meaning in the JSON array "claims": [].
+- Do NOT invent new meanings for unrecognized symbols.
+
+--------------------------------------------------
+DATE PRESERVATION RULE (CRITICAL):
+
+Dates must be preserved EXACTLY as printed.
+Do NOT normalize or rewrite dates.
+
+Examples of valid formats:
+
+12/05/2024
+12-05-2024
+08/2024
+08.2024
+15/03/25
+OCT 2024
+OCT.2024
+OCT. 2024
+02/DEC/2022
+29/NOV/2023
+AUG/24-AUG/25
+08/2024 - 08/2026
+
+Rules:
+- Do NOT change separators (/ - .)
+- Do NOT convert month names
+- Do NOT remove dots after month names
+- Do NOT merge numbers
+
+Extract ALL visible dates (MFG, PKD, EXP, USE BY).
+--------------------------------------------------
+FIELD ASSOCIATION RULE (CRITICAL):
+- A value must ONLY be attached to a label if it appears on the SAME LINE or immediately after the label.
+- If a number appears on a different line or floating → DO NOT assume it belongs to the label.
+- If the label has no clearly attached value → output the label exactly as printed.
+- If location is ambiguous → leave number on its own line.
+- Never guess or move numbers between lines.
+
+LABEL COMPLETION RULE:
+- Do NOT attach numbers to a label if the number is on a separate line.
+- If a label ends with ":" and no value is visible on the same line → leave label empty.
+
+--------------------------------------------------
+GENERAL OUTPUT RULE:
+
+Return the text exactly as seen:
+- line by line
+- same order
+- same spacing
+- same mistakes
+- include all symbols
+
+If OCR cannot read a value → write NA.
+Do NOT fill values from context.
+
+Example output (misaligned pack handled correctly):
+
+MAX. RETAIL PRICE: ₹ 139.00
+[Inclusive of all taxes]
+A21021
+BATCH NO.:
+10/2021
+MFG DATE:
+"""
+
+# ============================================================
+# STRUCTURE PROMPT TEMPLATE  (raw_text is injected at call time)
+# ============================================================
+STRUCTURE_PROMPT_TEMPLATE = """
+You MUST extract every meaningful detail from the OCR text WITHOUT summarizing or skipping important fields.
+
+==================================================
+PRODUCT NAME RULE
+==================================================
+Product Name = ONLY:
+- Brand
+- Product category
+- Variant / flavor
+- Quantity descriptors (e.g., Sugar Free, Lite)
+
+DO NOT include:
+- Slogans, taglines, or marketing lines.
+
+Examples:
+✔ Bisk Farm Cream Cracker Sugar Free
+✔ Cadbury Bournville 70% Dark Chocolate
+
+==================================================
+CROSSED-OUT TEXT HANDLING (CRITICAL)
+==================================================
+PRIORITY RULE: When extracting MRP or any other field:
+1. If text appears as [CROSSED: value], IGNORE it completely.
+2. Extract ONLY the non-crossed value.
+3. If multiple MRP values exist:
+   - Use the one WITHOUT [CROSSED: ] marker
+   - Discard the one WITH [CROSSED: ] marker
+
+Example in OCR text:
+  [CROSSED: ₹ 48] ₹ 46/-
+  → Extract: ₹ 46/- (ignore the crossed value entirely)
+
+Apply this rule to ALL fields, not just MRP.
+
+==================================================
+CORE EXTRACTION RULES
+==================================================
+Extract EXACTLY as printed:
+- All manufacturers, packers, addresses.
+- Packaging material manufacturer.
+- All barcode/EAN numbers.
+- All batch/lot/pack/manufacturing codes.
+- All machine codes.
+- All storage instructions.
+- All claims/certifications.
+
+DO NOT infer or modify any information.
+DO NOT treat decorative text as meaningful.
+
+==================================================
+DATE EXTRACTION AND CALCULATION RULES
+==================================================
+1. Extract all dates exactly as printed in the OCR text.
+   This includes manufacturing dates (MFG), expiry dates (EXP), best-before statements,
+   and any other date references.
+
+2. Standardize all identified dates to the format:
+   DD/MM/YYYY
+
+3. Handling partial dates:
+   - If a date contains only month and year (e.g., JAN-25, JAN 2025, 01-2025),
+     assume the first day of that month.
+     Example:
+     JAN-25 → 01/01/2025
+
+4. Expiry calculation from Best Before:
+   - If a manufacturing date is present and a Best Before duration is specified
+     (example: "BEST BEFORE 15 MONTHS FROM MANUFACTURE"),
+     you MUST calculate expiry_date by adding the mentioned duration to
+     the manufacture_date.
+   - expiry_date must never be "Not Specified" in this case.
+
+5. Shelf life rules:
+   - If the Best Before duration is explicitly mentioned, use that value
+     directly as shelf_life (example: "15 months").
+   - If shelf life is NOT explicitly mentioned but BOTH manufacture_date
+     and expiry_date are present, you MUST calculate shelf_life.
+   - shelf_life = difference between expiry_date and manufacture_date
+     calculated in months.
+   - Return shelf_life in months.
+
+   Example:
+   manufacture_date: 01/11/2024
+   expiry_date: 01/02/2026
+   shelf_life: 15 months
+
+6. Always populate shelf_life whenever possible based on the above rules.
+
+   If BOTH manufacture_date and expiry_date exist,
+   shelf_life must NEVER be "Not Specified".
+
+7. All final dates in the structured output must be in DD/MM/YYYY format.
+
+8. If no manufacturing date, expiry date, best-before statement, or shelf life
+   information is found in the OCR text, return:
+   manufacture_date: "Not Specified"
+   expiry_date: "Not Specified"
+   shelf_life: "Not Specified"
+
+9. Do NOT modify, reinterpret, or correct other extracted text.
+   Calculations are only allowed for expiry_date and shelf_life.
+
+==================================================
+TEXT PRESERVATION RULE (CRITICAL)
+==================================================
+Preserve ALL visible OCR text.
+1. First extract and store all meaningful text into the appropriate JSON fields.
+2. If text does NOT clearly belong to any defined field, store it under:
+"other_important_text": []
+
+This includes slogans, taglines, marketing text, environmental messages, disclaimers,
+regulatory notes, preparation notes, miscellaneous packaging text, and brand communication messages.
+Rules:
+- Preserve text exactly as printed.
+- Do NOT summarize or rewrite.
+- Store each line as a separate array item.
+
+Final Safety Rule:
+- After structured extraction, ensure any remaining partial, fragmented, or half-structured
+  OCR text that was not mapped to fields is also preserved in "other_important_text".
+- This guarantees no meaningful OCR text is lost.
+
+==================================================
+USPF RULE (NEW)
+==================================================
+Any price that contains "/Unit", "/g", "/ml", "/kg", "/pc", "/tablet", "/capsule"
+or similar unit formats is NOT an MRP.
+Extract it as: uspf
+
+Example:
+₹120.00/Unit → uspf: "₹120.00/Unit"
+₹ 0.14/g → uspf: "₹ 0.14/g"
+
+- DO NOT merge it with MRP.
+- DO NOT place it under "Other Important Text".
+
+==================================================
+NUTRITION JSON RULE (STRICT)
+==================================================
+You MUST output the nutrition table ONLY as JSON.
+JSON Format:
+[
+{{
+"nutrient_name": "<as printed>",
+"unit": "<unit printed for that nutrient>",
+"values": {{
+    "<column header>": "<value>"
+    }}
+}}
+]
+
+Rules:
+- NO Markdown tables.
+- NO ```json fences around the JSON.
+- Use exact nutrient row names exactly as printed on packaging.
+- Extract the UNIT printed for that nutrient (examples: g, mg, µg, kcal, kJ, IU).
+- The unit usually appears in brackets next to the nutrient name (example: Protein (g)).
+- If the unit appears in the column header instead of the nutrient name, still extract the correct unit for that nutrient.
+- Store ONLY the unit in the "unit" field (do NOT include brackets).
+- Do NOT attach the unit to numeric values.
+- Column headers must remain EXACT.
+- If RDA value is missing or blank, return: "not specified".
+- Do NOT return empty strings for any RDA values.
+
+Dynamic column handling:
+- Identify the table header row, if present, and map each column to its header.
+- First column = "nutrient_name".
+- Any numeric column with a clear header → use that header as the key.
+- If a middle numeric column has no header → treat it as "per_serving".
+- If a column contains "%" or "%RDA", preserve the header exactly as printed (including symbols like *, #).
+- Preserve all symbols (*, **, †, ‡) exactly as printed.
+- If a value is missing or unclear → return "not specified".
+
+Handling %RDA printed outside the table:
+- If %RDA values appear separately from the nutrition table (e.g., below, above, or beside it),
+  map them to the correct nutrient rows using the nutrient names.
+- Store these values under the appropriate "%RDA" column header exactly as printed.
+- If a nutrient exists but no %RDA value is found → return "not specified" for that column.
+
+NUTRITION NOTES:
+Store nutrition footnotes, explanations, and reference statements related to the nutrition table under:
+
+"nutrition_notes": []
+
+These usually appear:
+- Below the nutrition table
+- After symbols like *, **, ^, †
+- As lines explaining %RDA, serving references, or nutrient definitions.
+Rules:
+- Extract ONLY if the text actually appears in the OCR.
+- Preserve symbols (*, **, ^, †, etc.) exactly as printed.
+- Do NOT merge these lines into the nutrition table rows.
+- If no nutrition notes are present in the OCR text, return: []
+
+==================================================
+CLAIMS EXTRACTION RULE
+==================================================
+All product claims should be stored under:
+
+"claims": []
+
+1. Extract all short statements on the packaging that describe:
+   - Product attribute
+   - Feature
+   - Benefit
+   Examples: "Clinically Proven", "Doctor Recommended", "Supports Immunity", "Gluten Free", "Premium Quality", "Trusted by Mothers"
+
+2. Symbol-based claims:
+   - Convert recognized symbols into claim text:
+     - [GREEN DOT] → "Vegetarian"
+     - [BROWN DOT] → "Non-Vegetarian"
+     - [RECYCLABLE] → "Recyclable"
+   - Extract these symbols even if no text is visible.
+   - Store the mapped meaning, not the raw symbol, in the claims array.
+
+3. Rules:
+   - Extract claim text exactly as printed when visible.
+   - Include each claim as a separate item in the "claims" array.
+   - Do NOT include explanations, footnotes, or any non-claim text.
+
+==================================================
+CERTIFICATIONS EXTRACTION RULE
+==================================================
+Identify certifications, regulatory approvals, or
+quality standard marks printed on the packaging.
+Store them under:
+
+"certifications": []
+
+Examples:
+- "FSSAI"
+- "ISO 22000"
+- "HACCP"
+- "USFDA"
+- "GMP Certified"
+- "Organic Certified"
+
+Rules:
+- Extract certification names exactly as printed.
+- Do NOT store certifications under "claims".
+- Store each certification as a separate item in the array.
+
+==================================================
+MRP FLATTENING RULE (NEW)
+==================================================
+When extracting MRP:
+- Combine all MRP-related lines into ONE single line.
+- Remove line breaks inside MRP.
+- IGNORE any value marked with [CROSSED: ]
+- Final output MUST be:
+
+  mrp: <currency symbol> <amount> (<tax text>)
+Examples:
+- "MRP ₹\\n54.00\\n(INCL. OF\\nALL TAXES)" →
+  "₹ 54.00 (INCL. OF ALL TAXES)"
+
+- "[CROSSED: ₹ 48] ₹ 46/-" →
+  "₹ 46/-"
+
+- Remove duplicate words like "MRP" if they appear before the currency.
+- Do NOT change the amount or currency.
+
+==================================================
+BATCH / LOT / MACHINE CODES
+==================================================
+Lot Number:
+- Extract only alphanumeric lot/batch codes (e.g., B1025L4).
+- Date-like values can NEVER be lot numbers.
+- If "Lot No." is followed by a date → ignore the date.
+
+Machine Code:
+- Extract only if explicitly printed or located near the lot/batch code.
+- Must be alphanumeric.
+- Do NOT treat dates or lot numbers as machine codes.
+
+Other Codes:
+- Any standalone numbers, alphanumeric codes, or printed codes that are NOT clearly labeled as Lot, Batch, or Machine codes must be stored under:
+"batch_information.other_codes": []
+
+==================================================
+FSSAI LICENSE EXTRACTION RULE
+==================================================
+Extract ALL FSSAI license numbers printed on the packaging.
+Common patterns:
+- "FSSAI Lic. No."
+- "Lic. No."
+- "License No."
+- "FSSAI License No."
+
+Store under:
+"fssai_information": {{
+  "license_numbers": []
+}}
+
+Rules:
+- Preserve the exact number.
+- Do not remove duplicates unless identical.
+- Do NOT attach FSSAI license numbers to manufacturer license fields unless explicitly written with that manufacturer block.
+
+==================================================
+MANUFACTURER TYPE RULE
+==================================================
+Normalize "manufacturer_information.type" to ONLY one of these values:
+- "Manufactured By"
+- "Marketed By"
+
+Mapping:
+- Manufactured By → Manufactured By, Manufacturer, Mfg By, Mfd By, Produced By, Made By, Manufacturing Unit, Manufactured & Packed By
+- Marketed By → Marketed By, Marketer, Marketing Company, Marketed & Distributed By, Distributed By, Distributed and Marketed By
+
+Rules:
+- Extract manufacturer name, address, and license exactly as printed.
+- Only normalize the "type" field to the two allowed values.
+- If multiple manufacturer blocks exist, create separate objects in "manufacturer_information".
+- Do NOT merge different manufacturer blocks.
+- If license is not printed, return "".
+
+==================================================
+FINAL OUTPUT FORMAT (STRICT JSON ONLY)
+==================================================
+Return ONLY raw JSON.
+CRITICAL:
+- DO NOT wrap JSON in markdown code fences.
+- DO NOT include explanations.
+- DO NOT include bullet points.
+- The response MUST start with {{ and end with }}.
+
+JSON STRUCTURE:
+{{
+  "product_type": "single",
+  "product_identity": {{
+    "brand": {{
+      "parent_brand": "",
+      "sub_brand": ""
+    }},
+    "product_name": "",
+    "variant": "",
+    "product_category": ""
+  }},
+  "pack_details": {{
+    "net_quantity": "",
+    "pack_size": "",
+    "serving_size": "",
+    "servings_per_pack": "",
+    "packing_format": ""
+  }},
+  "pricing": {{
+    "mrp": "",
+    "uspf": ""
+  }},
+  "nutrition": {{
+    "nutrition_table": [
+        {{
+        "nutrient_name": "",
+        "unit": "",
+        "values": {{
+            "<column_header>": ""
+        }}
+        }}
+    ],
+    "nutrition_notes": []
+  }},
+  "ingredients": "",
+  "allergen_information": "",
+  "claims": [],
+  "medical_information": {{
+    "intended_use": [],
+    "warnings": [],
+    "contraindications": []
+  }},
+  "usage_instructions": {{
+    "directions_to_use": [],
+    "preparation_method": []
+  }},
+  "storage_instructions": [],
+  "manufacturer_information": [
+    {{
+      "type": "",
+      "name": "",
+      "address": "",
+      "license_number": ""
+    }}
+  ],
+  "fssai_information": {{
+    "license_numbers": []
+  }},
+  "packaging_information": {{
+    "packaging_material_manufacturer": "",
+    "packaging_codes": []
+  }},
+  "batch_information": {{
+    "lot_number": "",
+    "machine_code": "",
+    "other_codes": []
+  }},
+  "dates": {{
+    "manufacturing_date": "",
+    "expiry_date": "",
+    "best_before": "",
+    "shelf_life": ""
+  }},
+  "barcodes": [],
+  "certifications": [],
+  "customer_care": {{
+    "phone": [],
+    "email": "",
+    "website": "",
+    "address": ""
+  }},
+  "regulatory_text": [],
+  "footnotes": [],
+  "other_important_text": []
+}}
+
+==================================================
+JSON RULES (CRITICAL)
+==================================================
+1. Output MUST be valid JSON.
+2. All arrays must remain arrays even if only one item exists.
+3. If a field is missing in the OCR text, return:
+   - "" for strings
+   - [] for arrays
+   - 0.00 for mrp
+4. Do NOT invent values.
+5. Extract text EXACTLY as printed on packaging.
+6. Nutrition table must remain in the JSON array format defined earlier.
+
+==================================================
+OCR TEXT:
+{raw_text}
+"""
+
+# ============================================================
 # HELPER FUNCTIONS
 # ============================================================
 FUZZY_THRESHOLD = 85
 
-def preprocess_image_for_ocr(pil_image, save_path=None):
-    """
-    Enhance image quality for better OCR/AI extraction
-    - Aggressive upscaling (2x zoom minimum)
-    - Strong sharpening for text clarity
-    - Contrast enhancement
-    - Noise reduction
-    """
-    def safe_print(msg):
+
+def safe_print(msg):
+    try:
+        print(msg)
+    except UnicodeEncodeError:
         try:
-            print(msg)
-        except UnicodeEncodeError:
-            try:
-                print(msg.encode('ascii', 'replace').decode('ascii'))
-            except:
-                print("[IMAGE] (message contains special characters)")
-    
-    if pil_image.mode != 'RGB':
-        pil_image = pil_image.convert('RGB')
-    
-    width, height = pil_image.size
-    
-    # AGGRESSIVE UPSCALING: Always upscale by 2x (like zooming in)
-    # This helps AI see small text in nutrition tables better
-    new_width = int(width * 2)
-    new_height = int(height * 2)
-    pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-    safe_print(f"[IMAGE] Upscaled 2x: {width}x{height} → {new_width}x{new_height}")
-    
-    # Enhance brightness slightly for faded text
-    enhancer = ImageEnhance.Brightness(pil_image)
-    pil_image = enhancer.enhance(1.1)
-    safe_print("[IMAGE] Enhanced brightness (1.1x)")
-    
-    # Strong contrast for better text separation
-    enhancer = ImageEnhance.Contrast(pil_image)
-    pil_image = enhancer.enhance(1.8)
-    safe_print("[IMAGE] Enhanced contrast (1.8x)")
-    
-    # Reduce noise before sharpening
-    pil_image = pil_image.filter(ImageFilter.MedianFilter(size=3))
-    safe_print("[IMAGE] Applied noise reduction")
-    
-    # STRONG sharpening for crisp text
-    enhancer = ImageEnhance.Sharpness(pil_image)
-    pil_image = enhancer.enhance(3.0)
-    safe_print("[IMAGE] Applied strong sharpening (3.0x)")
-    
-    # Final edge enhancement for nutrition table borders
-    pil_image = pil_image.filter(ImageFilter.EDGE_ENHANCE_MORE)
-    safe_print("[IMAGE] Applied edge enhancement")
-    
-    if save_path:
-        pil_image.save(save_path, quality=95)
-        safe_print(f"[IMAGE] Saved processed image to: {save_path}")
-    
-    return pil_image
+            print(msg.encode("ascii", "replace").decode("ascii"))
+        except Exception:
+            print("[LOG] (message contains special characters)")
+
 
 def convert_energy_kj_to_kcal(nutrition_table):
     for row in nutrition_table:
@@ -196,20 +749,17 @@ def convert_energy_kj_to_kcal(nutrition_table):
             values = row.get("values", {})
             amount = values.get("amount")
             if amount is not None:
-                kcal = round(amount / 4.184, 2)  
+                kcal = round(float(amount) / 4.184, 2)
                 values["amount"] = kcal
                 row["nutrient_name"] = "Energy (kcal)"  
+
 
 def canonicalize(label):
     label = unicodedata.normalize("NFKC", label)
     label = label.lower()
-    SPELLING_MAP = {
-        "fibre": "fiber",
-    }
-
+    SPELLING_MAP = {"fibre": "fiber"}
     for wrong, correct in SPELLING_MAP.items():
         label = re.sub(rf"\b{wrong}\b", correct, label)
-
     label = re.sub(r"^-+", "", label)
     label = re.sub(r"\(.*?\)", "", label)
     label = re.sub(r"[^\w\s:\-]", " ", label)
@@ -225,6 +775,7 @@ def canonicalize(label):
             normalized_words.append(w)
     return " ".join(normalized_words)
 
+
 def standardize_nutrition(nutrition_table, nomenclature_map):
     standardized = []
     canonical_nomenclature = {canonicalize(k): v for k, v in nomenclature_map.items()}
@@ -237,8 +788,7 @@ def standardize_nutrition(nutrition_table, nomenclature_map):
         standard_name = None
         if canon in canonical_nomenclature:
             standard_name = canonical_nomenclature[canon]
-            print(f"Mapping '{original}' → '{standard_name}' (exact match)")
-
+            safe_print(f"Mapping '{original}' → '{standard_name}' (exact match)")
         else:
             best_match = None
             best_score = 0
@@ -247,13 +797,12 @@ def standardize_nutrition(nutrition_table, nomenclature_map):
                 if score > best_score:
                     best_score = score
                     best_match = value
-
             if best_score >= FUZZY_THRESHOLD:
                 standard_name = best_match
-                print(f"Mapping '{original}' → '{standard_name}' (fuzzy match {best_score:.2f}%)")
+                safe_print(f"Mapping '{original}' → '{standard_name}' (fuzzy match {best_score:.2f}%)")
 
         if not standard_name:
-            print(f"Adding new nutrient: {original}")
+            safe_print(f"Adding new nutrient: {original}")
             standard_name = original
 
         values = row.get("values", {})
@@ -264,40 +813,40 @@ def standardize_nutrition(nutrition_table, nomenclature_map):
             else:
                 cleaned_values[key] = value
         
-        # Skip rows with no meaningful data
         if not any(v != "not specified" for v in cleaned_values.values()):
             continue
 
         standardized.append({
             "nutrient_name": standard_name,
+            "unit": row.get("unit", ""),          # preserve unit from new OCR format
             "values": cleaned_values,
-            "original_name": original
+            "original_name": original,
         })
 
     return standardized
+
+
 def extract_numeric_mrp(mrp_value):
-    """Extract numeric MRP from string"""
-    if not mrp_value or mrp_value == "not specified":
+    if not mrp_value or mrp_value in ("not specified", "", "0.00", 0, 0.0):
         return None
     if isinstance(mrp_value, (int, float)):
-        return float(mrp_value)
+        return float(mrp_value) if float(mrp_value) > 0 else None
     if not isinstance(mrp_value, str):
         try:
             return float(mrp_value)
-        except:
+        except Exception:
             return None
     cleaned = re.sub(r"[₹Rs.MRP:INCL\.OFALLTAXES\s]", "", mrp_value, flags=re.IGNORECASE)
     numbers = re.findall(r"\d+\.?\d*", cleaned)
     if numbers:
         try:
             return float(numbers[0])
-        except:
+        except Exception:
             return None
     return None
 
 
 def detect_packing_format(text):
-    """Detect packing format from text"""
     if not isinstance(text, str):
         text = str(text) if text else ""
     text_lower = text.lower()
@@ -320,208 +869,65 @@ def detect_packing_format(text):
     return "not specified"
 
 
-def validate_dates(text):
-    """Extract and validate dates from text"""
-    if not isinstance(text, str):
-        text = str(text) if text else ""
-    date_strings = re.findall(r"\b\d{2}/\d{2}/\d{2,4}\b", text)
-    valid_dates = []
-    for ds in date_strings:
-        try:
-            if len(ds.split("/")[-1]) == 4:
-                dt = datetime.strptime(ds, "%d/%m/%Y")
-            else:
-                dt = datetime.strptime(ds, "%d/%m/%y")
-            valid_dates.append(dt)
-        except ValueError:
-            continue
-    mfg_date = valid_dates[0].strftime("%d/%m/%Y") if valid_dates else None
-    exp_date = valid_dates[-1].strftime("%d/%m/%Y") if len(valid_dates) > 1 else None
-    return mfg_date, exp_date
-
-
 def validate_fssai(text):
-    """Extract FSSAI license numbers"""
     if not isinstance(text, str):
         text = str(text) if text else ""
     return list(set(re.findall(r"\b\d{14}\b", text)))
 
 
-def calculate_cost(input_tokens, output_tokens):
-    """Calculate API cost"""
-      # Handle None values
+def calculate_shelf_life(mfg_str, exp_str):
+    """Calculate shelf life in months from two DD/MM/YYYY date strings."""
+    for fmt in ["%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"]:
+        try:
+            mfg = datetime.strptime(mfg_str, fmt)
+            exp = datetime.strptime(exp_str, fmt)
+            delta = relativedelta(exp, mfg)
+            months = delta.years * 12 + delta.months
+            if months > 0:
+                return f"{months} months"
+            days = (exp - mfg).days
+            return f"{days} days" if days > 0 else None
+        except ValueError:
+            continue
+    return None
+
+
+def calculate_cost(task, input_tokens, output_tokens):
     input_tokens = input_tokens or 0
     output_tokens = output_tokens or 0
-    
-    input_cost = (input_tokens / 1_000_000) * PRICING["input"]
-    output_cost = (output_tokens / 1_000_000) * PRICING["output"]
+    input_cost  = (input_tokens  / 1_000_000) * PRICING[task]["input"]
+    output_cost = (output_tokens / 1_000_000) * PRICING[task]["output"]
     return {
-        "input_tokens": input_tokens,
+        "input_tokens":  input_tokens,
         "output_tokens": output_tokens,
-        "input_cost": input_cost,
-        "output_cost": output_cost,
-        "total_cost": input_cost + output_cost,
+        "input_cost":    input_cost,
+        "output_cost":   output_cost,
+        "total_cost":    input_cost + output_cost,
     }
+
+
+def clean_json_string(raw):
+    """Strip markdown fences and locate the outermost JSON object."""
+    raw = raw.strip()
+    if raw.startswith("```"):
+        first_newline = raw.find("\n")
+        if first_newline != -1:
+            raw = raw[first_newline + 1:]
+        if "```" in raw:
+            raw = raw[: raw.rfind("```")].rstrip()
+    first_brace = raw.find("{")
+    if first_brace != -1:
+        raw = raw[first_brace:]
+    last_brace = raw.rfind("}")
+    if last_brace != -1:
+        raw = raw[: last_brace + 1]
+    return raw
 
 
 # ============================================================
-# EXTRACTION PROMPT
-# ============================================================
-EXTRACTION_PROMPT = """Extract complete product packaging data from these images.
-
-CRITICAL: Return ONLY raw JSON. DO NOT wrap in markdown code fences. Start with { and end with }.
-
-PRODUCT TYPE:
-- "single": One product, one variant
-- "parent_child": Multi-variant pack
-
-BRAND & PRODUCT:
-- parent_brand: Main company name ( owner of the product) not name of product 
-- sub_brand: Product line or "not specified" ( brand of the product)
-- product_name: Full product name + variant ( name of the product)
-- variant: Flavor/type
-
-WEIGHT & SIZE:
-1. net_weight: Product weight (e.g., "30 g")
-2. pack_size: If mentioned (e.g., "Pack of 10")
-3. serving_size: From nutrition table (e.g., "15 g")
-4. servings_per_pack: If mentioned
-
-PRICING:
-- mrp: NUMBER ONLY (e.g., 40.00 not "₹ 40")
-
-PACKING FORMAT:
-sachet, bottle, pouch, jar, can, tetra pack, carton, box, tub, pack
-
-NUTRITION TABLE - **EXTREMELY CRITICAL - PAY EXTRA ATTENTION**:
-
-**YOU MUST EXTRACT THE COMPLETE NUTRITION TABLE IF IT EXISTS - DO NOT MISS ANY NUTRIENTS**
-
-Look for:
-- "Nutritional Information" or "Approximate Composition Per 100 g"
-- Table with nutrient names and values
-- Usually on back/side of pack
-- May have multiple columns for different serving sizes
-
-Table structure:
-- Column 1: Nutrient name (e.g., "Protein", "Total Fat", "Saturated Fat")
-- Column 2: Per 100g values (most common)
-- Column 3: Per Serve values (if present)
-- Column 4: % RDA or % Daily Value (if present)
-
-Extract EVERY nutrient row EXACTLY as shown:
-[
-  {
-    "nutrient_name": "Energy (kcal)",
-    "values": {
-      "Per 100g": "503 kcal",
-      "Per Serve (15g)": "75 kcal",
-      "% RDA": "4%"
-    }
-  },
-  {
-    "nutrient_name": "Protein",
-    "values": {
-      "Per 100g": "6.4 g",
-      "Per Serve (15g)": "1 g",
-      "% RDA": "not specified"
-    }
-  },
-  {
-    "nutrient_name": "Total Fat",
-    "values": {
-      "Per 100g": "32.1 g",
-      "Per Serve (15g)": "4.8 g",
-      "% RDA": "not specified"
-    }
-  },
-  {
-    "nutrient_name": "Saturated Fat",
-    "values": {
-      "Per 100g": "14.2 g",
-      "Per Serve (15g)": "2.1 g",
-      "% RDA": "not specified"
-    }
-  }
-]
-
-**CRITICAL RULES**:
-1. NEVER return [] for nutrition_table if you see a table - this is the MOST IMPORTANT data
-2. Extract EVERY SINGLE nutrient row - don't skip any, including vitamins, minerals, and sub-nutrients
-3. If a nutrient appears with units in parentheses like "Saturated fat (g)", use ONLY "Saturated fat" as nutrient_name
-4. DO NOT create duplicate entries - if you see "Saturated Fat" in one row, don't create another row for "Saturated fat (g)"
-5. Each entry MUST have non-null nutrient_name
-6. Keep ALL values with units EXACTLY as printed (e.g., "32.1 g", "6.4 g", "29%", "< 0.1 g")
-7. If a cell is empty, has "-", or is unclear: use "not specified"
-8. **ENERGY EXTRACTION**: ONLY extract what is actually printed:
-   - If ONLY "Energy (kcal)" is shown, create ONE entry for "Energy (kcal)"
-   - If ONLY "Energy (kJ)" is shown, create ONE entry for "Energy (kJ)"
-   - If BOTH are shown in separate rows, create TWO separate entries
-   - DO NOT calculate or create missing energy values
-9. Pay EXTRA attention to micronutrients (all B vitamins, minerals like Iodine, Copper, Selenium, etc.) - don't miss them
-10. If a nutrient has multiple values across columns, capture ALL of them in the values object
-11. Handle "less than" values: "< 0.1 g" or "< 1 mg" - extract exactly as shown
-12. For ranges: "5-10 mg" - extract exactly as shown
-13. If text is blurry/unclear but you can partially read it, extract what you can see and note uncertainty
-
-MANUFACTURER:
-- Type: "Manufactured by" | "Packed by" | "Marketed by"
-- Extract ALL manufacturer entries
-
-DATES:
-- manufacturing_date: in dd/mm/yyyy format
-- expiry_date: in dd/mm/yyyy format  
-- shelf_life: Extract if printed on pack (e.g., "18 months", "2 years"). If not visible, calculate from manufacturing to expiry date difference and express in months (e.g., if mfg is 15/03/2023 and expiry is 14/09/2023, shelf_life is "6 months")
-
-JSON STRUCTURE:
-{
-  "product_type": "single",
-  "parent_product": {
-    "brand": {"parent_brand": "", "sub_brand": ""},
-    "product_name": "",
-    "variant": "",
-    "weight_and_size": {
-      "net_weight": "",
-      "pack_size": "",
-      "serving_size": "",
-      "servings_per_pack": ""
-    },
-    "pricing": {"mrp": 0.00, "uspf": ""},
-    "packing_format": "",
-    "nutrition_table": [],
-    "ingredients": "",
-    "allergen_info": "",
-    "claims": [],
-    "storage_instructions": "",
-    "instructions_to_use": "",
-    "manufacturer_details": [
-      {"type": "", "name": "", "address": "", "fssai": ""}
-    ],
-    "batch_codes": {"lot_number": "", "machine_code": ""},
-    "dates": {"manufacturing_date": "", "expiry_date": "", "shelf_life": ""},
-    "barcode": "",
-    "certifications": [],
-    "symbols": {"veg_nonveg": "", "recyclable": ""},
-    "customer_care": {"phone": [], "email": "", "website": ""},
-    "other_important_text": []
-  },
-  "child_variants": []
-}
-
-**OTHER IMPORTANT TEXT**:
-- This field captures ALL other important text visible on the package that doesn't fit in other categories
-- Include: warnings, disclaimers, quality statements, brand slogans, legal text, etc.
-- This will map to "Additional Notes" or "Other Notes" in the frontend
-- Extract as an array of strings, each string being a distinct piece of text
-
-Return ONLY the JSON."""
-
-
-# ============================================================
-# SCHEMAS
+# PYDANTIC SCHEMAS
 # ============================================================
 class ExtractedProductData(BaseModel):
-    """Response schema for extracted product data"""
     success: bool
     data: Optional[dict] = None
     error: Optional[str] = None
@@ -529,40 +935,55 @@ class ExtractedProductData(BaseModel):
 
 
 class ProductCreate(BaseModel):
-    """Schema for creating a product"""
     product_name: str
     parent_brand: str
     sub_brand: Optional[str] = None
     variant: Optional[str] = None
+    product_category: Optional[str] = None
+    net_quantity: Optional[str] = None
     net_weight: Optional[str] = None
     pack_size: Optional[str] = None
     serving_size: Optional[str] = None
-    mrp: Optional[float] = None
+    servings_per_pack: Optional[str] = None
     packing_format: Optional[str] = None
-    veg_nonveg: Optional[str] = None
-    category: Optional[str] = None
+    mrp: Optional[float] = None
+    uspf: Optional[str] = None
     nutrition_table: List[dict] = []
+    nutrition_notes: List[str] = []
     ingredients: Optional[str] = None
+    allergen_information: Optional[str] = None
     allergen_info: Optional[str] = None
     claims: List[str] = []
-    storage_instructions: Optional[str] = None
+    medical_information: dict = {}
+    usage_instructions: dict = {}
     instructions_to_use: Optional[str] = None
-    shelf_life: Optional[str] = None
+    storage_instructions: List[str] = []
+    manufacturer_information: List[dict] = []
     manufacturer_details: List[dict] = []
     brand_owner: Optional[str] = None
+    fssai_information: dict = {}
+    fssai_licenses: List[str] = []
+    packaging_information: dict = {}
+    batch_information: dict = {}
     manufacturing_date: Optional[str] = None
     expiry_date: Optional[str] = None
+    best_before: Optional[str] = None
+    shelf_life: Optional[str] = None
+    barcodes: List[str] = []
     barcode: Optional[str] = None
     certifications: List[str] = []
-    fssai_licenses: List[str] = []
+    regulatory_text: List[str] = []
+    footnotes: List[str] = []
     customer_care: dict = {}
+    other_important_text: List[str] = []
+    veg_nonveg: Optional[str] = None
+    category: Optional[str] = None
     tags: List[str] = []
     images: List[str] = []
     status: str = "draft"
 
 
 class ProductResponse(BaseModel):
-    """Response schema for product"""
     id: str
     product_name: str
     parent_brand: str
@@ -580,319 +1001,302 @@ class ProductResponse(BaseModel):
 @router.post("/extract", response_model=ExtractedProductData)
 async def extract_product_from_images(
     images: List[UploadFile] = File(...),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """
-    Extract product data from uploaded images using Gemini AI
-    
-    - Accepts up to 10 images
-    - Returns structured product data
-    - User can review and edit before saving
+    Two-step extraction:
+      Step 1 — OCR each image individually (OCR_MODEL)
+      Step 2 — Structure the combined raw text (STRUCTURE_MODEL)
+    No image preprocessing is applied.
     """
-    # Safe print function to handle Unicode encoding errors on Windows
-    def safe_print(msg):
-        try:
-            print(msg)
-        except UnicodeEncodeError:
-            try:
-                print(msg.encode('ascii', 'replace').decode('ascii'))
-            except:
-                print("[LOG] (message contains special characters)")
-    
-    safe_print("\n" + "="*60)
+    safe_print("\n" + "=" * 60)
     safe_print("[EXTRACTION] ===== NEW EXTRACTION REQUEST =====")
-    safe_print("="*60)
+    safe_print("=" * 60)
     
     try:
         safe_print(f"[EXTRACTION] User: {current_user.email}")
-        safe_print(f"[EXTRACTION] Number of images received: {len(images)}")
-        for idx, img in enumerate(images):
-            safe_print(f"[EXTRACTION] Image {idx + 1}: filename={img.filename}, content_type={img.content_type}")
+        safe_print(f"[EXTRACTION] Images received: {len(images)}")
         
-        # Check API key
         api_key = settings.GEMINI_API_KEY
         if not api_key:
-            safe_print("[ERROR] Gemini API key not configured")
             raise HTTPException(
                 status_code=500, 
-                detail="Gemini API key not configured. Please set GEMINI_API_KEY in environment."
+                detail="Gemini API key not configured. Please set GEMINI_API_KEY in environment.",
             )
         
-        safe_print(f"[EXTRACTION] API key configured: {api_key[:20]}...")
-        
-        # Validate image count
         if len(images) == 0:
             raise HTTPException(status_code=400, detail="At least one image is required")
         if len(images) > 10:
             raise HTTPException(status_code=400, detail="Maximum 10 images allowed")
         
-        safe_print(f"[EXTRACTION] Processing {len(images)} images")
-        
-        # Create temp directory for processed images
-        import tempfile
-        temp_dir = tempfile.mkdtemp(prefix="nutri_processed_")
-        safe_print(f"[EXTRACTION] Processed images will be saved to: {temp_dir}")
-        
-        # Load and validate images
-        pil_images = []
-        processed_image_paths = []
-        for idx, img in enumerate(images):
-            try:
-                safe_print(f"[EXTRACTION] Loading image {idx + 1}/{len(images)}: {img.filename}")
-                content = await img.read()
-                pil_img = Image.open(BytesIO(content))
-                safe_print(f"[EXTRACTION] Image {idx + 1} loaded: {pil_img.size} pixels")
-                
-                # Preprocess image for better OCR accuracy
-                safe_print(f"[EXTRACTION] Preprocessing image {idx + 1} for OCR...")
-                processed_path = os.path.join(temp_dir, f"processed_{idx + 1}_{img.filename}")
-                pil_img = preprocess_image_for_ocr(pil_img, save_path=processed_path)
-                processed_image_paths.append(processed_path)
-                safe_print(f"[EXTRACTION] Image {idx + 1} preprocessed: {pil_img.size} pixels")
-                
-                pil_images.append(pil_img)
-            except Exception as e:
-                safe_print(f"[ERROR] Failed to load image {img.filename}: {str(e)}")
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Invalid image file: {img.filename}. Error: {str(e)}"
-                )
-        
-        # Call Gemini API
-        safe_print("[EXTRACTION] Initializing Gemini client...")
         from google import genai
-        
-        client = genai.Client(api_key=api_key)
-        safe_print("[EXTRACTION] Client initialized successfully")
-        
-        content = [EXTRACTION_PROMPT] + pil_images
-        
-        safe_print(f"[EXTRACTION] Calling Gemini API with model: {GEMINI_MODEL}")
-        safe_print(f"[EXTRACTION] This may take 10-30 seconds for {len(images)} images...")
-        
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=content,
+
+        # Vertex AI client — required for gemini-3-flash-preview / gemini-3.1-flash-lite-preview
+        client = genai.Client(vertexai=True, api_key=api_key)
+        safe_print("[EXTRACTION] Gemini client initialized (Vertex AI)")
+
+        # ── Token accumulators ──────────────────────────────────────────────
+        ocr_tokens       = {"input": 0, "output": 0}
+        structure_tokens = {"input": 0, "output": 0}
+
+        # ── Exponential-backoff retry wrapper for 429 / quota errors ────────
+        async def gemini_call_with_retry(fn, *args, timeout_s=90, max_retries=5, **kwargs):
+            """
+            Runs a synchronous Gemini call in a thread with:
+              - per-call timeout
+              - exponential backoff on 429 / ResourceExhausted
+            """
+            delay = 2.0
+            for attempt in range(1, max_retries + 1):
+                try:
+                    return await asyncio.wait_for(
+                        asyncio.to_thread(fn, *args, **kwargs),
+                        timeout=timeout_s,
+                    )
+                except asyncio.TimeoutError:
+                    raise  # bubble up — caller decides what to do
+                except Exception as exc:
+                    err_str = str(exc).lower()
+                    is_429 = (
+                        "429" in err_str
+                        or "resource_exhausted" in err_str
+                        or "quota" in err_str
+                        or "rate limit" in err_str
+                    )
+                    if is_429 and attempt < max_retries:
+                        safe_print(
+                            f"[RETRY] 429 rate-limit hit (attempt {attempt}/{max_retries}). "
+                            f"Waiting {delay:.1f}s before retry..."
+                        )
+                        await asyncio.sleep(delay)
+                        delay = min(delay * 2, 64)  # cap at 64 s
+                        continue
+                    raise  # non-429 or max retries exhausted
+
+        # ══════════════════════════════════════════════════════════════════════
+        # STEP 1 — OCR each image
+        # ══════════════════════════════════════════════════════════════════════
+        raw_text_blocks = []
+
+        for idx, img_file in enumerate(images):
+            filename = img_file.filename
+            safe_print(f"[OCR] Processing image {idx + 1}/{len(images)}: {filename}")
+            try:
+                content_bytes = await img_file.read()
+                pil_img = Image.open(BytesIO(content_bytes))
+                if pil_img.mode != "RGB":
+                    pil_img = pil_img.convert("RGB")
+                safe_print(f"[OCR] Image {idx + 1} size: {pil_img.size}")
+
+                ocr_response = await gemini_call_with_retry(
+                    client.models.generate_content,
+                    model=OCR_MODEL,
+                    contents=[OCR_PROMPT, pil_img],
+                    config={
+                        "temperature": 0,
+                        "top_p": 0,
+                        "thinking_config": {"thinking_budget": 0},
+                    },
+                    timeout_s=60,
+                )
+
+                if hasattr(ocr_response, "usage_metadata") and ocr_response.usage_metadata:
+                    um = ocr_response.usage_metadata
+                    ocr_tokens["input"]  += (getattr(um, "prompt_token_count",    None) or 0)
+                    ocr_tokens["output"] += (getattr(um, "candidates_token_count", None) or 0)
+
+                extracted = ocr_response.text.strip() if ocr_response.text else ""
+                safe_print(f"[OCR] Image {idx + 1} extracted {len(extracted)} chars")
+                if extracted:
+                    raw_text_blocks.append(extracted)
+
+            except asyncio.TimeoutError:
+                safe_print(f"[OCR] Image {idx + 1} timed out after 60s — skipping")
+            except Exception as img_err:
+                safe_print(f"[OCR] Image {idx + 1} failed: {img_err}")
+
+        combined_raw_text = "\n\n".join(raw_text_blocks).strip()
+        safe_print(f"[OCR] Combined OCR text length: {len(combined_raw_text)} chars")
+
+        if not combined_raw_text:
+            return ExtractedProductData(success=False, error="OCR produced no text from the provided images.")
+
+        # ══════════════════════════════════════════════════════════════════════
+        # STEP 2 — Structure the combined raw text
+        # ══════════════════════════════════════════════════════════════════════
+        safe_print("[STRUCTURE] Calling structure model...")
+
+        structure_prompt = STRUCTURE_PROMPT_TEMPLATE.format(raw_text=combined_raw_text)
+
+        struct_response = await gemini_call_with_retry(
+            client.models.generate_content,
+            model=STRUCTURE_MODEL,
+            contents=structure_prompt,
             config={
                 "temperature": 0,
-                "top_p": 0.95,
-                "top_k": 40,
-                "response_mime_type": "application/json",
+                "thinking_config": {"thinking_budget": 0},
             },
+            timeout_s=120,
         )
-        
-        safe_print("[EXTRACTION] Response received from Gemini API")
-        
-        # Calculate cost
-        usage = response.usage_metadata
-        safe_print(f"[EXTRACTION] Token usage - Input: {usage.prompt_token_count}, Output: {usage.candidates_token_count}")
-        cost_info = calculate_cost(
-            usage.prompt_token_count, 
-            usage.candidates_token_count
-        )
-        safe_print(f"[EXTRACTION] Estimated cost: ${cost_info['total_cost']:.4f}")
-        
-        # Parse response
-        raw_json = response.text.strip()
-        safe_print(f"[EXTRACTION] Response length: {len(raw_json)} characters")
-        
-        # Clean markdown if present
-        if raw_json.startswith("```"):
-            safe_print("[EXTRACTION] Cleaning markdown formatting...")
-            first_newline = raw_json.find("\n")
-            if first_newline != -1:
-                raw_json = raw_json[first_newline + 1:]
-            if "```" in raw_json:
-                last_fence = raw_json.rfind("```")
-                raw_json = raw_json[:last_fence].rstrip()
-        
-        if not raw_json.startswith("{"):
-            first_brace = raw_json.find("{")
-            if first_brace != -1:
-                raw_json = raw_json[first_brace:]
-        
-        if not raw_json.endswith("}"):
-            last_brace = raw_json.rfind("}")
-            if last_brace != -1:
-                raw_json = raw_json[:last_brace + 1]
-        
-        safe_print("[EXTRACTION] Parsing JSON response...")
+
+        if hasattr(struct_response, "usage_metadata") and struct_response.usage_metadata:
+            um = struct_response.usage_metadata
+            structure_tokens["input"]  += (getattr(um, "prompt_token_count",    None) or 0)
+            structure_tokens["output"] += (getattr(um, "candidates_token_count", None) or 0)
+
+        safe_print("[STRUCTURE] Response received")
+
+        # ── Parse JSON ──────────────────────────────────────────────────────
+        raw_json = clean_json_string(struct_response.text or "")
+        safe_print(f"[STRUCTURE] JSON length: {len(raw_json)} chars")
+
         product_data = json.loads(raw_json)
-        safe_print("[EXTRACTION] JSON parsed successfully")
-        
-        # Post-process the data
-        safe_print("[EXTRACTION] Post-processing extracted data...")
-        parent = product_data.get("parent_product", {})
-        
-        if "nutrition_table" in parent:
-            safe_print("[EXTRACTION] Converting energy from kJ to kcal if needed...")
-            convert_energy_kj_to_kcal(parent["nutrition_table"])
-            safe_print("[EXTRACTION] Standardizing nutrition table...")
-            parent["nutrition_table"] = standardize_nutrition(
-                parent["nutrition_table"], 
-                NOMENCLATURE_MAP
-            )
-        
-        # Extract numeric MRP
-        if "pricing" in parent:
-            mrp_value = parent["pricing"].get("mrp")
-            numeric_mrp = extract_numeric_mrp(mrp_value)
-            if numeric_mrp is not None:
-                parent["pricing"]["mrp"] = numeric_mrp
-        
-        # Detect packing format
-        if parent.get("packing_format") == "not specified":
-            combined_text = json.dumps(product_data)
-            parent["packing_format"] = detect_packing_format(combined_text)
-        
-        # Validate dates
-        mfg_date, exp_date = validate_dates(raw_json)
-        if "dates" in parent:
-            if mfg_date:
-                parent["dates"]["manufacturing_date"] = mfg_date
-            if exp_date:
-                parent["dates"]["expiry_date"] = exp_date
-        
-        # Get shelf life from extraction or calculate if not provided
-        shelf_life = parent.get("dates", {}).get("shelf_life", "") or parent.get("shelf_life", "")
-        if not shelf_life or shelf_life == "not specified":
-            if mfg_date and exp_date:
-                try:
-                    from datetime import datetime
-                    # Try different date formats
-                    for date_format in ["%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"]:
-                        try:
-                            mfg = datetime.strptime(mfg_date, date_format)
-                            exp = datetime.strptime(exp_date, date_format)
-                            days_diff = (exp - mfg).days
-                            months = days_diff // 30
-                            if months > 0:
-                                shelf_life = f"{months} months"
-                            else:
-                                shelf_life = f"{days_diff} days"
-                            break
-                        except ValueError:
-                            continue
-                except:
-                    pass
-        
-        # Store shelf_life in both locations for compatibility
-        if shelf_life:
-            parent["shelf_life"] = shelf_life
-            if "dates" in parent:
-                parent["dates"]["shelf_life"] = shelf_life
-        
-        # Extract FSSAI
-        fssai_licenses = validate_fssai(raw_json)
-        if fssai_licenses and "manufacturer_details" in parent:
-            for manufacturer in parent["manufacturer_details"]:
-                if manufacturer.get("fssai") == "not specified" and fssai_licenses:
-                    manufacturer["fssai"] = fssai_licenses.pop(0)
-        
-        # Transform to frontend-friendly format
+        safe_print("[STRUCTURE] JSON parsed successfully")
+
+        # ══════════════════════════════════════════════════════════════════════
+        # POST-PROCESSING
+        # ══════════════════════════════════════════════════════════════════════
+        safe_print("[POST] Starting post-processing...")
+
+        nutrition_block = product_data.get("nutrition", {})
+        nutrition_table = nutrition_block.get("nutrition_table", [])
+
+        if nutrition_table:
+            convert_energy_kj_to_kcal(nutrition_table)
+            nutrition_table = standardize_nutrition(nutrition_table, NOMENCLATURE_MAP)
+            nutrition_block["nutrition_table"] = nutrition_table
+
+        # Numeric MRP
+        pricing = product_data.get("pricing", {})
+        numeric_mrp = extract_numeric_mrp(pricing.get("mrp"))
+        if numeric_mrp is not None:
+            pricing["mrp"] = numeric_mrp
+
+        # Packing format fallback
+        pack_details = product_data.get("pack_details", {})
+        if not pack_details.get("packing_format") or pack_details["packing_format"] in ("", "not specified"):
+            pack_details["packing_format"] = detect_packing_format(json.dumps(product_data))
+
+        # Dates + shelf life
+        dates = product_data.get("dates", {})
+        mfg = dates.get("manufacturing_date", "")
+        exp = dates.get("expiry_date", "")
+        shelf = dates.get("shelf_life", "")
+
+        if mfg and exp and (not shelf or shelf in ("", "Not Specified", "not specified")):
+            computed = calculate_shelf_life(mfg, exp)
+            if computed:
+                dates["shelf_life"] = computed
+
+        # FSSAI — validate any 14-digit numbers found in raw JSON
+        fssai_info = product_data.get("fssai_information", {})
+        existing_licenses = fssai_info.get("license_numbers", [])
+        detected_licenses = validate_fssai(raw_json)
+        merged = list(dict.fromkeys(existing_licenses + detected_licenses))
+        fssai_info["license_numbers"] = merged
+        product_data["fssai_information"] = fssai_info
+
+        # Veg/NonVeg detection from claims
+        claims = product_data.get("claims", [])
+        veg_nonveg = ""
+        for claim in claims:
+            cl = claim.lower()
+            if "non-vegetarian" in cl or "non vegetarian" in cl:
+                veg_nonveg = "Non-Vegetarian"
+                break
+            if "vegetarian" in cl:
+                veg_nonveg = "Vegetarian"
+
+        # ── Build cost info ──────────────────────────────────────────────────
+        ocr_cost  = calculate_cost("ocr",       ocr_tokens["input"],       ocr_tokens["output"])
+        str_cost  = calculate_cost("structure",  structure_tokens["input"],  structure_tokens["output"])
+        cost_info = {
+            "ocr":        ocr_cost,
+            "structure":  str_cost,
+            "grand_total": ocr_cost["total_cost"] + str_cost["total_cost"],
+        }
+        safe_print(f"[COST] Grand total: ${cost_info['grand_total']:.6f}")
+
+        # ── Build frontend-friendly transformed_data ─────────────────────────
+        identity    = product_data.get("product_identity", {})
+        brand_block = identity.get("brand", {})
+
         transformed_data = {
             "basic": {
-                "productName": parent.get("product_name", ""),
-                "brand": parent.get("brand", {}).get("parent_brand", ""),
-                "subBrand": parent.get("brand", {}).get("sub_brand", ""),
-                "variant": parent.get("variant", ""),
-                "packSize": parent.get("weight_and_size", {}).get("net_weight", ""),
-                "serveSize": parent.get("weight_and_size", {}).get("serving_size", ""),
-                "mrp": parent.get("pricing", {}).get("mrp", ""),
-                "packingFormat": parent.get("packing_format", ""),
-                "manufactured": parent.get("dates", {}).get("manufacturing_date", ""),
-                "expiry": parent.get("dates", {}).get("expiry_date", ""),
-                "shelfLife": parent.get("shelf_life", ""),
-                "vegNonVeg": parent.get("symbols", {}).get("veg_nonveg", ""),
+                "productName":   identity.get("product_name", ""),
+                "brand":         brand_block.get("parent_brand", ""),
+                "subBrand":      brand_block.get("sub_brand", ""),
+                "variant":       identity.get("variant", ""),
+                "category":      identity.get("product_category", ""),
+                "packSize":      pack_details.get("net_quantity", ""),
+                "serveSize":     pack_details.get("serving_size", ""),
+                "servingsPerPack": pack_details.get("servings_per_pack", ""),
+                "packingFormat": pack_details.get("packing_format", ""),
+                "mrp":           pricing.get("mrp", ""),
+                "uspf":          pricing.get("uspf", ""),
+                "manufactured":  dates.get("manufacturing_date", ""),
+                "expiry":        dates.get("expiry_date", ""),
+                "bestBefore":    dates.get("best_before", ""),
+                "shelfLife":     dates.get("shelf_life", ""),
+                "vegNonVeg":     veg_nonveg,
             },
-            "nutrition": parent.get("nutrition_table", []),
+            "nutrition": {
+                "table": nutrition_block.get("nutrition_table", []),
+                "notes": nutrition_block.get("nutrition_notes", []),
+            },
             "composition": {
-                "ingredients": parent.get("ingredients", ""),
-                "allergenInfo": parent.get("allergen_info", ""),
-                "claims": parent.get("claims", []),
-                "storageInstructions": parent.get("storage_instructions", ""),
-                "instructionsToUse": parent.get("instructions_to_use", ""),
-                "shelfLife": parent.get("shelf_life", ""),
+                "ingredients":        product_data.get("ingredients", ""),
+                "allergenInfo":       product_data.get("allergen_information", ""),
+                "claims":             product_data.get("claims", []),
+                "storageInstructions": product_data.get("storage_instructions", []),
+                "usageInstructions":  product_data.get("usage_instructions", {}),
+                "medicalInformation": product_data.get("medical_information", {}),
             },
             "company": {
-                "manufacturerDetails": parent.get("manufacturer_details", []),
-                "barcode": parent.get("barcode", ""),
-                "certifications": parent.get("certifications", []),
-                "customerCare": parent.get("customer_care", {}),
+                "manufacturerDetails":  product_data.get("manufacturer_information", []),
+                "fssaiInformation":     product_data.get("fssai_information", {}),
+                "packagingInformation": product_data.get("packaging_information", {}),
+                "barcodes":             product_data.get("barcodes", []),
+                "certifications":       product_data.get("certifications", []),
+                "customerCare":         product_data.get("customer_care", {}),
             },
-            "dates": parent.get("dates", {}),
-            "other": parent.get("other_important_text", []),
-            "raw": product_data,  # Keep raw data for reference
-            "processed_images": processed_image_paths,  # Paths to view enhanced images
+            "batch":      product_data.get("batch_information", {}),
+            "dates":      dates,
+            "regulatory": product_data.get("regulatory_text", []),
+            "footnotes":  product_data.get("footnotes", []),
+            "other":      product_data.get("other_important_text", []),
+            "raw":        product_data,
         }
-        
-        safe_print("[EXTRACTION] SUCCESS - Extraction completed successfully!")
-        safe_print(f"[EXTRACTION] View processed images at: {temp_dir}")
-        return ExtractedProductData(
-            success=True,
-            data=transformed_data,
-            cost=cost_info
-        )
+
+        safe_print("[EXTRACTION] SUCCESS")
+        return ExtractedProductData(success=True, data=transformed_data, cost=cost_info)
         
     except json.JSONDecodeError as e:
-        safe_print(f"[ERROR] JSON parsing failed: {str(e)}")
-        safe_print(f"[ERROR] Raw response preview: {raw_json[:500] if 'raw_json' in locals() else 'N/A'}")
-        return ExtractedProductData(
-            success=False,
-            error=f"Failed to parse AI response: {str(e)}"
-        )
-    except HTTPException as e:
-        try:
-            print(f"[ERROR] HTTP Exception: {e.detail}")
-            print(f"[ERROR] Status Code: {e.status_code}")
-        except UnicodeEncodeError:
-                print("[ERROR] HTTP Exception (Unicode error in message)")
+        safe_print(f"[ERROR] JSON parse failed: {e}")
+        return ExtractedProductData(success=False, error=f"Failed to parse AI response: {e}")
+
+    except HTTPException:
         raise
+
     except Exception as e:
-        # Safe print function that handles Unicode encoding errors
-        def safe_print(msg):
-            try:
-                print(msg)
-            except UnicodeEncodeError:
-                # Fallback: print ASCII-only version
-                try:
-                    print(msg.encode('ascii', 'replace').decode('ascii'))
-                except:
-                    print("[ERROR] Could not display error message (encoding error)")
-        
-        safe_print("\n[ERROR] ===== EXTRACTION FAILED =====")
-        safe_print(f"[ERROR] Exception Type: {type(e).__name__}")
-        safe_print(f"[ERROR] Error Message: {str(e)}")
-        
+        safe_print(f"[ERROR] {type(e).__name__}: {e}")
         import traceback
-        safe_print("[ERROR] Full Traceback:")
         try:
-            tb = traceback.format_exc()
-            safe_print(tb)
+            safe_print(traceback.format_exc())
         except Exception:
-            safe_print("[ERROR] Could not format traceback")
-        
-        safe_print("="*60)
-        
-        # Return error response instead of raising exception
-        # This ensures a 200 status with error details in the response
+            pass
         error_msg = f"{type(e).__name__}: {str(e)}"
         try:
-            # Try to encode to ASCII to avoid Unicode errors in response
-            error_msg = error_msg.encode('ascii', 'replace').decode('ascii')
-        except:
-            error_msg = f"{type(e).__name__}: (error message contains non-ASCII characters)"
-        
-        return ExtractedProductData(
-            success=False,
-            error=f"Extraction failed: {error_msg}"
-        )
+            error_msg = error_msg.encode("ascii", "replace").decode("ascii")
+        except Exception:
+            pass
+        return ExtractedProductData(success=False, error=f"Extraction failed: {error_msg}")
 
 
 @router.post("", response_model=dict)
 async def create_product(
     product: ProductCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """Create a new product"""
     try:
@@ -901,46 +1305,57 @@ async def create_product(
             parent_brand=product.parent_brand,
             sub_brand=product.sub_brand,
             variant=product.variant,
+            product_category=product.product_category,
+            net_quantity=product.net_quantity,
             net_weight=product.net_weight,
             pack_size=product.pack_size,
             serving_size=product.serving_size,
-            mrp=product.mrp,
+            servings_per_pack=product.servings_per_pack,
             packing_format=product.packing_format,
-            veg_nonveg=product.veg_nonveg,
-            category=product.category,
+            mrp=product.mrp,
+            uspf=product.uspf,
             nutrition_table=product.nutrition_table,
+            nutrition_notes=product.nutrition_notes,
             ingredients=product.ingredients,
+            allergen_information=product.allergen_information,
             allergen_info=product.allergen_info,
             claims=product.claims,
-            storage_instructions=product.storage_instructions,
+            medical_information=product.medical_information,
+            usage_instructions=product.usage_instructions,
             instructions_to_use=product.instructions_to_use,
-            shelf_life=product.shelf_life,
+            storage_instructions=product.storage_instructions,
+            manufacturer_information=product.manufacturer_information,
             manufacturer_details=product.manufacturer_details,
             brand_owner=product.brand_owner,
+            fssai_information=product.fssai_information,
+            fssai_licenses=product.fssai_licenses,
+            packaging_information=product.packaging_information,
+            batch_information=product.batch_information,
             manufacturing_date=product.manufacturing_date,
             expiry_date=product.expiry_date,
+            best_before=product.best_before,
+            shelf_life=product.shelf_life,
+            barcodes=product.barcodes,
             barcode=product.barcode,
             certifications=product.certifications,
-            fssai_licenses=product.fssai_licenses,
+            regulatory_text=product.regulatory_text,
+            footnotes=product.footnotes,
             customer_care=product.customer_care,
+            other_important_text=product.other_important_text,
+            veg_nonveg=product.veg_nonveg,
+            category=product.category,
             tags=product.tags,
             images=product.images,
             status=product.status,
             created_by=str(current_user.id),
             created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            updated_at=datetime.utcnow(),
         )
-        
         await new_product.insert()
-        
-        return {
-            "success": True,
-            "message": "Product created successfully",
-            "product_id": str(new_product.id)
-        }
+        return {"success": True, "message": "Product created successfully", "product_id": str(new_product.id)}
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create product: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to create product: {e}")
 
 
 @router.get("", response_model=dict)
@@ -949,172 +1364,176 @@ async def list_products(
     limit: int = 50,
     category: Optional[str] = None,
     status: Optional[str] = None,
-    search: Optional[str] = None
+    search: Optional[str] = None,
 ):
     """List all products with optional filters"""
     try:
         query = {}
-        
         if category:
             query["category"] = category
         if status:
             query["status"] = status
         if search:
             query["$or"] = [
-                {"product_name": {"$regex": search, "$options": "i"}},
-                {"parent_brand": {"$regex": search, "$options": "i"}},
-                {"variant": {"$regex": search, "$options": "i"}}
+                {"product_name":  {"$regex": search, "$options": "i"}},
+                {"parent_brand":  {"$regex": search, "$options": "i"}},
+                {"variant":       {"$regex": search, "$options": "i"}},
             ]
         
         products = await Product.find(query).skip(skip).limit(limit).to_list()
-        total = await Product.find(query).count()
-
-        # Debug logging
-        for p in products:
-            if "Nutralite" in p.product_name:
-                print(f"[API DEBUG] Product: {p.product_name}")
-                print(f"[API DEBUG] Images count: {len(p.images) if p.images else 0}")
-                print(f"[API DEBUG] Images type: {type(p.images)}")
+        total    = await Product.find(query).count()
 
         return {
             "products": [
                 {
-                    "id": str(p.id),
-                    "product_name": p.product_name,
-                    "parent_brand": p.parent_brand,
-                    "variant": p.variant,
-                    "mrp": p.mrp,
-                    "category": p.category,
-                    "status": p.status,
-                    "pack_size": p.pack_size,
-                    "net_weight": p.net_weight,
-                    "created_at": p.created_at.isoformat(),
+                    "id":               str(p.id),
+                    "product_name":     p.product_name,
+                    "parent_brand":     p.parent_brand,
+                    "variant":          p.variant,
+                    "mrp":              p.mrp,
+                    "uspf":             p.uspf,
+                    "category":         p.category,
+                    "status":           p.status,
+                    "pack_size":        p.pack_size,
+                    "net_quantity":     p.net_quantity,
+                    "net_weight":       p.net_weight,
+                    "created_at":       p.created_at.isoformat(),
                     "manufacturing_date": p.manufacturing_date,
-                    "expiry_date": p.expiry_date,
-                    "images": p.images if p.images else []  # All images for preview
+                    "expiry_date":      p.expiry_date,
+                    "images":           p.images if p.images else [],
                 }
                 for p in products
             ],
             "total": total,
-            "skip": skip,
-            "limit": limit
+            "skip":  skip,
+            "limit": limit,
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch products: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch products: {e}")
 
 
 @router.get("/{product_id}", response_model=dict)
 async def get_product(
     product_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """Get a single product by ID"""
     try:
         from bson import ObjectId
         product = await Product.get(ObjectId(product_id))
-        
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
         
         return {
-            "id": str(product.id),
-            "product_name": product.product_name,
-            "parent_brand": product.parent_brand,
-            "sub_brand": product.sub_brand,
-            "variant": product.variant,
-            "net_weight": product.net_weight,
-            "pack_size": product.pack_size,
-            "serving_size": product.serving_size,
-            "mrp": product.mrp,
-            "packing_format": product.packing_format,
-            "veg_nonveg": product.veg_nonveg,
-            "category": product.category,
-            "nutrition_table": product.nutrition_table,
-            "ingredients": product.ingredients,
-            "allergen_info": product.allergen_info,
-            "claims": product.claims,
-            "storage_instructions": product.storage_instructions,
-            "instructions_to_use": product.instructions_to_use,
-            "shelf_life": product.shelf_life,
-            "manufacturer_details": product.manufacturer_details,
-            "brand_owner": product.brand_owner,
-            "manufacturing_date": product.manufacturing_date,
-            "expiry_date": product.expiry_date,
-            "barcode": product.barcode,
-            "certifications": product.certifications,
-            "fssai_licenses": product.fssai_licenses,
-            "customer_care": product.customer_care,
-            "tags": product.tags,
-            "images": product.images,
-            "status": product.status,
-            "created_at": product.created_at.isoformat(),
-            "updated_at": product.updated_at.isoformat()
+            "id":                     str(product.id),
+            "product_name":           product.product_name,
+            "parent_brand":           product.parent_brand,
+            "sub_brand":              product.sub_brand,
+            "variant":                product.variant,
+            "product_category":       product.product_category,
+            "product_type":           product.product_type,
+            # pack
+            "net_quantity":           product.net_quantity,
+            "net_weight":             product.net_weight,
+            "pack_size":              product.pack_size,
+            "serving_size":           product.serving_size,
+            "servings_per_pack":      product.servings_per_pack,
+            "packing_format":         product.packing_format,
+            # pricing
+            "mrp":                    product.mrp,
+            "uspf":                   product.uspf,
+            # nutrition
+            "nutrition_table":        product.nutrition_table,
+            "nutrition_notes":        product.nutrition_notes,
+            # composition
+            "ingredients":            product.ingredients,
+            "allergen_information":   product.allergen_information,
+            "claims":                 product.claims,
+            "medical_information":    product.medical_information,
+            "usage_instructions":     product.usage_instructions,
+            "storage_instructions":   product.storage_instructions,
+            # manufacturer / fssai
+            "manufacturer_information": product.manufacturer_information,
+            "manufacturer_details":   product.manufacturer_details,
+            "brand_owner":            product.brand_owner,
+            "fssai_information":      product.fssai_information,
+            "fssai_licenses":         product.fssai_licenses,
+            # packaging / batch
+            "packaging_information":  product.packaging_information,
+            "batch_information":      product.batch_information,
+            # dates
+            "manufacturing_date":     product.manufacturing_date,
+            "expiry_date":            product.expiry_date,
+            "best_before":            product.best_before,
+            "shelf_life":             product.shelf_life,
+            # identifiers
+            "barcodes":               product.barcodes,
+            "barcode":                product.barcode,
+            # regulatory / other
+            "certifications":         product.certifications,
+            "regulatory_text":        product.regulatory_text,
+            "footnotes":              product.footnotes,
+            "customer_care":          product.customer_care,
+            "other_important_text":   product.other_important_text,
+            "veg_nonveg":             product.veg_nonveg,
+            "category":               product.category,
+            "tags":                   product.tags,
+            "images":                 product.images,
+            "status":                 product.status,
+            "created_at":             product.created_at.isoformat(),
+            "updated_at":             product.updated_at.isoformat(),
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch product: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch product: {e}")
 
 
 @router.put("/{product_id}", response_model=dict)
 async def update_product(
     product_id: str,
     product_update: ProductCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """Update a product"""
     try:
         from bson import ObjectId
         product = await Product.get(ObjectId(product_id))
-        
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
         
-        # Update fields
         update_data = product_update.model_dump(exclude_unset=True)
         update_data["updated_at"] = datetime.utcnow()
-        
         for field, value in update_data.items():
             setattr(product, field, value)
         
         await product.save()
-        
-        return {
-            "success": True,
-            "message": "Product updated successfully",
-            "product_id": str(product.id)
-        }
+        return {"success": True, "message": "Product updated successfully", "product_id": str(product.id)}
         
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update product: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update product: {e}")
 
 
 @router.delete("/{product_id}", response_model=dict)
 async def delete_product(
     product_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """Delete a product"""
     try:
         from bson import ObjectId
         product = await Product.get(ObjectId(product_id))
-        
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
         
         await product.delete()
-        
-        return {
-            "success": True,
-            "message": "Product deleted successfully"
-        }
+        return {"success": True, "message": "Product deleted successfully"}
         
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete product: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"Failed to delete product: {e}")

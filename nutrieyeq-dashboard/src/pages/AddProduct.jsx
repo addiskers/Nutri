@@ -11,506 +11,494 @@ const AddProduct = () => {
   const navigate = useNavigate()
   const hasPermission = authService.hasPermission('add_products')
   const [activeTab, setActiveTab] = useState('basic')
-  
-  // Image states
+
+  // ── Image states ───────────────────────────────────────────────────────────
   const [images, setImages] = useState([
-    { id: 1, label: 'Front', file: null, dataUrl: null },
-    { id: 2, label: 'Back', file: null, dataUrl: null },
-    { id: 3, label: 'Side 1', file: null, dataUrl: null },
-    { id: 4, label: 'Side 2', file: null, dataUrl: null },
+    { id: 1, label: 'Front',   file: null, dataUrl: null },
+    { id: 2, label: 'Back',    file: null, dataUrl: null },
+    { id: 3, label: 'Side 1',  file: null, dataUrl: null },
+    { id: 4, label: 'Side 2',  file: null, dataUrl: null },
     { id: 5, label: 'Add Image', file: null, dataUrl: null }
   ])
-  
-  // Extraction states
-  const [isExtracting, setIsExtracting] = useState(false)
+
+  // ── Extraction states ──────────────────────────────────────────────────────
+  const [isExtracting, setIsExtracting]         = useState(false)
   const [extractionComplete, setExtractionComplete] = useState(false)
-  const [extractionError, setExtractionError] = useState(null)
-  const [extractionCost, setExtractionCost] = useState(null)
-  
-  // Saving state
-  const [isSaving, setIsSaving] = useState(false)
-  
-  // Form states
-  const [claims, setClaims] = useState([])
-  const [newClaim, setNewClaim] = useState('')
-  const [ingredients, setIngredients] = useState([])
-  const [newIngredient, setNewIngredient] = useState('')
-  const [allergens, setAllergens] = useState([])
-  const [newAllergen, setNewAllergen] = useState('')
-  const [storageData, setStorageData] = useState({
-    shelfLife: '',
-    storageCondition: '',
-    instructionsToUse: '',
-    packagingDetails: ''
-  })
-  const [companyData, setCompanyData] = useState({
-    brandOwner: '',
-    marketedBy: '',
-    manufacturedBy: '',
-    packedBy: '',
-    otherNotes: '',
-    fssai: '',
-    barcode: ''
-  })
-  const [nutritionRows, setNutritionRows] = useState([])
+  const [extractionError, setExtractionError]   = useState(null)
+  const [extractionCost, setExtractionCost]     = useState(null)
+  const [isSaving, setIsSaving]                 = useState(false)
+
+  // ── Basic form data ────────────────────────────────────────────────────────
   const [formData, setFormData] = useState({
-    productName: '',
-    brand: '',
-    subBrand: '',
-    variant: '',
-    packSize: '',
-    mrp: '',
-    manufactured: '',
-    expiry: '',
-    shelfLife: '',
-    serveSize: '',
-    category: '',
-    vegNonVeg: '',
-    categoryInfo: '',
-    variantDetails: '',
-    packingFormat: '',
-    barcode: ''
+    productName: '', brand: '', subBrand: '', variant: '',
+    packSize: '', servingsPerPack: '', mrp: '', uspf: '',
+    manufactured: '', expiry: '', bestBefore: '', shelfLife: '',
+    serveSize: '', category: '', vegNonVeg: '', packingFormat: ''
   })
 
-  const [copiedField, setCopiedField] = useState(null)
+  // ── Claims / Tags ──────────────────────────────────────────────────────────
+  const [claims, setClaims]             = useState([])
+  const [newClaim, setNewClaim]         = useState('')
+  const predefinedTags = [
+    'Kids Nutrition','Dairy Mix','Protein Drink','Sugar Free','Gluten Free',
+    'Organic','High Protein','Low Fat','Fortified','Natural',
+    'Premium','Value Pack','Personal Care','Hygiene','Sanitizer','IMA Recommended'
+  ]
+  const [selectedTags, setSelectedTags] = useState([])
 
+  // ── Nutrition ──────────────────────────────────────────────────────────────
+  const [nutritionRows, setNutritionRows]       = useState([])
+  const [nutritionNotes, setNutritionNotes]     = useState([])
+  const [newNutritionNote, setNewNutritionNote] = useState('')
+
+  // ── Composition ───────────────────────────────────────────────────────────
+  const [ingredients, setIngredients]   = useState([])
+  const [newIngredient, setNewIngredient] = useState('')
+  const [allergens, setAllergens]       = useState([])
+  const [newAllergen, setNewAllergen]   = useState('')
+
+  const [storageData, setStorageData] = useState({
+    shelfLife: '', storageCondition: ''
+  })
+  const [directionsToUse, setDirectionsToUse]     = useState('')
+  const [preparationMethod, setPreparationMethod] = useState('')
+  const [medicalInfo, setMedicalInfo] = useState({
+    intendedUse: '', warnings: '', contraindications: ''
+  })
+
+  // ── Company ───────────────────────────────────────────────────────────────
+  const [companyData, setCompanyData] = useState({
+    brandOwner: '', marketedBy: '', manufacturedBy: '', packedBy: '', otherNotes: ''
+  })
+  const [fssaiNumbers, setFssaiNumbers]     = useState([])
+  const [newFssaiNumber, setNewFssaiNumber] = useState('')
+  const [barcodes, setBarcodes]             = useState([])
+  const [newBarcode, setNewBarcode]         = useState('')
+  const [certifications, setCertifications]       = useState([])
+  const [newCertification, setNewCertification]   = useState('')
+  const [packagingData, setPackagingData] = useState({ manufacturer: '', codes: '' })
+  const [batchData, setBatchData]         = useState({ lotNumber: '', machineCode: '', otherCodes: '' })
+  const [customerCareData, setCustomerCareData] = useState({ phones: '', email: '', website: '', address: '' })
+  const [regulatoryText, setRegulatoryText]     = useState('')
+  const [footnotes, setFootnotes]               = useState('')
+  const [otherImportantText, setOtherImportantText] = useState('')
+
+  // ── Copy helper ───────────────────────────────────────────────────────────
+  const [copiedField, setCopiedField] = useState(null)
   const copyToClipboard = (text, fieldName) => {
     if (!text) return
     navigator.clipboard.writeText(String(text))
     setCopiedField(fieldName)
     setTimeout(() => setCopiedField(null), 1500)
   }
-
   const CopyBtn = ({ value, field }) => (
-    <button
-      type="button"
-      onClick={(e) => { e.preventDefault(); copyToClipboard(value, field) }}
+    <button type="button" onClick={(e) => { e.preventDefault(); copyToClipboard(value, field) }}
       className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded hover:bg-gray-200 transition-colors"
-      title={copiedField === field ? 'Copied!' : 'Copy'}
-    >
-      {copiedField === field ? (
-        <Check className="w-3.5 h-3.5 text-green-600" />
-      ) : (
-        <Copy className="w-3.5 h-3.5 text-[#65758b]" />
-      )}
+      title={copiedField === field ? 'Copied!' : 'Copy'}>
+      {copiedField === field ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5 text-[#65758b]" />}
     </button>
   )
-
   const CopyBtnStandalone = ({ value, field }) => (
-    <button
-      type="button"
-      onClick={(e) => { e.preventDefault(); copyToClipboard(value, field) }}
+    <button type="button" onClick={(e) => { e.preventDefault(); copyToClipboard(value, field) }}
       className="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-200 transition-colors flex-shrink-0"
-      title={copiedField === field ? 'Copied!' : 'Copy'}
-    >
-      {copiedField === field ? (
-        <Check className="w-3.5 h-3.5 text-green-600" />
-      ) : (
-        <Copy className="w-3.5 h-3.5 text-[#65758b]" />
-      )}
+      title={copiedField === field ? 'Copied!' : 'Copy'}>
+      {copiedField === field ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5 text-[#65758b]" />}
     </button>
   )
 
-  const predefinedTags = [
-    'Kids Nutrition', 'Dairy Mix', 'Protein Drink', 'Sugar Free', 'Gluten Free',
-    'Organic', 'High Protein', 'Low Fat', 'Fortified', 'Natural',
-    'Premium', 'Value Pack', 'Personal Care', 'Hygiene', 'Sanitizer', 'IMA Recommended'
-  ]
-  const [selectedTags, setSelectedTags] = useState([])
+  // ── Reusable chip-list helpers ─────────────────────────────────────────────
+  const inputClass = "w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
+  const textareaClass = "w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+  const addBtnClass  = "bg-[#b455a0] h-10 px-4 py-2 rounded-md font-ibm-plex font-medium text-sm text-white hover:bg-[#a04890] transition-colors"
+  const labelClass   = "text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block"
 
   const tabs = [
-    { id: 'basic', label: 'Basic Info' },
-    { id: 'nutrition', label: 'Nutrition' },
-    { id: 'composition', label: 'Composition' },
-    { id: 'company', label: 'Company' }
+    { id: 'basic',       label: 'Basic Info'   },
+    { id: 'nutrition',   label: 'Nutrition'    },
+    { id: 'composition', label: 'Composition'  },
+    { id: 'company',     label: 'Company'      }
   ]
 
+  // ── Image handlers ─────────────────────────────────────────────────────────
   const handleAddMoreImages = () => {
-    if (images.length < 10) {
-      setImages([...images, { 
-        id: images.length + 1, 
-        label: `Image ${images.length + 1}`, 
-        file: null,
-        dataUrl: null
-      }])
-    }
+    if (images.length < 10)
+      setImages([...images, { id: images.length + 1, label: `Image ${images.length + 1}`, file: null, dataUrl: null }])
   }
-
   const handleImageCropped = (index, imageData, cropData) => {
-    const newImages = [...images]
-    newImages[index].file = { imageData, cropData }
-    newImages[index].dataUrl = imageData
-    setImages(newImages)
+    const updated = [...images]
+    updated[index].file   = { imageData, cropData }
+    updated[index].dataUrl = imageData
+    setImages(updated)
   }
 
+  // ── Extraction ─────────────────────────────────────────────────────────────
   const handleSubmitImages = async () => {
-    console.log('[ADD_PRODUCT] Extract button clicked')
-    // Prevent double extraction
-    if (isExtracting) {
-      console.log('[ADD_PRODUCT] Extraction already in progress, ignoring')
-      return
-    }
-    // Filter out images that have files
-    const uploadedImages = images.filter(img => img.dataUrl !== null)
-    console.log('[ADD_PRODUCT] Uploaded images count:', uploadedImages.length)
-    
-    if (uploadedImages.length === 0) {
-      console.log('[ADD_PRODUCT] No images to extract')
-      setExtractionError('Please upload at least one image')
-      return
-    }
-
-    console.log('[ADD_PRODUCT] Starting extraction...')
-    setIsExtracting(true)
-    setExtractionError(null)
-    setExtractionComplete(false)
-    
+    if (isExtracting) return
+    const uploaded = images.filter(img => img.dataUrl !== null)
+    if (uploaded.length === 0) { setExtractionError('Please upload at least one image'); return }
+    setIsExtracting(true); setExtractionError(null); setExtractionComplete(false)
     try {
-      // Get all image data URLs
-      const imageDataUrls = uploadedImages.map(img => img.dataUrl)
-      console.log('[ADD_PRODUCT] Calling extraction service...')
-      
-      // Call extraction API
-      const result = await productService.extractFromImages(imageDataUrls)
-      console.log('[ADD_PRODUCT] Extraction result:', result)
-      
+      const result = await productService.extractFromImages(uploaded.map(img => img.dataUrl))
       if (result.success && result.data) {
-        // Populate form with extracted data
         populateFormFromExtraction(result.data)
         setExtractionComplete(true)
         setExtractionCost(result.cost)
       } else {
         setExtractionError(result.error || 'Extraction failed')
       }
-    } catch (error) {
-      console.error('Extraction error:', error)
-      setExtractionError(error.message || 'Failed to extract data from images')
+    } catch (err) {
+      setExtractionError(err.message || 'Failed to extract data from images')
     } finally {
       setIsExtracting(false)
     }
   }
 
   const populateFormFromExtraction = (data) => {
-    // Populate basic info
+    // Basic info
     if (data.basic) {
       setFormData(prev => ({
         ...prev,
-        productName: data.basic.productName || prev.productName,
-        brand: data.basic.brand || prev.brand,
-        subBrand: data.basic.subBrand || prev.subBrand,
-        variant: data.basic.variant || prev.variant,
-        packSize: data.basic.packSize || prev.packSize,
-        serveSize: data.basic.serveSize || prev.serveSize,
-        mrp: data.basic.mrp || prev.mrp,
-        packingFormat: data.basic.packingFormat || prev.packingFormat,
-        manufactured: data.basic.manufactured || prev.manufactured,
-        expiry: data.basic.expiry || prev.expiry,
-        shelfLife: data.basic.shelfLife || prev.shelfLife,
-        vegNonVeg: data.basic.vegNonVeg === 'Vegetarian' ? 'veg' : 
-                   data.basic.vegNonVeg === 'Non-Vegetarian' ? 'non-veg' : 
-                   data.basic.vegNonVeg?.toLowerCase() || prev.vegNonVeg,
+        productName:     data.basic.productName     || prev.productName,
+        brand:           data.basic.brand           || prev.brand,
+        subBrand:        data.basic.subBrand        || prev.subBrand,
+        variant:         data.basic.variant         || prev.variant,
+        packSize:        data.basic.packSize        || prev.packSize,
+        servingsPerPack: data.basic.servingsPerPack || prev.servingsPerPack,
+        serveSize:       data.basic.serveSize       || prev.serveSize,
+        mrp:             data.basic.mrp             || prev.mrp,
+        uspf:            data.basic.uspf            || prev.uspf,
+        packingFormat:   data.basic.packingFormat   || prev.packingFormat,
+        manufactured:    data.basic.manufactured    || prev.manufactured,
+        expiry:          data.basic.expiry          || prev.expiry,
+        bestBefore:      data.basic.bestBefore      || prev.bestBefore,
+        shelfLife:       data.basic.shelfLife       || prev.shelfLife,
+        category:        data.basic.category        || prev.category,
+        vegNonVeg:
+          data.basic.vegNonVeg === 'Vegetarian'     ? 'veg' :
+          data.basic.vegNonVeg === 'Non-Vegetarian' ? 'non-veg' :
+          data.basic.vegNonVeg?.toLowerCase()       || prev.vegNonVeg,
       }))
     }
-    
-    // Populate category
-    if (data.basic?.category) {
-      setFormData(prev => ({ ...prev, category: data.basic.category }))
-    }
-    
-    // Also populate dates from dates object if present (fallback)
+
+    // Dates fallback
     if (data.dates) {
       setFormData(prev => ({
         ...prev,
         manufactured: data.dates.manufacturing_date || prev.manufactured,
-        expiry: data.dates.expiry_date || prev.expiry,
-        shelfLife: data.dates.shelf_life || prev.shelfLife
+        expiry:       data.dates.expiry_date        || prev.expiry,
+        bestBefore:   data.dates.best_before        || prev.bestBefore,
+        shelfLife:    data.dates.shelf_life         || prev.shelfLife,
       }))
     }
-    
-    // Populate nutrition table
-    if (data.nutrition && Array.isArray(data.nutrition) && data.nutrition.length > 0) {
-      const nutritionData = data.nutrition.map((item, index) => {
-        const values = item.values || {}
-        // Find per 100g value
-        const per100gKey = Object.keys(values).find(k => k.toLowerCase().includes('100'))
-        const perServeKey = Object.keys(values).find(k => k.toLowerCase().includes('serve'))
-        const rdaKey = Object.keys(values).find(k => k.toLowerCase().includes('rda'))
-        
+
+    // Nutrition — new format: data.nutrition = { table: [], notes: [] }
+    const nutritionSrc = data.nutrition || {}
+    const tableArr = Array.isArray(nutritionSrc) ? nutritionSrc
+                   : Array.isArray(nutritionSrc.table) ? nutritionSrc.table : []
+    if (tableArr.length > 0) {
+      const rows = tableArr.map((item, idx) => {
+        const vals   = item.values || {}
+        const p100k  = Object.keys(vals).find(k => k.toLowerCase().includes('100'))
+        const pServeK = Object.keys(vals).find(k => k.toLowerCase().includes('serve'))
+        const rdaK   = Object.keys(vals).find(k => k.toLowerCase().includes('rda') || k.includes('%'))
         return {
-          id: index + 1,
+          id:       idx + 1,
           nutrient: item.nutrient_name || '',
-          per100g: per100gKey ? values[per100gKey]?.replace(/[^\d.]/g, '') || '' : '',
-          perServe: perServeKey ? values[perServeKey] || '' : '',
-          rda: rdaKey ? values[rdaKey] || '' : ''
+          unit:     item.unit          || '',
+          per100g:  p100k   ? (vals[p100k]  || '') : '',
+          perServe: pServeK ? (vals[pServeK] || '') : '',
+          rda:      rdaK    ? (vals[rdaK]    || '') : '',
         }
       })
-      setNutritionRows(nutritionData)
+      setNutritionRows(rows)
     }
-    
-    // Populate composition
+    if (Array.isArray(nutritionSrc.notes) && nutritionSrc.notes.length > 0) {
+      setNutritionNotes(nutritionSrc.notes.filter(Boolean))
+    }
+
+    // Composition
     if (data.composition) {
-      // Ingredients - can be string or comma separated
-      if (data.composition.ingredients) {
-        const ingredientStr = data.composition.ingredients
-        if (typeof ingredientStr === 'string' && ingredientStr.length > 0) {
-
-          const ingredientList = (() => {
-            const result = []
-            let current = ''
-            let depth = 0
-
-            for (let char of ingredientStr) {
-              if (char === '(') depth++
-              if (char === ')') depth--
-
-              if (char === ',' && depth === 0) {
-                result.push(current.trim())
-                current = ''
-              } else {
-                current += char
-              }
-            }
-
-            if (current.trim()) {
-              result.push(current.trim())
-            }
-
-            return result
-          })()
-
-          setIngredients(ingredientList)
+      const comp = data.composition
+      if (comp.ingredients) {
+        const str = comp.ingredients
+        if (typeof str === 'string' && str.length > 0) {
+          const list = []
+          let cur = '', depth = 0
+          for (const ch of str) {
+            if (ch === '(') depth++
+            if (ch === ')') depth--
+            if (ch === ',' && depth === 0) { list.push(cur.trim()); cur = '' }
+            else cur += ch
+          }
+          if (cur.trim()) list.push(cur.trim())
+          setIngredients(list)
         }
       }
-      
-      // Allergens
-      if (data.composition.allergenInfo && data.composition.allergenInfo !== 'not specified') {
-        const allergenStr = data.composition.allergenInfo
-        if (typeof allergenStr === 'string') {
-          const allergenList = allergenStr.split(',').map(a => a.trim()).filter(a => a)
-          setAllergens(allergenList)
+      if (comp.allergenInfo && comp.allergenInfo !== 'not specified') {
+        setAllergens(comp.allergenInfo.split(',').map(a => a.trim()).filter(Boolean))
+      }
+      if (Array.isArray(comp.claims)) {
+        setClaims(comp.claims.filter(c => c && c !== 'not specified'))
+      }
+      // Storage instructions (array or string)
+      if (comp.storageInstructions) {
+        const si = comp.storageInstructions
+        setStorageData(prev => ({
+          ...prev,
+          storageCondition: Array.isArray(si) ? si.join('\n') : (si !== 'not specified' ? si : '')
+        }))
+      }
+      // Usage instructions
+      if (comp.usageInstructions) {
+        const ui = comp.usageInstructions
+        if (typeof ui === 'object') {
+          setDirectionsToUse((ui.directions_to_use || []).join('\n'))
+          setPreparationMethod((ui.preparation_method || []).join('\n'))
+        } else if (typeof ui === 'string' && ui !== 'not specified') {
+          setDirectionsToUse(ui)
         }
       }
-      
-      // Claims
-      if (data.composition.claims && Array.isArray(data.composition.claims)) {
-        setClaims(data.composition.claims.filter(c => c && c !== 'not specified'))
-      }
-      
-      // Storage
-      if (data.composition.storageInstructions && data.composition.storageInstructions !== 'not specified') {
-        setStorageData(prev => ({
-          ...prev,
-          storageCondition: data.composition.storageInstructions
-        }))
-      }
-      if (data.composition.instructionsToUse && data.composition.instructionsToUse !== 'not specified') {
-        setStorageData(prev => ({
-          ...prev,
-          instructionsToUse: data.composition.instructionsToUse
-        }))
-      }
-      if (data.composition.shelfLife && data.composition.shelfLife !== 'not specified') {
-        setStorageData(prev => ({
-          ...prev,
-          shelfLife: data.composition.shelfLife
-        }))
+      // Medical information
+      if (comp.medicalInformation) {
+        const mi = comp.medicalInformation
+        setMedicalInfo({
+          intendedUse:      (mi.intended_use     || []).join('\n'),
+          warnings:         (mi.warnings         || []).join('\n'),
+          contraindications:(mi.contraindications|| []).join('\n'),
+        })
       }
     }
-    
-    // Populate company info
+
+    // Company
     if (data.company) {
-      // Manufacturer details
-      if (data.company.manufacturerDetails && Array.isArray(data.company.manufacturerDetails)) {
-        const manufacturers = data.company.manufacturerDetails
-        
-        for (const mfg of manufacturers) {
-          const type = mfg.type?.toLowerCase() || ''
-          const fullAddress = [mfg.name, mfg.address].filter(Boolean).join(', ')
-          
-          if (type.includes('manufactured')) {
-            setCompanyData(prev => ({ ...prev, manufacturedBy: fullAddress }))
-          } else if (type.includes('packed')) {
-            setCompanyData(prev => ({ ...prev, packedBy: fullAddress }))
-          } else if (type.includes('marketed')) {
-            setCompanyData(prev => ({ ...prev, marketedBy: fullAddress }))
-          }
-          
-          // Get FSSAI from first manufacturer
-          if (mfg.fssai && mfg.fssai !== 'not specified') {
-            setCompanyData(prev => ({ ...prev, fssai: prev.fssai || mfg.fssai }))
-          }
+      const co = data.company
+      if (Array.isArray(co.manufacturerDetails)) {
+        for (const mfg of co.manufacturerDetails) {
+          const type = (mfg.type || '').toLowerCase()
+          const full = [mfg.name, mfg.address].filter(Boolean).join(', ')
+          if (type.includes('manufactur')) setCompanyData(prev => ({ ...prev, manufacturedBy: full }))
+          else if (type.includes('pack'))   setCompanyData(prev => ({ ...prev, packedBy: full }))
+          else if (type.includes('market')) setCompanyData(prev => ({ ...prev, marketedBy: full }))
+          if ((mfg.license_number || mfg.fssai) && mfg.license_number !== 'not specified')
+            setFssaiNumbers(prev => prev.includes(mfg.license_number || mfg.fssai) ? prev : [...prev, mfg.license_number || mfg.fssai])
         }
       }
-      
-      // Barcode
-      if (data.company.barcode && data.company.barcode !== 'not specified') {
-        setCompanyData(prev => ({ ...prev, barcode: data.company.barcode }))
+      if (co.fssaiInformation?.license_numbers) {
+        setFssaiNumbers(co.fssaiInformation.license_numbers.filter(Boolean))
       }
-      
-      // Customer care
-      if (data.company.customerCare) {
-        const cc = data.company.customerCare
-        let notes = []
-        if (cc.phone && Array.isArray(cc.phone) && cc.phone.length > 0) {
-          notes.push(`Phone: ${cc.phone.join(', ')}`)
-        }
-        if (cc.email && cc.email !== 'not specified') {
-          notes.push(`Email: ${cc.email}`)
-        }
-        if (cc.website && cc.website !== 'not specified') {
-          notes.push(`Website: ${cc.website}`)
-        }
-        if (notes.length > 0) {
-          setCompanyData(prev => ({ ...prev, otherNotes: notes.join('\n') }))
-        }
+      if (Array.isArray(co.barcodes) && co.barcodes.length > 0) {
+        setBarcodes(co.barcodes.filter(Boolean))
+      }
+      if (Array.isArray(co.certifications) && co.certifications.length > 0) {
+        setCertifications(co.certifications.filter(Boolean))
+      }
+      if (co.packagingInformation) {
+        setPackagingData({
+          manufacturer: co.packagingInformation.packaging_material_manufacturer || '',
+          codes: (co.packagingInformation.packaging_codes || []).join('\n'),
+        })
+      }
+      if (co.customerCare) {
+        const cc = co.customerCare
+        setCustomerCareData({
+          phones:  (cc.phone || []).join('\n'),
+          email:   cc.email   || '',
+          website: cc.website || '',
+          address: cc.address || '',
+        })
       }
     }
-  }
 
-  const handleAddClaim = () => {
-    if (newClaim.trim()) {
-      setClaims([...claims, newClaim.trim()])
-      setNewClaim('')
+    // Batch
+    if (data.batch) {
+      setBatchData({
+        lotNumber:   data.batch.lot_number   || '',
+        machineCode: data.batch.machine_code || '',
+        otherCodes:  (data.batch.other_codes || []).join('\n'),
+      })
     }
+
+    // Regulatory / other
+    if (Array.isArray(data.regulatory) && data.regulatory.length > 0)
+      setRegulatoryText(data.regulatory.join('\n'))
+    if (Array.isArray(data.footnotes) && data.footnotes.length > 0)
+      setFootnotes(data.footnotes.join('\n'))
+    if (Array.isArray(data.other) && data.other.length > 0)
+      setOtherImportantText(data.other.join('\n'))
   }
 
-  const handleRemoveClaim = (index) => {
-    setClaims(claims.filter((_, i) => i !== index))
-  }
+  // ── Nutrition row helpers ──────────────────────────────────────────────────
+  const handleAddNutritionRow = () =>
+    setNutritionRows([...nutritionRows, { id: Date.now(), nutrient: '', unit: '', per100g: '', perServe: '', rda: '' }])
+  const handleNutritionChange = (id, field, value) =>
+    setNutritionRows(nutritionRows.map(r => r.id === id ? { ...r, [field]: value } : r))
+  const handleRemoveNutritionRow = (id) =>
+    setNutritionRows(nutritionRows.filter(r => r.id !== id))
 
-  const handleAddIngredient = () => {
-    if (newIngredient.trim()) {
-      setIngredients([...ingredients, newIngredient.trim()])
-      setNewIngredient('')
-    }
+  // ── Chip-list helpers ──────────────────────────────────────────────────────
+  const makeChipAdder = (list, setList, newVal, setNew) => () => {
+    if (newVal.trim()) { setList([...list, newVal.trim()]); setNew('') }
   }
+  const makeChipRemover = (list, setList) => (idx) => setList(list.filter((_, i) => i !== idx))
 
-  const handleRemoveIngredient = (index) => {
-    setIngredients(ingredients.filter((_, i) => i !== index))
-  }
+  const handleAddClaim       = makeChipAdder(claims,        setClaims,       newClaim,       setNewClaim)
+  const handleAddIngredient  = makeChipAdder(ingredients,   setIngredients,  newIngredient,  setNewIngredient)
+  const handleAddAllergen    = makeChipAdder(allergens,      setAllergens,    newAllergen,    setNewAllergen)
+  const handleAddNote        = makeChipAdder(nutritionNotes, setNutritionNotes, newNutritionNote, setNewNutritionNote)
+  const handleAddFssai       = makeChipAdder(fssaiNumbers,  setFssaiNumbers, newFssaiNumber, setNewFssaiNumber)
+  const handleAddBarcode     = makeChipAdder(barcodes,      setBarcodes,     newBarcode,     setNewBarcode)
+  const handleAddCert        = makeChipAdder(certifications, setCertifications, newCertification, setNewCertification)
 
-  const handleAddAllergen = () => {
-    if (newAllergen.trim()) {
-      setAllergens([...allergens, newAllergen.trim()])
-      setNewAllergen('')
-    }
-  }
+  const handleRemoveClaim       = makeChipRemover(claims,        setClaims)
+  const handleRemoveIngredient  = makeChipRemover(ingredients,   setIngredients)
+  const handleRemoveAllergen    = makeChipRemover(allergens,      setAllergens)
+  const handleRemoveNote        = makeChipRemover(nutritionNotes, setNutritionNotes)
+  const handleRemoveFssai       = makeChipRemover(fssaiNumbers,  setFssaiNumbers)
+  const handleRemoveBarcode     = makeChipRemover(barcodes,      setBarcodes)
+  const handleRemoveCert        = makeChipRemover(certifications, setCertifications)
 
-  const handleRemoveAllergen = (index) => {
-    setAllergens(allergens.filter((_, i) => i !== index))
-  }
+  const handleTagToggle = (tag) =>
+    setSelectedTags(selectedTags.includes(tag) ? selectedTags.filter(t => t !== tag) : [...selectedTags, tag])
 
-  const handleAddNutritionRow = () => {
-    setNutritionRows([
-      ...nutritionRows,
-      {
-        id: nutritionRows.length + 1,
-        nutrient: '',
-        per100g: '',
-        perServe: '',
-        rda: ''
-      }
-    ])
-  }
-
-  const handleNutritionChange = (id, field, value) => {
-    setNutritionRows(nutritionRows.map(row =>
-      row.id === id ? { ...row, [field]: value } : row
-    ))
-  }
-
-  const handleRemoveNutritionRow = (id) => {
-    setNutritionRows(nutritionRows.filter(row => row.id !== id))
-  }
-
-  const handleTagToggle = (tag) => {
-    if (selectedTags.includes(tag)) {
-      setSelectedTags(selectedTags.filter(t => t !== tag))
-    } else {
-      setSelectedTags([...selectedTags, tag])
-    }
-  }
-
+  // ── Save ───────────────────────────────────────────────────────────────────
   const handleSaveProduct = async () => {
-    // Validate required fields
-    if (!formData.productName || !formData.brand) {
-      alert('Please fill in all required fields (*)')
-      return
-    }
-
+    if (!formData.productName || !formData.brand) { alert('Please fill in all required fields (*)'); return }
     setIsSaving(true)
-    
     try {
-      // Prepare product data for API
       const productData = {
-        product_name: formData.productName,
-        parent_brand: formData.brand,
-        sub_brand: formData.subBrand || null,
-        variant: formData.variant || null,
-        net_weight: formData.packSize || null,
-        serving_size: formData.serveSize || null,
-        mrp: formData.mrp ? parseFloat(formData.mrp) : null,
-        packing_format: formData.packingFormat || null,
-        veg_nonveg: formData.vegNonVeg || null,
-        category: formData.category || null,
-        
-        // Nutrition
+        product_name:    formData.productName,
+        parent_brand:    formData.brand,
+        sub_brand:       formData.subBrand       || null,
+        variant:         formData.variant        || null,
+        net_quantity:    formData.packSize       || null,
+        net_weight:      formData.packSize       || null,
+        pack_size:       formData.packSize       || null,
+        serving_size:    formData.serveSize      || null,
+        servings_per_pack: formData.servingsPerPack || null,
+        packing_format:  formData.packingFormat  || null,
+        mrp:             formData.mrp ? parseFloat(formData.mrp) : null,
+        uspf:            formData.uspf           || null,
+        veg_nonveg:      formData.vegNonVeg      || null,
+        category:        formData.category       || null,
+
         nutrition_table: nutritionRows.map(row => ({
           nutrient_name: row.nutrient,
-          values: {
-            'Per 100g': row.per100g,
-            'Per Serve': row.perServe,
-            '% RDA': row.rda
-          }
+          unit:          row.unit || '',
+          values: { 'Per 100g': row.per100g, 'Per Serve': row.perServe, '% RDA': row.rda }
         })),
-        
-        // Composition
-        ingredients: ingredients.join(', '),
-        allergen_info: allergens.join(', '),
-        claims: claims,
-        storage_instructions: storageData.storageCondition,
-        shelf_life: storageData.shelfLife,
-        
-        // Company
+        nutrition_notes: nutritionNotes,
+
+        ingredients:           ingredients.join(', '),
+        allergen_information:  allergens.join(', '),
+        claims:                claims,
+
+        medical_information: {
+          intended_use:      medicalInfo.intendedUse.split('\n').filter(Boolean),
+          warnings:          medicalInfo.warnings.split('\n').filter(Boolean),
+          contraindications: medicalInfo.contraindications.split('\n').filter(Boolean),
+        },
+        usage_instructions: {
+          directions_to_use: directionsToUse.split('\n').filter(Boolean),
+          preparation_method: preparationMethod.split('\n').filter(Boolean),
+        },
+        storage_instructions: storageData.storageCondition.split('\n').filter(Boolean),
+        shelf_life: storageData.shelfLife || null,
+
+        manufacturer_information: [
+          companyData.manufacturedBy && { type: 'Manufactured By', name: companyData.manufacturedBy, address: '', license_number: '' },
+          companyData.packedBy       && { type: 'Manufactured By', name: companyData.packedBy,       address: '', license_number: '' },
+          companyData.marketedBy     && { type: 'Marketed By',     name: companyData.marketedBy,     address: '', license_number: '' },
+        ].filter(Boolean),
         manufacturer_details: [
           companyData.manufacturedBy && { type: 'Manufactured by', name: companyData.manufacturedBy },
-          companyData.packedBy && { type: 'Packed by', name: companyData.packedBy },
-          companyData.marketedBy && { type: 'Marketed by', name: companyData.marketedBy }
+          companyData.marketedBy     && { type: 'Marketed by',     name: companyData.marketedBy },
         ].filter(Boolean),
-        brand_owner: companyData.brandOwner || null,
-        barcode: companyData.barcode || null,
-        fssai_licenses: companyData.fssai ? [companyData.fssai] : [],
-        
-        // Dates
-        manufacturing_date: formData.manufactured || null,
-        expiry_date: formData.expiry || null,
-        
-        // Tags
-        tags: selectedTags,
-        
-        // Images (store base64)
-        images: images.filter(img => img.dataUrl).map(img => img.dataUrl),
+        brand_owner:       companyData.brandOwner || null,
 
-        // Status - always published by default
-        status: 'published'
+        fssai_information: { license_numbers: fssaiNumbers },
+        fssai_licenses:    fssaiNumbers,
+
+        barcodes:          barcodes,
+        barcode:           barcodes[0] || null,
+
+        certifications:    certifications,
+
+        packaging_information: {
+          packaging_material_manufacturer: packagingData.manufacturer,
+          packaging_codes: packagingData.codes.split('\n').filter(Boolean),
+        },
+        batch_information: {
+          lot_number:   batchData.lotNumber,
+          machine_code: batchData.machineCode,
+          other_codes:  batchData.otherCodes.split('\n').filter(Boolean),
+        },
+        customer_care: {
+          phone:   customerCareData.phones.split('\n').filter(Boolean),
+          email:   customerCareData.email,
+          website: customerCareData.website,
+          address: customerCareData.address,
+        },
+
+        manufacturing_date: formData.manufactured || null,
+        expiry_date:        formData.expiry       || null,
+        best_before:        formData.bestBefore   || null,
+
+        regulatory_text:      regulatoryText.split('\n').filter(Boolean),
+        footnotes:            footnotes.split('\n').filter(Boolean),
+        other_important_text: otherImportantText.split('\n').filter(Boolean),
+
+        tags:   selectedTags,
+        images: images.filter(img => img.dataUrl).map(img => img.dataUrl),
+        status: 'published',
       }
-      
+
       const result = await productService.createProduct(productData)
-      
       if (result.success) {
         alert('Product saved successfully!')
         navigate('/products')
       } else {
         alert(`Failed to save product: ${result.error}`)
       }
-    } catch (error) {
-      console.error('Save error:', error)
+    } catch (err) {
+      console.error('Save error:', err)
       alert('Failed to save product. Please try again.')
     } finally {
       setIsSaving(false)
     }
   }
 
+  // ── Chip list renderer ─────────────────────────────────────────────────────
+  const ChipList = ({ items, onRemove, colorClass = 'bg-primary/10 border-primary/20 text-[#0f1729]' }) => (
+    <div className="flex flex-wrap gap-2 mt-3">
+      {items.map((item, idx) => (
+        <div key={idx} className={`border px-3 py-1.5 rounded-full flex items-center gap-2 ${colorClass}`}>
+          <span className="text-xs font-ibm-plex font-medium">{item}</span>
+          <button onClick={() => onRemove(idx)} className="hover:opacity-70 rounded-full p-0.5">
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      ))}
+    </div>
+  )
+
+  const ChipInput = ({ value, onChange, onAdd, onKeyPress, placeholder, btnLabel = 'Add' }) => (
+    <div className="flex gap-2">
+      <input type="text" value={value} onChange={e => onChange(e.target.value)}
+        onKeyPress={e => e.key === 'Enter' && onAdd()}
+        placeholder={placeholder}
+        className="flex-1 h-10 px-3 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary" />
+      <button onClick={onAdd} className={addBtnClass}>{btnLabel}</button>
+    </div>
+  )
+
+  const SectionHeader = ({ title, copyValue, copyField }) => (
+    <div className="flex items-center justify-between mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">
+      <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729]">{title}</h3>
+      {copyValue && <CopyBtnStandalone value={copyValue} field={copyField} />}
+    </div>
+  )
+
+  // ══════════════════════════════════════════════════════════════════════════
   return (
     <Layout>
       {!hasPermission ? (
@@ -518,901 +506,627 @@ const AddProduct = () => {
       ) : (
         <div className="overflow-y-auto h-full">
           <div className="max-w-6xl mx-auto p-4 md:p-6">
+
             {/* Header */}
-          <div className="flex flex-col sm:flex-row items-start gap-4 mb-6">
-            <button
-              onClick={() => navigate('/products')}
-              className="w-10 h-10 flex items-center justify-center rounded-md hover:bg-gray-100 transition-colors sm:mt-1"
-            >
-              <ArrowLeft className="w-4 h-4 text-[#0f1729]" />
-            </button>
-            
-            <div className="flex-1">
-              <h1 className="text-xl md:text-2xl font-ibm-plex font-bold text-[#0f1729] mb-1">
-                Add New Product
-              </h1>
-              <p className="text-sm md:text-base font-ibm-plex text-[#65758b]">
-                Upload images and let AI extract product data automatically
-              </p>
+            <div className="flex flex-col sm:flex-row items-start gap-4 mb-6">
+              <button onClick={() => navigate('/products')}
+                className="w-10 h-10 flex items-center justify-center rounded-md hover:bg-gray-100 transition-colors sm:mt-1">
+                <ArrowLeft className="w-4 h-4 text-[#0f1729]" />
+              </button>
+              <div className="flex-1">
+                <h1 className="text-xl md:text-2xl font-ibm-plex font-bold text-[#0f1729] mb-1">Add New Product</h1>
+                <p className="text-sm md:text-base font-ibm-plex text-[#65758b]">Upload images and let AI extract product data automatically</p>
+              </div>
+              <button onClick={handleSaveProduct} disabled={isSaving}
+                className="bg-[#b455a0] flex items-center gap-2 h-10 px-4 py-2 rounded-md text-white font-ibm-plex font-medium text-sm hover:bg-[#a04890] transition-colors whitespace-nowrap w-full sm:w-auto justify-center disabled:opacity-50 disabled:cursor-not-allowed">
+                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {isSaving ? 'Saving...' : 'Save Product'}
+              </button>
             </div>
 
-            <button
-              onClick={handleSaveProduct}
-              disabled={isSaving}
-              className="bg-[#b455a0] flex items-center gap-2 h-10 px-4 py-2 rounded-md text-white font-ibm-plex font-medium text-sm hover:bg-[#a04890] transition-colors whitespace-nowrap w-full sm:w-auto justify-center disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSaving ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Save className="w-4 h-4" />
+            {/* Product Images */}
+            <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6 mb-4 md:mb-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 pb-2 border-b border-[#e1e7ef]">
+                <div>
+                  <h2 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729]">Product Images</h2>
+                  <p className="text-xs text-[#65758b] mt-0.5">Upload up to 10 images • Click to crop • Then submit for AI extraction</p>
+                </div>
+                <div className="flex gap-2 sm:gap-3">
+                  <button onClick={handleAddMoreImages} disabled={images.length >= 10}
+                    className="bg-[#f9fafb] border border-[#e1e7ef] flex items-center justify-center gap-2 h-10 px-3 md:px-4 py-2 rounded-md font-ibm-plex font-medium text-xs md:text-sm text-[#0f1729] hover:bg-gray-100 transition-colors flex-1 sm:flex-none disabled:opacity-50">
+                    <Plus className="w-4 h-4" /><span>Add More</span>
+                  </button>
+                  <button onClick={handleSubmitImages} disabled={isExtracting || images.every(img => !img.dataUrl)}
+                    className="bg-[#009da5] border border-[#5bc4bf] h-10 px-3 md:px-4 py-2 rounded-md font-ibm-plex font-medium text-xs md:text-sm text-white hover:bg-[#008891] transition-colors flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 justify-center">
+                    {isExtracting ? <><Loader2 className="w-4 h-4 animate-spin" /><span>Extracting...</span></>
+                                  : <><Sparkles className="w-4 h-4" /><span>Extract Data</span></>}
+                  </button>
+                </div>
+              </div>
+
+              {extractionComplete && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4 flex items-start gap-3">
+                  <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-ibm-plex font-medium text-green-800">Extraction Complete!</p>
+                    <p className="text-xs text-green-700 mt-0.5">Data has been extracted and filled below. Review and edit before saving.</p>
+                    {extractionCost && (
+                      <p className="text-xs text-green-600 mt-1">
+                        Cost — OCR: ${extractionCost.ocr?.total_cost?.toFixed(6)} | Structure: ${extractionCost.structure?.total_cost?.toFixed(6)} | Total: ${extractionCost.grand_total?.toFixed(6)}
+                      </p>
+                    )}
+                  </div>
+                </div>
               )}
-              {isSaving ? 'Saving...' : 'Save Product'}
-            </button>
-          </div>
-
-          {/* Product Images Section */}
-          <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6 mb-4 md:mb-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 pb-2 border-b border-[#e1e7ef]">
-              <div>
-                <h2 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729]">
-                  Product Images
-                </h2>
-                <p className="text-xs text-[#65758b] mt-0.5">
-                  Upload up to 10 images • Click to crop • Then submit for AI extraction
-                </p>
-              </div>
-              <div className="flex gap-2 sm:gap-3">
-                <button
-                  onClick={handleAddMoreImages}
-                  disabled={images.length >= 10}
-                  className="bg-[#f9fafb] border border-[#e1e7ef] flex items-center justify-center gap-2 h-10 px-3 md:px-4 py-2 rounded-md font-ibm-plex font-medium text-xs md:text-sm text-[#0f1729] hover:bg-gray-100 transition-colors flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Add More</span>
-                </button>
-                <button
-                  onClick={handleSubmitImages}
-                  disabled={isExtracting || images.every(img => !img.dataUrl)}
-                  className="bg-[#009da5] border border-[#5bc4bf] h-10 px-3 md:px-4 py-2 rounded-md font-ibm-plex font-medium text-xs md:text-sm text-white hover:bg-[#008891] transition-colors flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 justify-center"
-                >
-                  {isExtracting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Extracting...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4" />
-                      <span>Extract Data</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Extraction Status */}
-            {extractionComplete && (
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4 flex items-start gap-3">
-                <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-ibm-plex font-medium text-green-800">
-                    Extraction Complete!
-                  </p>
-                  <p className="text-xs text-green-700 mt-0.5">
-                    Data has been extracted and filled in the form below. Review and edit as needed before saving.
-                  </p>
+              {extractionError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-ibm-plex font-medium text-red-800">Extraction Failed</p>
+                    <p className="text-xs text-red-700 mt-0.5">{extractionError}</p>
+                  </div>
                 </div>
-              </div>
-            )}
-
-            {extractionError && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-ibm-plex font-medium text-red-800">
-                    Extraction Failed
-                  </p>
-                  <p className="text-xs text-red-700 mt-0.5">
-                    {extractionError}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {isExtracting && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                <div className="flex items-center gap-3">
+              )}
+              {isExtracting && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 flex items-center gap-3">
                   <Loader2 className="w-6 h-6 text-blue-600 animate-spin" />
                   <div>
-                    <p className="text-sm font-ibm-plex font-medium text-blue-800">
-                      Extracting product data...
-                    </p>
-                    <p className="text-xs text-blue-700 mt-0.5">
-                      This may take 10-30 seconds depending on image count and quality
-                    </p>
+                    <p className="text-sm font-ibm-plex font-medium text-blue-800">Extracting product data...</p>
+                    <p className="text-xs text-blue-700 mt-0.5">This may take 15-45 seconds (two-step OCR pipeline)</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-4 mb-3 md:mb-4">
+                {images.map((img, index) => (
+                  <ImageUploadWithCrop key={img.id} label={img.label}
+                    onImageCropped={(imageData, cropData) => handleImageCropped(index, imageData, cropData)}
+                    onRemove={() => { const n=[...images]; n[index].file=null; n[index].dataUrl=null; setImages(n) }} />
+                ))}
+              </div>
+              <p className="text-xs md:text-sm font-ibm-plex text-[#65758b]">
+                Upload front, back, nutrition table, and ingredients images for best results. Supported: JPG, PNG, WebP
+              </p>
+            </div>
+
+            {/* Tabs */}
+            <div className="bg-[#ebebeb] rounded-md p-1 mb-4 md:mb-6 overflow-x-auto">
+              <div className="flex gap-1 min-w-max sm:min-w-0">
+                {tabs.map(tab => (
+                  <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                    className={`flex-1 px-3 sm:px-4 md:px-6 py-2 rounded text-xs sm:text-sm font-ibm-plex font-medium transition-all whitespace-nowrap ${
+                      activeTab === tab.id ? 'bg-[#f9fafb] text-[#0f1729] shadow-sm' : 'text-[#65758b] hover:text-[#0f1729]'}`}>
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* ══════════════ BASIC INFO TAB ══════════════ */}
+            {activeTab === 'basic' && (
+              <div className="space-y-6">
+                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                  <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Basic Information</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+
+                    {[
+                      { label:'Product Name *', key:'productName', placeholder:'Enter product name', req:true },
+                      { label:'Brand *',         key:'brand',       placeholder:'Enter brand name',    req:true },
+                      { label:'Sub Brand',       key:'subBrand',    placeholder:'e.g., Junior, Pro, Lite' },
+                      { label:'Variant',         key:'variant',     placeholder:'e.g., Chocolate, Vanilla' },
+                      { label:'Net Quantity / Pack Size', key:'packSize',  placeholder:'e.g., 500g, 1L' },
+                      { label:'Serve Size',      key:'serveSize',   placeholder:'e.g., 30g, 200ml' },
+                      { label:'Servings Per Pack',key:'servingsPerPack', placeholder:'e.g., 10' },
+                    ].map(({ label, key, placeholder, req }) => (
+                      <div key={key}>
+                        <label className={labelClass}>{label}</label>
+                        <div className="relative">
+                          <input type="text" placeholder={placeholder} value={formData[key]} required={req}
+                            onChange={e => setFormData({ ...formData, [key]: e.target.value })}
+                            className={inputClass} />
+                          <CopyBtn value={formData[key]} field={`add_${key}`} />
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* MRP */}
+                    <div>
+                      <label className={labelClass}>MRP (₹)</label>
+                      <div className="relative">
+                        <input type="number" placeholder="0.00" value={formData.mrp}
+                          onChange={e => setFormData({ ...formData, mrp: e.target.value })}
+                          className={inputClass} />
+                        <CopyBtn value={formData.mrp} field="add_mrp" />
+                      </div>
+                    </div>
+
+                    {/* USPF */}
+                    <div>
+                      <label className={labelClass}>USPF — Unit Selling Price Format</label>
+                      <div className="relative">
+                        <input type="text" placeholder="e.g., ₹120.00/Unit, ₹0.14/g"
+                          value={formData.uspf}
+                          onChange={e => setFormData({ ...formData, uspf: e.target.value })}
+                          className={inputClass} />
+                        <CopyBtn value={formData.uspf} field="add_uspf" />
+                      </div>
+                    </div>
+
+                    {/* Packing Format */}
+                    <div>
+                      <label className={labelClass}>Packing Format</label>
+                      <div className="relative">
+                        <select value={formData.packingFormat}
+                          onChange={e => setFormData({ ...formData, packingFormat: e.target.value })}
+                          className={inputClass.replace('pr-9','pr-9')}>
+                          <option value="">Select format</option>
+                          {['sachet','bottle','pouch','jar','can','tetra pack','carton','box','tub','pack'].map(f => (
+                            <option key={f} value={f}>{f.charAt(0).toUpperCase()+f.slice(1)}</option>
+                          ))}
+                        </select>
+                        <CopyBtn value={formData.packingFormat} field="add_packingFormat" />
+                      </div>
+                    </div>
+
+                    {/* Manufacturing Date */}
+                    <div>
+                      <label className={labelClass}>Manufacturing Date</label>
+                      <div className="relative">
+                        <input type="text" placeholder="DD/MM/YYYY" value={formData.manufactured}
+                          onChange={e => setFormData({ ...formData, manufactured: e.target.value })}
+                          className={inputClass} />
+                        <CopyBtn value={formData.manufactured} field="add_manufactured" />
+                      </div>
+                    </div>
+
+                    {/* Expiry Date */}
+                    <div>
+                      <label className={labelClass}>Expiry Date</label>
+                      <div className="relative">
+                        <input type="text" placeholder="DD/MM/YYYY" value={formData.expiry}
+                          onChange={e => setFormData({ ...formData, expiry: e.target.value })}
+                          className={inputClass} />
+                        <CopyBtn value={formData.expiry} field="add_expiry" />
+                      </div>
+                    </div>
+
+                    {/* Best Before */}
+                    <div>
+                      <label className={labelClass}>Best Before</label>
+                      <div className="relative">
+                        <input type="text" placeholder="e.g., 15 months from manufacture"
+                          value={formData.bestBefore}
+                          onChange={e => setFormData({ ...formData, bestBefore: e.target.value })}
+                          className={inputClass} />
+                        <CopyBtn value={formData.bestBefore} field="add_bestBefore" />
+                      </div>
+                    </div>
+
+                    {/* Shelf Life */}
+                    <div>
+                      <label className={labelClass}>Shelf Life</label>
+                      <div className="relative">
+                        <input type="text" placeholder="e.g., 12 months" value={formData.shelfLife}
+                          onChange={e => setFormData({ ...formData, shelfLife: e.target.value })}
+                          className={inputClass} />
+                        <CopyBtn value={formData.shelfLife} field="add_shelfLife" />
+                      </div>
+                    </div>
+
+                    {/* Category */}
+                    <div>
+                      <label className={labelClass}>Category</label>
+                      <div className="relative">
+                        <select value={formData.category}
+                          onChange={e => setFormData({ ...formData, category: e.target.value })}
+                          className={inputClass}>
+                          <option value="">Select category</option>
+                          {mockCategories.filter(c => c !== 'All Categories').map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                        <CopyBtn value={formData.category} field="add_category" />
+                      </div>
+                    </div>
+
+                    {/* Veg/Non-Veg */}
+                    <div>
+                      <label className={labelClass}>Veg / Non-Veg</label>
+                      <div className="relative">
+                        <select value={formData.vegNonVeg}
+                          onChange={e => setFormData({ ...formData, vegNonVeg: e.target.value })}
+                          className={inputClass}>
+                          <option value="">Select type</option>
+                          <option value="veg">Vegetarian</option>
+                          <option value="non-veg">Non-Vegetarian</option>
+                          <option value="vegan">Vegan</option>
+                          <option value="na">Not Applicable</option>
+                        </select>
+                        <CopyBtn value={formData.vegNonVeg} field="add_vegNonVeg" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Claims */}
+                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                  <SectionHeader title="Claims on Pack" copyValue={claims.join(', ')} copyField="add_claims" />
+                  <ChipInput value={newClaim} onChange={setNewClaim} onAdd={handleAddClaim} placeholder="Add a claim" />
+                  {claims.length > 0 && <ChipList items={claims} onRemove={handleRemoveClaim} colorClass="bg-primary/10 border border-primary/20 text-[#0f1729]" />}
+                </div>
+
+                {/* Tags */}
+                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                  <SectionHeader title="Tags" copyValue={selectedTags.join(', ')} copyField="add_tags" />
+                  <div className="flex flex-wrap gap-2">
+                    {predefinedTags.map((tag, idx) => (
+                      <button key={idx} onClick={() => handleTagToggle(tag)}
+                        className={`border px-3 py-1 rounded-full transition-colors ${selectedTags.includes(tag) ? 'bg-[#b455a0] border-[#b455a0] text-white' : 'border-[#e1e7ef] hover:border-[#b455a0] hover:bg-primary/5'}`}>
+                        <span className="text-xs font-ibm-plex font-semibold">{tag}</span>
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
             )}
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 md:gap-4 mb-3 md:mb-4">
-              {images.map((img, index) => (
-                <ImageUploadWithCrop
-                  key={img.id}
-                  label={img.label}
-                  onImageCropped={(imageData, cropData) => handleImageCropped(index, imageData, cropData)}
-                  onRemove={() => {
-                    const newImages = [...images]
-                    newImages[index].file = null
-                    newImages[index].dataUrl = null
-                    setImages(newImages)
-                  }}
-                />
-              ))}
-            </div>
-
-            <p className="text-xs md:text-sm font-ibm-plex text-[#65758b]">
-              Upload product images (front, back, nutrition table, ingredients list) for best results. Supported formats: JPG, PNG, WebP
-            </p>
-          </div>
-
-          {/* Tabs */}
-          <div className="bg-[#ebebeb] rounded-md p-1 mb-4 md:mb-6 overflow-x-auto">
-            <div className="flex gap-1 min-w-max sm:min-w-0">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex-1 px-3 sm:px-4 md:px-6 py-2 rounded text-xs sm:text-sm font-ibm-plex font-medium transition-all whitespace-nowrap ${
-                    activeTab === tab.id
-                      ? 'bg-[#f9fafb] text-[#0f1729] shadow-sm'
-                      : 'text-[#65758b] hover:text-[#0f1729]'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Tab Content */}
-          {activeTab === 'basic' && (
-            <div className="space-y-6">
-              {/* Basic Information */}
-              <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
-                <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">
-                  Basic Information
-                </h3>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-                  {/* Product Name */}
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      Product Name *
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="Enter product name"
-                        value={formData.productName}
-                        onChange={(e) => setFormData({ ...formData, productName: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                        required
-                      />
-                      <CopyBtn value={formData.productName} field="add_productName" />
+            {/* ══════════════ NUTRITION TAB ══════════════ */}
+            {activeTab === 'nutrition' && (
+              <div className="space-y-6">
+                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                  <div className="flex items-center justify-between mb-4 pb-2 border-b border-[#e1e7ef]">
+                    <h3 className="text-lg font-ibm-plex font-semibold text-[#0f1729]">Nutritional Information</h3>
+                    <div className="flex items-center gap-2">
+                      {nutritionRows.length > 0 && (
+                        <CopyBtnStandalone
+                          value={`Nutrient\tUnit\tPer 100g\tPer Serve\t% RDA\n${nutritionRows.map(r=>`${r.nutrient}\t${r.unit}\t${r.per100g}\t${r.perServe}\t${r.rda}`).join('\n')}`}
+                          field="add_nutritionTable" />
+                      )}
+                      <button onClick={handleAddNutritionRow} className={addBtnClass}>Add Row</button>
                     </div>
                   </div>
 
-                  {/* Brand */}
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      Brand *
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="Enter brand name"
-                        value={formData.brand}
-                        onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                        required
-                      />
-                      <CopyBtn value={formData.brand} field="add_brand" />
-                    </div>
-                  </div>
+                  <p className="text-sm font-ibm-plex text-[#65758b] mb-4">
+                    {nutritionRows.length === 0
+                      ? 'No nutrition data. Upload images and click "Extract Data", or add rows manually.'
+                      : 'Review and edit extracted nutrition data.'}
+                  </p>
 
-                  {/* Sub Brand */}
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      Sub Brand
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="e.g., Junior, Pro, Lite"
-                        value={formData.subBrand}
-                        onChange={(e) => setFormData({ ...formData, subBrand: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                      <CopyBtn value={formData.subBrand} field="add_subBrand" />
+                  {nutritionRows.length > 0 && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr className="border-b border-[#e1e7ef]">
+                            {['Nutrient','Unit','Per 100g','Per Serve','% RDA',''].map(h => (
+                              <th key={h} className="px-1 py-2 text-left">
+                                <span className="text-sm font-ibm-plex font-medium text-[#0f1729]">{h}</span>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {nutritionRows.map(row => (
+                            <tr key={row.id} className="border-b border-[#e1e7ef]">
+                              <td className="px-1 py-2">
+                                <input type="text" value={row.nutrient} placeholder="e.g., Protein"
+                                  onChange={e => handleNutritionChange(row.id, 'nutrient', e.target.value)}
+                                  className="w-full px-0 py-2 bg-transparent border-0 text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none" />
+                              </td>
+                              <td className="px-1 py-2">
+                                <input type="text" value={row.unit} placeholder="g"
+                                  onChange={e => handleNutritionChange(row.id, 'unit', e.target.value)}
+                                  className="w-16 h-10 px-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] text-center focus:outline-none focus:ring-2 focus:ring-primary" />
+                              </td>
+                              {['per100g','perServe','rda'].map(field => (
+                                <td key={field} className="px-1 py-2">
+                                  <input type="text" value={row[field]}
+                                    onChange={e => handleNutritionChange(row.id, field, e.target.value)}
+                                    className="w-24 h-10 px-3 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] text-right focus:outline-none focus:ring-2 focus:ring-primary" />
+                                </td>
+                              ))}
+                              <td className="px-1 py-2 text-center">
+                                <button onClick={() => handleRemoveNutritionRow(row.id)}
+                                  className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-red-50 transition-colors">
+                                  <X className="w-4 h-4 text-red-500" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                  </div>
-
-                  {/* Variant */}
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      Variant
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="e.g., Chocolate, Vanilla"
-                        value={formData.variant}
-                        onChange={(e) => setFormData({ ...formData, variant: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                      <CopyBtn value={formData.variant} field="add_variant" />
-                    </div>
-                  </div>
-
-                  {/* Pack Size */}
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      Net Weight / Pack Size
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="e.g., 500g, 1L"
-                        value={formData.packSize}
-                        onChange={(e) => setFormData({ ...formData, packSize: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                      <CopyBtn value={formData.packSize} field="add_packSize" />
-                    </div>
-                  </div>
-
-                  {/* Serve Size */}
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      Serve Size
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="e.g., 30g, 200ml"
-                        value={formData.serveSize}
-                        onChange={(e) => setFormData({ ...formData, serveSize: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                      <CopyBtn value={formData.serveSize} field="add_serveSize" />
-                    </div>
-                  </div>
-
-                  {/* MRP */}
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      MRP (₹)
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="number"
-                        placeholder="0.00"
-                        value={formData.mrp}
-                        onChange={(e) => setFormData({ ...formData, mrp: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                      <CopyBtn value={formData.mrp} field="add_mrp" />
-                    </div>
-                  </div>
-
-                  {/* Packing Format */}
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      Packing Format
-                    </label>
-                    <div className="relative">
-                      <select
-                        value={formData.packingFormat}
-                        onChange={(e) => setFormData({ ...formData, packingFormat: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] focus:outline-none focus:ring-2 focus:ring-primary"
-                      >
-                        <option value="">Select format</option>
-                        <option value="sachet">Sachet</option>
-                        <option value="bottle">Bottle</option>
-                        <option value="pouch">Pouch</option>
-                        <option value="jar">Jar</option>
-                        <option value="can">Can</option>
-                        <option value="tetra pack">Tetra Pack</option>
-                        <option value="carton">Carton</option>
-                        <option value="box">Box</option>
-                        <option value="tub">Tub</option>
-                        <option value="pack">Pack</option>
-                      </select>
-                      <CopyBtn value={formData.packingFormat} field="add_packingFormat" />
-                    </div>
-                  </div>
-
-                  {/* Manufacturing Date */}
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      Manufacturing Date
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="DD/MM/YYYY"
-                        value={formData.manufactured}
-                        onChange={(e) => setFormData({ ...formData, manufactured: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                      <CopyBtn value={formData.manufactured} field="add_manufactured" />
-                    </div>
-                  </div>
-
-                  {/* Expiry Date */}
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      Expiry Date
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="DD/MM/YYYY"
-                        value={formData.expiry}
-                        onChange={(e) => setFormData({ ...formData, expiry: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                      <CopyBtn value={formData.expiry} field="add_expiry" />
-                    </div>
-                  </div>
-
-                  {/* Shelf Life */}
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      Shelf Life
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="e.g., 12 months, 18 months"
-                        value={formData.shelfLife}
-                        onChange={(e) => setFormData({ ...formData, shelfLife: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                      <CopyBtn value={formData.shelfLife} field="add_shelfLife" />
-                    </div>
-                  </div>
-
-                  {/* Category Dropdown */}
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      Category
-                    </label>
-                    <div className="relative">
-                      <select
-                        value={formData.category}
-                        onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] focus:outline-none focus:ring-2 focus:ring-primary"
-                      >
-                        <option value="">Select category</option>
-                        {mockCategories.filter(c => c !== 'All Categories').map((category) => (
-                          <option key={category} value={category}>
-                            {category}
-                          </option>
-                        ))}
-                      </select>
-                      <CopyBtn value={formData.category} field="add_category" />
-                    </div>
-                  </div>
-
-                  {/* Veg/Non-Veg */}
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      Veg/Non-Veg
-                    </label>
-                    <div className="relative">
-                      <select
-                        value={formData.vegNonVeg}
-                        onChange={(e) => setFormData({ ...formData, vegNonVeg: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] focus:outline-none focus:ring-2 focus:ring-primary"
-                      >
-                        <option value="">Select type</option>
-                        <option value="veg">Vegetarian</option>
-                        <option value="non-veg">Non-Vegetarian</option>
-                        <option value="vegan">Vegan</option>
-                        <option value="na">Not Applicable</option>
-                      </select>
-                      <CopyBtn value={formData.vegNonVeg} field="add_vegNonVeg" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Claims on Pack */}
-              <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
-                <div className="flex items-center justify-between mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">
-                  <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729]">
-                    Claims on Pack
-                  </h3>
-                  {claims.length > 0 && (
-                    <CopyBtnStandalone value={claims.join(', ')} field="add_claims" />
                   )}
                 </div>
-                
-                <div className="flex gap-2 mb-4">
-                  <input
-                    type="text"
-                    placeholder="Add a claim"
-                    value={newClaim}
-                    onChange={(e) => setNewClaim(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAddClaim()}
-                    className="flex-1 h-10 px-3 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                  />
-                  <button
-                    onClick={handleAddClaim}
-                    className="bg-[#b455a0] h-10 px-4 py-2 rounded-md font-ibm-plex font-medium text-sm text-white hover:bg-[#a04890] transition-colors"
-                  >
-                    Add
-                  </button>
+
+                {/* Nutrition Notes */}
+                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                  <SectionHeader title="Nutrition Notes" copyValue={nutritionNotes.join(' | ')} copyField="add_nutNotes" />
+                  <p className="text-xs text-[#65758b] mb-3">Footnotes, %RDA references, or disclaimers printed below the nutrition table.</p>
+                  <ChipInput value={newNutritionNote} onChange={setNewNutritionNote} onAdd={handleAddNote} placeholder="e.g., *RDA based on 2000 kcal diet" />
+                  {nutritionNotes.length > 0 && (
+                    <ChipList items={nutritionNotes} onRemove={handleRemoveNote} colorClass="bg-yellow-50 border border-yellow-200 text-yellow-900" />
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ══════════════ COMPOSITION TAB ══════════════ */}
+            {activeTab === 'composition' && (
+              <div className="space-y-6">
+                {/* Ingredients */}
+                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                  <SectionHeader title="Ingredients" copyValue={ingredients.join(', ')} copyField="add_ingredients" />
+                  <ChipInput value={newIngredient} onChange={setNewIngredient} onAdd={handleAddIngredient} placeholder="Add an ingredient" />
+                  {ingredients.length > 0 && (
+                    <ChipList items={ingredients} onRemove={handleRemoveIngredient} colorClass="bg-gray-100 border border-[#e1e7ef] text-[#0f1729]" />
+                  )}
                 </div>
 
-                {claims.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {claims.map((claim, index) => (
-                      <div
-                        key={index}
-                        className="bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-full flex items-center gap-2"
-                      >
-                        <span className="text-xs font-ibm-plex font-medium text-[#0f1729]">
-                          {claim}
-                        </span>
-                        <button
-                          onClick={() => handleRemoveClaim(index)}
-                          className="hover:bg-primary/20 rounded-full p-0.5"
-                        >
-                          <X className="w-3 h-3 text-[#0f1729]" />
-                        </button>
+                {/* Allergens */}
+                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                  <SectionHeader title="Allergen Information" copyValue={allergens.join(', ')} copyField="add_allergens" />
+                  <ChipInput value={newAllergen} onChange={setNewAllergen} onAdd={handleAddAllergen} placeholder="Add an allergen" />
+                  {allergens.length > 0 && (
+                    <ChipList items={allergens} onRemove={handleRemoveAllergen} colorClass="bg-red-50 border border-red-200 text-red-900" />
+                  )}
+                </div>
+
+                {/* Storage & Usage */}
+                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                  <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Storage & Usage</h3>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mb-4">
+                    <div>
+                      <label className={labelClass}>Shelf Life</label>
+                      <div className="relative">
+                        <input type="text" placeholder="e.g., 18 months from manufacture"
+                          value={storageData.shelfLife}
+                          onChange={e => setStorageData({ ...storageData, shelfLife: e.target.value })}
+                          className={inputClass} />
+                        <CopyBtn value={storageData.shelfLife} field="add_shelfLifeComp" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className={labelClass}>Storage Conditions</label>
+                      <div className="relative">
+                        <input type="text" placeholder="e.g., Store in cool, dry place"
+                          value={storageData.storageCondition}
+                          onChange={e => setStorageData({ ...storageData, storageCondition: e.target.value })}
+                          className={inputClass} />
+                        <CopyBtn value={storageData.storageCondition} field="add_storageCondition" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5 md:mb-2">
+                        <label className={labelClass.replace('block','')}>Directions to Use</label>
+                        <CopyBtnStandalone value={directionsToUse} field="add_directions" />
+                      </div>
+                      <textarea placeholder="One direction per line" value={directionsToUse}
+                        onChange={e => setDirectionsToUse(e.target.value)} rows={4}
+                        className={textareaClass} />
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5 md:mb-2">
+                        <label className={labelClass.replace('block','')}>Preparation Method</label>
+                        <CopyBtnStandalone value={preparationMethod} field="add_preparation" />
+                      </div>
+                      <textarea placeholder="One step per line" value={preparationMethod}
+                        onChange={e => setPreparationMethod(e.target.value)} rows={4}
+                        className={textareaClass} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Medical Information */}
+                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                  <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Medical Information</h3>
+                  <p className="text-xs text-[#65758b] mb-4">Applicable for pharmaceutical or health products. One item per line.</p>
+
+                  <div className="space-y-4">
+                    {[
+                      { key:'intendedUse',      label:'Intended Use',      placeholder:'e.g., For adults 18+, Suitable for diabetics' },
+                      { key:'warnings',          label:'Warnings',          placeholder:'e.g., Do not exceed recommended dose' },
+                      { key:'contraindications', label:'Contraindications', placeholder:'e.g., Not suitable during pregnancy' },
+                    ].map(({ key, label, placeholder }) => (
+                      <div key={key}>
+                        <div className="flex items-center justify-between mb-1.5 md:mb-2">
+                          <label className={labelClass.replace('block','')}>{label}</label>
+                          <CopyBtnStandalone value={medicalInfo[key]} field={`add_med_${key}`} />
+                        </div>
+                        <textarea placeholder={placeholder} value={medicalInfo[key]}
+                          onChange={e => setMedicalInfo({ ...medicalInfo, [key]: e.target.value })} rows={3}
+                          className={textareaClass} />
                       </div>
                     ))}
                   </div>
-                )}
-              </div>
-
-              {/* Tags */}
-              <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
-                <div className="flex items-center justify-between mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">
-                  <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729]">
-                    Tags
-                  </h3>
-                  {selectedTags.length > 0 && (
-                    <CopyBtnStandalone value={selectedTags.join(', ')} field="add_tags" />
-                  )}
                 </div>
-                
-                <div className="flex flex-wrap gap-2">
-                  {predefinedTags.map((tag, index) => (
-                    <button
-                      key={index}
-                      onClick={() => handleTagToggle(tag)}
-                      className={`border px-3 py-1 rounded-full transition-colors ${
-                        selectedTags.includes(tag)
-                          ? 'bg-[#b455a0] border-[#b455a0] text-white'
-                          : 'border-[#e1e7ef] hover:border-[#b455a0] hover:bg-primary/5'
-                      }`}
-                    >
-                      <span className="text-xs font-ibm-plex font-semibold">
-                        {tag}
-                      </span>
-                    </button>
+              </div>
+            )}
+
+            {/* ══════════════ COMPANY TAB ══════════════ */}
+            {activeTab === 'company' && (
+              <div className="space-y-4 md:space-y-6">
+                {/* Company Information */}
+                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                  <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Company Information</h3>
+                  {[
+                    { key:'marketedBy',    label:'Marketed By',     placeholder:'Marketing company name and address' },
+                    { key:'manufacturedBy',label:'Manufactured By',  placeholder:'Manufacturing unit name and address' },
+                    { key:'packedBy',      label:'Packed By',        placeholder:'Packing unit name and address' },
+                  ].map(({ key, label, placeholder }) => (
+                    <div key={key} className="mb-3 md:mb-4">
+                      <div className="flex items-center justify-between mb-1.5 md:mb-2">
+                        <label className={labelClass.replace('block','')}>{label}</label>
+                        <CopyBtnStandalone value={companyData[key]} field={`add_${key}`} />
+                      </div>
+                      <textarea placeholder={placeholder} value={companyData[key]} rows={3}
+                        onChange={e => setCompanyData({ ...companyData, [key]: e.target.value })}
+                        className={textareaClass} />
+                    </div>
                   ))}
                 </div>
-              </div>
-            </div>
-          )}
 
-          {/* Nutrition Tab */}
-          {activeTab === 'nutrition' && (
-            <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
-              <div className="flex items-center justify-between mb-4 pb-2 border-b border-[#e1e7ef]">
-                <h3 className="text-lg font-ibm-plex font-semibold text-[#0f1729]">
-                  Nutritional Information
-                </h3>
-                <div className="flex items-center gap-2">
-                  {nutritionRows.length > 0 && (
-                    <CopyBtnStandalone
-                      value={`Nutrient\tPer 100g\tPer Serve\t% RDA\n${nutritionRows.map(r => `${r.nutrient}\t${r.per100g}\t${r.perServe}\t${r.rda}`).join('\n')}`}
-                      field="add_nutritionTable"
-                    />
-                  )}
-                  <button
-                    onClick={handleAddNutritionRow}
-                    className="bg-[#b455a0] h-10 px-4 py-2 rounded-md font-ibm-plex font-medium text-sm text-white hover:bg-[#a04890] transition-colors"
-                  >
-                    Add Row
-                  </button>
+                {/* Batch Information */}
+                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                  <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Batch Information</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mb-4">
+                    <div>
+                      <label className={labelClass}>Lot / Batch Number</label>
+                      <div className="relative">
+                        <input type="text" placeholder="e.g., B1025L4" value={batchData.lotNumber}
+                          onChange={e => setBatchData({ ...batchData, lotNumber: e.target.value })}
+                          className={inputClass} />
+                        <CopyBtn value={batchData.lotNumber} field="add_lotNumber" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className={labelClass}>Machine Code</label>
+                      <div className="relative">
+                        <input type="text" placeholder="Alphanumeric machine code" value={batchData.machineCode}
+                          onChange={e => setBatchData({ ...batchData, machineCode: e.target.value })}
+                          className={inputClass} />
+                        <CopyBtn value={batchData.machineCode} field="add_machineCode" />
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5 md:mb-2">
+                      <label className={labelClass.replace('block','')}>Other Codes</label>
+                      <CopyBtnStandalone value={batchData.otherCodes} field="add_otherCodes" />
+                    </div>
+                    <textarea placeholder="One code per line" value={batchData.otherCodes}
+                      onChange={e => setBatchData({ ...batchData, otherCodes: e.target.value })} rows={3}
+                      className={textareaClass} />
+                  </div>
                 </div>
-              </div>
 
-              <p className="text-sm font-ibm-plex text-[#65758b] mb-4">
-                {nutritionRows.length === 0 
-                  ? 'No nutrition data extracted. Upload images and click "Extract Data" or add rows manually.'
-                  : 'Review and edit the extracted nutrition data. You can add or remove rows as needed.'
-                }
-              </p>
-
-              {nutritionRows.length > 0 && (
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse">
-                    <thead>
-                      <tr className="border-b border-[#e1e7ef]">
-                        <th className="px-1 py-2 text-left">
-                          <span className="text-sm font-ibm-plex font-medium text-[#0f1729]">
-                            Nutrient
-                          </span>
-                        </th>
-                        <th className="px-1 py-2 text-right w-24">
-                          <span className="text-sm font-ibm-plex font-medium text-[#0f1729]">
-                            Per 100g
-                          </span>
-                        </th>
-                        <th className="px-1 py-2 text-right w-24">
-                          <span className="text-sm font-ibm-plex font-medium text-[#0f1729]">
-                            Per Serve
-                          </span>
-                        </th>
-                        <th className="px-1 py-2 text-right w-24">
-                          <span className="text-sm font-ibm-plex font-medium text-[#0f1729]">
-                            % RDA
-                          </span>
-                        </th>
-                        <th className="px-1 py-2 w-10"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {nutritionRows.map((row) => (
-                        <tr key={row.id} className="border-b border-[#e1e7ef]">
-                          <td className="px-1 py-2">
-                            <input
-                              type="text"
-                              value={row.nutrient}
-                              onChange={(e) => handleNutritionChange(row.id, 'nutrient', e.target.value)}
-                              placeholder="e.g., Vitamin C (mg)"
-                              className="w-full px-0 py-2 bg-transparent border-0 text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none"
-                            />
-                          </td>
-                          <td className="px-1 py-2">
-                            <input
-                              type="text"
-                              value={row.per100g}
-                              onChange={(e) => handleNutritionChange(row.id, 'per100g', e.target.value)}
-                              className="w-24 h-10 px-3 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] text-right focus:outline-none focus:ring-2 focus:ring-primary"
-                            />
-                          </td>
-                          <td className="px-1 py-2">
-                            <input
-                              type="text"
-                              value={row.perServe}
-                              onChange={(e) => handleNutritionChange(row.id, 'perServe', e.target.value)}
-                              className="w-24 h-10 px-3 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] text-right focus:outline-none focus:ring-2 focus:ring-primary"
-                            />
-                          </td>
-                          <td className="px-1 py-2">
-                            <input
-                              type="text"
-                              value={row.rda}
-                              onChange={(e) => handleNutritionChange(row.id, 'rda', e.target.value)}
-                              className="w-24 h-10 px-3 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] text-right focus:outline-none focus:ring-2 focus:ring-primary"
-                            />
-                          </td>
-                          <td className="px-1 py-2 text-center">
-                            <button
-                              onClick={() => handleRemoveNutritionRow(row.id)}
-                              className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-red-50 transition-colors"
-                              title="Remove"
-                            >
-                              <X className="w-4 h-4 text-red-500" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                {/* Packaging Information */}
+                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                  <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Packaging Information</h3>
+                  <div className="mb-3 md:mb-4">
+                    <label className={labelClass}>Packaging Material Manufacturer</label>
+                    <div className="relative">
+                      <input type="text" placeholder="Manufacturer of packaging material"
+                        value={packagingData.manufacturer}
+                        onChange={e => setPackagingData({ ...packagingData, manufacturer: e.target.value })}
+                        className={inputClass} />
+                      <CopyBtn value={packagingData.manufacturer} field="add_packMfr" />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5 md:mb-2">
+                      <label className={labelClass.replace('block','')}>Packaging Codes</label>
+                      <CopyBtnStandalone value={packagingData.codes} field="add_packCodes" />
+                    </div>
+                    <textarea placeholder="One code per line" value={packagingData.codes}
+                      onChange={e => setPackagingData({ ...packagingData, codes: e.target.value })} rows={3}
+                      className={textareaClass} />
+                  </div>
                 </div>
-              )}
-            </div>
-          )}
 
-          {/* Composition Tab */}
-          {activeTab === 'composition' && (
-            <div className="space-y-6">
-              {/* Ingredients */}
-              <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
-                <div className="flex items-center justify-between mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">
-                  <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729]">
-                    Ingredients
-                  </h3>
-                  {ingredients.length > 0 && (
-                    <CopyBtnStandalone value={ingredients.join(', ')} field="add_ingredients" />
+                {/* FSSAI & Barcodes */}
+                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                  <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Regulatory Information</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className={labelClass}>FSSAI License Numbers</label>
+                      <ChipInput value={newFssaiNumber} onChange={setNewFssaiNumber} onAdd={handleAddFssai} placeholder="14-digit FSSAI number" />
+                      {fssaiNumbers.length > 0 && (
+                        <ChipList items={fssaiNumbers} onRemove={handleRemoveFssai} colorClass="bg-blue-50 border border-blue-200 text-blue-900" />
+                      )}
+                    </div>
+                    <div>
+                      <label className={labelClass}>Barcodes / EAN</label>
+                      <ChipInput value={newBarcode} onChange={setNewBarcode} onAdd={handleAddBarcode} placeholder="Enter barcode number" />
+                      {barcodes.length > 0 && (
+                        <ChipList items={barcodes} onRemove={handleRemoveBarcode} colorClass="bg-gray-100 border border-[#e1e7ef] text-[#0f1729]" />
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Certifications */}
+                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                  <SectionHeader title="Certifications" copyValue={certifications.join(', ')} copyField="add_certs" />
+                  <ChipInput value={newCertification} onChange={setNewCertification} onAdd={handleAddCert} placeholder="e.g., FSSAI, ISO 22000, HACCP" />
+                  {certifications.length > 0 && (
+                    <ChipList items={certifications} onRemove={handleRemoveCert} colorClass="bg-green-50 border border-green-200 text-green-900" />
                   )}
                 </div>
-                
-                <div className="flex gap-2 mb-4">
-                  <input
-                    type="text"
-                    placeholder="Add an ingredient"
-                    value={newIngredient}
-                    onChange={(e) => setNewIngredient(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAddIngredient()}
-                    className="flex-1 h-10 px-3 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                  />
-                  <button
-                    onClick={handleAddIngredient}
-                    className="bg-[#b455a0] h-10 px-4 py-2 rounded-md font-ibm-plex font-medium text-sm text-white hover:bg-[#a04890] transition-colors"
-                  >
-                    Add
-                  </button>
+
+                {/* Customer Care */}
+                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                  <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Customer Care</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mb-4">
+                    <div>
+                      <label className={labelClass}>Email</label>
+                      <div className="relative">
+                        <input type="text" placeholder="support@example.com" value={customerCareData.email}
+                          onChange={e => setCustomerCareData({ ...customerCareData, email: e.target.value })}
+                          className={inputClass} />
+                        <CopyBtn value={customerCareData.email} field="add_ccEmail" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className={labelClass}>Website</label>
+                      <div className="relative">
+                        <input type="text" placeholder="www.example.com" value={customerCareData.website}
+                          onChange={e => setCustomerCareData({ ...customerCareData, website: e.target.value })}
+                          className={inputClass} />
+                        <CopyBtn value={customerCareData.website} field="add_ccWebsite" />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5 md:mb-2">
+                        <label className={labelClass.replace('block','')}>Phone Numbers</label>
+                        <CopyBtnStandalone value={customerCareData.phones} field="add_ccPhones" />
+                      </div>
+                      <textarea placeholder="One phone number per line" value={customerCareData.phones}
+                        onChange={e => setCustomerCareData({ ...customerCareData, phones: e.target.value })} rows={3}
+                        className={textareaClass} />
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5 md:mb-2">
+                        <label className={labelClass.replace('block','')}>Address</label>
+                        <CopyBtnStandalone value={customerCareData.address} field="add_ccAddress" />
+                      </div>
+                      <textarea placeholder="Customer care address" value={customerCareData.address}
+                        onChange={e => setCustomerCareData({ ...customerCareData, address: e.target.value })} rows={3}
+                        className={textareaClass} />
+                    </div>
+                  </div>
                 </div>
 
-                {ingredients.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {ingredients.map((ingredient, index) => (
-                      <div
-                        key={index}
-                        className="bg-gray-100 border border-[#e1e7ef] px-3 py-1.5 rounded-full flex items-center gap-2"
-                      >
-                        <span className="text-sm font-ibm-plex text-[#0f1729]">
-                          {ingredient}
-                        </span>
-                        <button
-                          onClick={() => handleRemoveIngredient(index)}
-                          className="hover:bg-gray-200 rounded-full p-0.5"
-                        >
-                          <X className="w-3 h-3 text-[#0f1729]" />
-                        </button>
+                {/* Regulatory / Other Text */}
+                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                  <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Additional Notes & Regulatory</h3>
+                  <div className="space-y-4">
+                    {[
+                      { key:'regulatoryText',   label:'Regulatory Text',      setter:setRegulatoryText,   val:regulatoryText,   placeholder:'Legal/regulatory statements on pack (one per line)' },
+                      { key:'footnotes',         label:'Footnotes',             setter:setFootnotes,        val:footnotes,        placeholder:'Footnotes printed on pack (one per line)' },
+                      { key:'otherImportantText',label:'Other Important Text',  setter:setOtherImportantText, val:otherImportantText, placeholder:'Slogans, taglines, marketing text, disclaimers (one per line)' },
+                      { key:'otherNotes',        label:'Other Notes',           val:companyData.otherNotes,
+                        setter:v=>setCompanyData({...companyData,otherNotes:v}), placeholder:'Additional notes (customer care, etc.)' },
+                    ].map(({ key, label, setter, val, placeholder }) => (
+                      <div key={key}>
+                        <div className="flex items-center justify-between mb-1.5 md:mb-2">
+                          <label className={labelClass.replace('block','')}>{label}</label>
+                          <CopyBtnStandalone value={val} field={`add_${key}`} />
+                        </div>
+                        <textarea placeholder={placeholder} value={val}
+                          onChange={e => setter(e.target.value)} rows={3} className={textareaClass} />
                       </div>
                     ))}
                   </div>
-                )}
-              </div>
-
-              {/* Allergens */}
-              <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
-                <div className="flex items-center justify-between mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">
-                  <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729]">
-                    Allergens
-                  </h3>
-                  {allergens.length > 0 && (
-                    <CopyBtnStandalone value={allergens.join(', ')} field="add_allergens" />
-                  )}
-                </div>
-                
-                <div className="flex gap-2 mb-4">
-                  <input
-                    type="text"
-                    placeholder="Add an allergen"
-                    value={newAllergen}
-                    onChange={(e) => setNewAllergen(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleAddAllergen()}
-                    className="flex-1 h-10 px-3 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                  />
-                  <button
-                    onClick={handleAddAllergen}
-                    className="bg-[#b455a0] h-10 px-4 py-2 rounded-md font-ibm-plex font-medium text-sm text-white hover:bg-[#a04890] transition-colors"
-                  >
-                    Add
-                  </button>
-                </div>
-
-                {allergens.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {allergens.map((allergen, index) => (
-                      <div
-                        key={index}
-                        className="bg-red-50 border border-red-200 px-3 py-1.5 rounded-full flex items-center gap-2"
-                      >
-                        <span className="text-sm font-ibm-plex text-red-900">
-                          {allergen}
-                        </span>
-                        <button
-                          onClick={() => handleRemoveAllergen(index)}
-                          className="hover:bg-red-100 rounded-full p-0.5"
-                        >
-                          <X className="w-3 h-3 text-red-900" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Storage & Usage */}
-              <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
-                <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">
-                  Storage & Usage
-                </h3>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mb-4">
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      Shelf Life
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="e.g., 18 months from manufacture"
-                        value={storageData.shelfLife}
-                        onChange={(e) => setStorageData({ ...storageData, shelfLife: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                      <CopyBtn value={storageData.shelfLife} field="add_shelfLife" />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      Storage Condition
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="e.g., Store in cool, dry place"
-                        value={storageData.storageCondition}
-                        onChange={(e) => setStorageData({ ...storageData, storageCondition: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                      <CopyBtn value={storageData.storageCondition} field="add_storageCondition" />
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1.5 md:mb-2">
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] block">
-                      Instructions to Use
-                    </label>
-                    <CopyBtnStandalone value={storageData.instructionsToUse} field="add_instructionsToUse" />
-                  </div>
-                  <textarea
-                    placeholder="How to use the product"
-                    value={storageData.instructionsToUse}
-                    onChange={(e) => setStorageData({ ...storageData, instructionsToUse: e.target.value })}
-                    rows={4}
-                    className="w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                  />
                 </div>
               </div>
+            )}
 
-              {/* Packaging */}
-              {/* Packaging section removed as per requirements */}
-            </div>
-          )}
-
-          {/* Company Tab */}
-          {activeTab === 'company' && (
-            <div className="space-y-4 md:space-y-6">
-              {/* Company Information */}
-              <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
-                <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">
-                  Company Information
-                </h3>
-                
-                <div className="mb-3 md:mb-4">
-                  <div className="flex items-center justify-between mb-1.5 md:mb-2">
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] block">
-                      Marketed By
-                    </label>
-                    <CopyBtnStandalone value={companyData.marketedBy} field="add_marketedBy" />
-                  </div>
-                  <textarea
-                    placeholder="Marketing company name and address"
-                    value={companyData.marketedBy}
-                    onChange={(e) => setCompanyData({ ...companyData, marketedBy: e.target.value })}
-                    rows={3}
-                    className="w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                  />
-                </div>
-
-                <div className="mb-3 md:mb-4">
-                  <div className="flex items-center justify-between mb-1.5 md:mb-2">
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] block">
-                      Manufactured By
-                    </label>
-                    <CopyBtnStandalone value={companyData.manufacturedBy} field="add_manufacturedBy" />
-                  </div>
-                  <textarea
-                    placeholder="Manufacturing unit name and address"
-                    value={companyData.manufacturedBy}
-                    onChange={(e) => setCompanyData({ ...companyData, manufacturedBy: e.target.value })}
-                    rows={3}
-                    className="w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                  />
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1.5 md:mb-2">
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] block">
-                      Packed By
-                    </label>
-                    <CopyBtnStandalone value={companyData.packedBy} field="add_packedBy" />
-                  </div>
-                  <textarea
-                    placeholder="Packing unit name and address"
-                    value={companyData.packedBy}
-                    onChange={(e) => setCompanyData({ ...companyData, packedBy: e.target.value })}
-                    rows={3}
-                    className="w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                  />
-                </div>
-              </div>
-
-              {/* Regulatory Information */}
-              <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
-                <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">
-                  Regulatory Information
-                </h3>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      FSSAI License No.
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="14-digit FSSAI number"
-                        value={companyData.fssai}
-                        onChange={(e) => setCompanyData({ ...companyData, fssai: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                      <CopyBtn value={companyData.fssai} field="add_fssai" />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                      Barcode
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="Product barcode"
-                        value={companyData.barcode}
-                        onChange={(e) => setCompanyData({ ...companyData, barcode: e.target.value })}
-                        className="w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                      <CopyBtn value={companyData.barcode} field="add_barcode" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Additional Notes */}
-              <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
-                <div className="flex items-center justify-between mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">
-                  <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729]">
-                    Additional Notes
-                  </h3>
-                  <CopyBtnStandalone value={companyData.otherNotes} field="add_otherNotes" />
-                </div>
-                
-                <div>
-                  <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
-                    Other Notes
-                  </label>
-                  <textarea
-                    placeholder="Any additional information (customer care, certifications, etc.)"
-                    value={companyData.otherNotes}
-                    onChange={(e) => setCompanyData({ ...companyData, otherNotes: e.target.value })}
-                    rows={3}
-                    className="w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
+          </div>
         </div>
-      </div>
       )}
     </Layout>
   )
