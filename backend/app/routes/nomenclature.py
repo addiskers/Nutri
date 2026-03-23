@@ -117,6 +117,8 @@ async def get_nomenclature_map():
         # Build reverse map: raw_name -> standardized_name
         nomenclature_map = {}
         for mapping in mappings:
+            # Include the standardized name itself as a key
+            nomenclature_map[mapping.standardized_name.lower()] = mapping.standardized_name
             for raw_name in mapping.raw_names:
                 nomenclature_map[raw_name.lower()] = mapping.standardized_name
         
@@ -328,6 +330,61 @@ async def delete_nomenclature(
         )
 
 
+# ============================================================
+# SEED FROM HARDCODED MAP
+# ============================================================
+@router.post("/seed", response_model=dict)
+async def seed_nomenclature(
+    current_user: User = Depends(get_current_user)
+):
+    """Seed nomenclature collection from the hardcoded NOMENCLATURE_MAP in products.py.
+    Skips standardized names that already exist in the DB."""
+    try:
+        from app.routes.products import NOMENCLATURE_MAP
+
+        # Group raw_names by standardized_name
+        grouped: dict[str, list[str]] = {}
+        for raw, standard in NOMENCLATURE_MAP.items():
+            grouped.setdefault(standard, []).append(raw)
+
+        created = 0
+        skipped = 0
+        updated = 0
+
+        for standard_name, raw_names in grouped.items():
+            existing = await NomenclatureMapping.find_one(
+                NomenclatureMapping.standardized_name == standard_name
+            )
+            if existing:
+                new_raws = [r for r in raw_names if r not in existing.raw_names]
+                if new_raws:
+                    existing.raw_names.extend(new_raws)
+                    existing.updated_at = datetime.now(timezone.utc)
+                    await existing.save()
+                    updated += 1
+                else:
+                    skipped += 1
+            else:
+                mapping = NomenclatureMapping(
+                    standardized_name=standard_name,
+                    raw_names=raw_names,
+                    created_by=current_user.email
+                )
+                await mapping.insert()
+                created += 1
+
+        return {
+            "message": f"Seed complete: {created} created, {updated} updated, {skipped} skipped",
+            "created": created,
+            "updated": updated,
+            "skipped": skipped
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to seed nomenclature: {str(e)}"
+        )
 
 
 

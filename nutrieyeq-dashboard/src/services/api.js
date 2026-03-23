@@ -789,6 +789,46 @@ export const nomenclatureService = {
         error: error.message || 'Network error'
       }
     }
+  },
+
+  /**
+   * Get the full reverse lookup map (raw_name -> standardized_name) from DB
+   */
+  async getBuildMap() {
+    try {
+      const response = await fetch(`${API_BASE_URL}/nomenclature/map`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': '69420'
+        }
+      })
+      if (response.ok) {
+        return await response.json()
+      }
+      throw new Error('Failed to fetch nomenclature map')
+    } catch (error) {
+      console.error('Failed to fetch nomenclature map:', error)
+      throw error
+    }
+  },
+
+  /**
+   * Seed nomenclature from hardcoded map
+   */
+  async seedNomenclature() {
+    try {
+      const response = await apiRequest('/nomenclature/seed', {
+        method: 'POST'
+      })
+      const result = await response.json()
+      if (response.ok) {
+        return { success: true, ...result }
+      }
+      return { success: false, error: result.detail || 'Failed to seed nomenclature' }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
   }
 }
 

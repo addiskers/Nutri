@@ -8,7 +8,7 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
   const [crop, setCrop] = useState({
     unit: '%',
     width: 90,
-    aspect: undefined // No fixed aspect ratio - free crop!
+    aspect: undefined 
   })
   const [completedCrop, setCompletedCrop] = useState(null)
   const [croppedImage, setCroppedImage] = useState(null)
@@ -125,47 +125,44 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
       {/* Cropper Modal */}
       {showCropper && imageSrc && (
         <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
+          <div className="bg-white rounded-lg p-6 max-w-4xl w-full flex flex-col" style={{ maxHeight: '92vh' }}>
+
+            {/* Header – never scrolls away */}
+            <div className="flex items-center justify-between mb-4 flex-shrink-0">
               <h3 className="text-lg font-ibm-plex font-semibold text-[#0f1729]">
-                Crop Image - {label}
+                Crop Image – {label}
               </h3>
               <button
-                onClick={() => {
-                  setShowCropper(false)
-                  if (!croppedImage) {
-                    setImageSrc(null)
-                  }
-                }}
+                onClick={() => { setShowCropper(false); if (!croppedImage) setImageSrc(null) }}
                 className="p-1 hover:bg-gray-100 rounded"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
-            <div className="bg-gray-100 rounded-lg mb-4 p-4" style={{ minHeight: '400px' }}>
+
+            {/* Image crop area — no scroll so mouse events reach ReactCrop uninterrupted */}
+            <div className="bg-gray-100 rounded-lg p-4 flex items-center justify-center flex-1 min-h-0 overflow-hidden">
               <ReactCrop
                 crop={crop}
                 onChange={(c) => setCrop(c)}
                 onComplete={(c) => setCompletedCrop(c)}
-                className="max-w-full"
+                style={{ maxWidth: '100%', maxHeight: '100%' }}
               >
                 <img
                   ref={imgRef}
                   src={imageSrc}
                   alt="Crop preview"
-                  className="max-w-full h-auto"
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: 'calc(92vh - 240px)', // fits in modal; no scroll needed
+                    objectFit: 'contain',
+                    display: 'block',
+                    userSelect: 'none',  // prevent text-selection fighting with drag
+                  }}
                   onLoad={(e) => {
                     imgRef.current = e.currentTarget
                     const { width, height } = e.currentTarget
-                    const initialCrop = {
-                      unit: '%',
-                      width: 90,
-                      height: 90,
-                      x: 5,
-                      y: 5
-                    }
-                    setCrop(initialCrop)
+                    setCrop({ unit: '%', width: 90, height: 90, x: 5, y: 5 })
                     setCompletedCrop({
                       x: Math.round(width * 0.05),
                       y: Math.round(height * 0.05),
@@ -178,30 +175,27 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
               </ReactCrop>
             </div>
 
-            <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
-              <p className="text-xs font-ibm-plex text-blue-800">
-                💡 <strong>Drag corners/edges</strong> to resize crop area to any rectangle size you want. Drag inside to move position.
-              </p>
-            </div>
-
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => {
-                  setShowCropper(false)
-                  if (!croppedImage) {
-                    setImageSrc(null)
-                  }
-                }}
-                className="px-4 py-2 border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#65758b] hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCropSave}
-                className="px-4 py-2 bg-primary text-white rounded-md text-sm font-ibm-plex hover:bg-[#a04890]"
-              >
-                Save Crop
-              </button>
+            {/* Footer – never scrolls away */}
+            <div className="flex-shrink-0 mt-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
+                <p className="text-xs font-ibm-plex text-blue-800">
+                  <strong>Drag corners/edges</strong> to resize · Drag inside the selection to reposition it
+                </p>
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => { setShowCropper(false); if (!croppedImage) setImageSrc(null) }}
+                  className="px-4 py-2 border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#65758b] hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCropSave}
+                  className="px-4 py-2 bg-primary text-white rounded-md text-sm font-ibm-plex hover:bg-[#a04890]"
+                >
+                  Save Crop
+                </button>
+              </div>
             </div>
           </div>
         </div>

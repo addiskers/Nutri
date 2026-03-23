@@ -3,7 +3,8 @@ import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
 import Layout from '../components/Layout/Layout'
 import NoPermissionContent from '../components/NoPermissionContent'
-import { Search, X, Table as TableIcon, BarChart3, Download, ChevronLeft, ChevronRight, Menu, Loader2, Filter, ChevronDown } from 'lucide-react'
+import { Search, X, Table as TableIcon, BarChart3, Download, ChevronLeft, ChevronRight, Menu, Loader2, Filter, ChevronDown, ImageOff, ZoomIn } from 'lucide-react'
+import ProductPreviewModal from '../components/Modals/ProductPreviewModal'
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts'
 import authService, { productService } from '../services/api'
 
@@ -22,6 +23,8 @@ const Compare = () => {
   const [filterCategory, setFilterCategory] = useState('All Categories')
   const [showBrandFilter, setShowBrandFilter] = useState(false)
   const [showCategoryFilter, setShowCategoryFilter] = useState(false)
+  const [previewProduct, setPreviewProduct] = useState(null)
+  const [imageIndices, setImageIndices] = useState({})
 
   // Detect mobile screen
   useEffect(() => {
@@ -73,52 +76,74 @@ const Compare = () => {
       ingredientsArr = p.ingredients
     }
 
-    // Parse allergens string to array
+    // Parse allergens — new schema uses allergen_information
+    const allergenRaw = p.allergen_information || p.allergen_info || ''
     let allergensArr = []
-    if (typeof p.allergen_info === 'string' && p.allergen_info) {
-      allergensArr = p.allergen_info.split(',').map(a => a.trim()).filter(Boolean)
-    } else if (Array.isArray(p.allergen_info)) {
-      allergensArr = p.allergen_info
+    if (typeof allergenRaw === 'string' && allergenRaw) {
+      allergensArr = allergenRaw.split(',').map(a => a.trim()).filter(Boolean)
+    } else if (Array.isArray(allergenRaw)) {
+      allergensArr = allergenRaw
     }
 
-    // Parse nutrition_table to a keyed object
-    const nutrition = {}
+    // Parse nutrition_table — keep full dynamic values per row
+    // Prefer original_name for display; fall back to nutrient_name only if original_name is empty/null
+    const nutritionRows = []
     if (Array.isArray(p.nutrition_table)) {
       p.nutrition_table.forEach(row => {
-        const name = row.nutrient_name || row.nutrient
+        const stdName = row.nutrient_name || row.nutrient || ''
+        let name = (row.original_name && row.original_name.trim()) ? row.original_name.trim() : stdName
+        let unit = row.unit || ''
         if (name) {
-          const vals = row.values || {}
-          // Try to extract per100g, perServe, rda from values object
-          const per100gKey = Object.keys(vals).find(k => k.toLowerCase().includes('100'))
-          const perServeKey = Object.keys(vals).find(k => k.toLowerCase().includes('serve'))
-          const rdaKey = Object.keys(vals).find(k => k.toLowerCase().includes('rda'))
-          nutrition[name] = {
-            per100g: per100gKey ? vals[per100gKey] : (row.per100g || null),
-            perServe: perServeKey ? vals[perServeKey] : (row.perServe || null),
-            rda: rdaKey ? vals[rdaKey] : (row.rda || null)
+          // Strip unit from name if already embedded, e.g. "Energy (kcal)" → "Energy", unit "kcal"
+          if (unit) {
+            const suffix = ` (${unit})`
+            if (name.endsWith(suffix)) name = name.slice(0, -suffix.length)
+          } else {
+            const match = name.match(/^(.+?)\s*\(([^)]+)\)$/)
+            if (match) { name = match[1].trim(); unit = match[2].trim() }
           }
+          nutritionRows.push({ nutrient: name, stdName: stdName || name, unit, values: row.values || {} })
         }
       })
     }
+    const nutritionNotes = Array.isArray(p.nutrition_notes) ? p.nutrition_notes : []
 
-    // Extract manufacturer info
-    let marketedBy = ''
-    let manufacturedBy = ''
-    let packedBy = ''
-    let fssai = ''
-    if (Array.isArray(p.manufacturer_details)) {
-      p.manufacturer_details.forEach(m => {
+    // Extract manufacturer info — support multiple entries per type
+    const marketed = [], manufactured = [], packed = []
+    const mfrs = p.manufacturer_information || p.manufacturer_details || []
+    if (Array.isArray(mfrs)) {
+      mfrs.forEach(m => {
         const type = (m.type || '').toLowerCase()
-        const info = [m.name, m.address].filter(Boolean).join(', ')
-        if (type.includes('market')) marketedBy = info
-        else if (type.includes('manufactur')) manufacturedBy = info
-        else if (type.includes('pack')) packedBy = info
-        if (m.fssai && m.fssai !== 'not specified') fssai = fssai || m.fssai
+        const parts = [m.name, m.address, m.license_number ? `License: ${m.license_number}` : ''].filter(Boolean)
+        const info = parts.join('\n')
+        if (type.includes('market')) marketed.push(info)
+        else if (type.includes('manufactur')) manufactured.push(info)
+        else if (type.includes('pack')) packed.push(info)
       })
     }
-    if (!fssai && Array.isArray(p.fssai_licenses) && p.fssai_licenses.length > 0) {
-      fssai = p.fssai_licenses[0]
-    }
+
+    // FSSAI
+    const fssaiInfo = p.fssai_information || {}
+    const fssaiNumbers = Array.isArray(fssaiInfo.license_numbers) ? fssaiInfo.license_numbers : (Array.isArray(p.fssai_licenses) ? p.fssai_licenses : [])
+
+    // Usage instructions
+    const usage = p.usage_instructions || {}
+    const directionsToUse = Array.isArray(usage.directions_to_use) ? usage.directions_to_use.join('\n') : ''
+    const preparationMethod = Array.isArray(usage.preparation_method) ? usage.preparation_method.join('\n') : ''
+
+    // Medical information
+    const medical = p.medical_information || {}
+    const warnings = Array.isArray(medical.warnings) ? medical.warnings.join('\n') : ''
+
+    // Storage
+    const storageArr = Array.isArray(p.storage_instructions) ? p.storage_instructions : (typeof p.storage_instructions === 'string' ? [p.storage_instructions] : [])
+
+    // Batch
+    const batch = p.batch_information || {}
+    // Packaging
+    const packaging = p.packaging_information || {}
+    // Customer care
+    const cc = p.customer_care || {}
 
     // Get first image
     const firstImage = (Array.isArray(p.images) && p.images.length > 0) ? p.images[0] : null
@@ -126,13 +151,16 @@ const Compare = () => {
     return {
       id: p.id,
       firstImage,
+      images: Array.isArray(p.images) ? p.images : [],
       productName: p.product_name || '',
       brand: p.parent_brand || '',
       subBrand: p.sub_brand || '',
       variant: p.variant || '',
-      packSize: p.net_weight || p.pack_size || '',
+      packSize: p.net_quantity || p.pack_size || p.net_weight || '',
       serveSize: p.serving_size || '',
+      servingsPerPack: p.servings_per_pack || '',
       mrp: p.mrp != null ? `₹${p.mrp}` : '',
+      uspf: p.uspf || '',
       packingFormat: p.packing_format || '',
       manufactured: p.manufacturing_date || '',
       expiry: p.expiry_date || '',
@@ -141,17 +169,42 @@ const Compare = () => {
       vegNonVeg: p.veg_nonveg || '',
       claims: Array.isArray(p.claims) ? p.claims : [],
       tags: Array.isArray(p.tags) ? p.tags : [],
-      nutrition,
+      // Nutrition
+      nutritionRows,
+      nutritionNotes,
+      // Composition
       ingredients: ingredientsArr,
       allergens: allergensArr,
-      storageCondition: p.storage_instructions || '',
-      instructionsToUse: p.instructions_to_use || '',
-      marketedBy: marketedBy,
-      manufacturedBy: manufacturedBy,
-      packedBy: packedBy,
-      fssai: fssai,
-      barcode: p.barcode || '',
-      otherNotes: p.customer_care ? (typeof p.customer_care === 'object' ? [p.customer_care.phone, p.customer_care.email, p.customer_care.website].filter(Boolean).join(', ') : '') : '',
+      // Storage & Usage
+      storageCondition: storageArr.join('\n'),
+      directionsToUse,
+      preparationMethod,
+      // Medical
+      warnings,
+      // Company
+      brandOwner: p.brand_owner || '',
+      marketedBy: marketed.join('\n\n'),
+      manufacturedBy: manufactured.join('\n\n'),
+      packedBy: packed.join('\n\n'),
+      // Batch
+      lotNumber: batch.lot_number || '',
+      machineCode: batch.machine_code || '',
+      otherCodes: Array.isArray(batch.other_codes) ? batch.other_codes.join('\n') : '',
+      // Packaging
+      packagingManufacturer: packaging.packaging_material_manufacturer || '',
+      packagingCodes: Array.isArray(packaging.packaging_codes) ? packaging.packaging_codes.join('\n') : '',
+      // Regulatory
+      fssaiNumbers,
+      barcodes: Array.isArray(p.barcodes) ? p.barcodes : (p.barcode ? [p.barcode] : []),
+      certifications: Array.isArray(p.certifications) ? p.certifications : [],
+      // Customer Care
+      customerCarePhone: Array.isArray(cc.phone) ? cc.phone.join(', ') : (cc.phone || ''),
+      customerCareEmail: cc.email || '',
+      customerCareWebsite: cc.website || '',
+      customerCareAddress: cc.address || '',
+      // Additional Notes
+      regulatoryText: Array.isArray(p.regulatory_text) ? p.regulatory_text.join('\n') : '',
+      otherImportantText: Array.isArray(p.other_important_text) ? p.other_important_text.join('\n') : '',
     }
   }
 
@@ -212,7 +265,9 @@ const Compare = () => {
       { label: 'Variant', key: 'variant' },
       { label: 'Net Weight / Pack Size', key: 'packSize' },
       { label: 'Serve Size', key: 'serveSize' },
+      { label: 'Servings Per Pack', key: 'servingsPerPack' },
       { label: 'MRP', key: 'mrp' },
+      { label: 'USPF', key: 'uspf' },
       { label: 'Packing Format', key: 'packingFormat' },
       { label: 'Manufacturing Date', key: 'manufactured' },
       { label: 'Expiry Date', key: 'expiry' },
@@ -223,15 +278,28 @@ const Compare = () => {
       { label: 'Tags', key: 'tags', isArray: true },
       { label: 'Ingredients', key: 'ingredients', section: 'Composition', isArray: true },
       { label: 'Allergens', key: 'allergens', isArray: true },
-      { label: 'Shelf Life', key: 'shelfLife' },
-      { label: 'Storage Condition', key: 'storageCondition' },
-      { label: 'Instructions to Use', key: 'instructionsToUse' },
-      { label: 'Marketed By', key: 'marketedBy', section: 'Company Information' },
+      { label: 'Storage Condition', key: 'storageCondition', section: 'Storage & Usage' },
+      { label: 'Directions to Use', key: 'directionsToUse' },
+      { label: 'Preparation Method', key: 'preparationMethod' },
+      { label: 'Warnings', key: 'warnings', section: 'Medical Information' },
+      { label: 'Brand Owner', key: 'brandOwner', section: 'Company Information' },
+      { label: 'Marketed By', key: 'marketedBy' },
       { label: 'Manufactured By', key: 'manufacturedBy' },
       { label: 'Packed By', key: 'packedBy' },
-      { label: 'FSSAI License No.', key: 'fssai' },
-      { label: 'Barcode', key: 'barcode' },
-      { label: 'Other Notes', key: 'otherNotes' },
+      { label: 'Lot / Batch Number', key: 'lotNumber', section: 'Batch Information' },
+      { label: 'Machine Code', key: 'machineCode' },
+      { label: 'Other Codes', key: 'otherCodes' },
+      { label: 'Packaging Manufacturer', key: 'packagingManufacturer', section: 'Packaging Information' },
+      { label: 'Packaging Codes', key: 'packagingCodes' },
+      { label: 'FSSAI License No.', key: 'fssaiNumbers', section: 'Regulatory Information', isArray: true },
+      { label: 'Barcodes / EAN', key: 'barcodes', isArray: true },
+      { label: 'Certifications', key: 'certifications', isArray: true },
+      { label: 'Phone', key: 'customerCarePhone', section: 'Customer Care' },
+      { label: 'Email', key: 'customerCareEmail' },
+      { label: 'Website', key: 'customerCareWebsite' },
+      { label: 'Address', key: 'customerCareAddress' },
+      { label: 'Regulatory Text', key: 'regulatoryText', section: 'Additional Notes' },
+      { label: 'Other Important Text', key: 'otherImportantText' },
     ]
 
     // Set column widths
@@ -282,37 +350,67 @@ const Compare = () => {
       }
     })
 
-    // Embed images into the image row
+    // Embed images into the image row — use the currently visible image (from carousel)
     if (imageRowNumber) {
-      selectedProducts.forEach((product, colIndex) => {
-        if (product.firstImage) {
-          try {
-            // Extract base64 data and extension from data URL
-            const match = product.firstImage.match(/^data:image\/(png|jpeg|jpg|gif);base64,(.+)$/)
-            if (match) {
-              const ext = match[1] === 'jpg' ? 'jpeg' : match[1]
-              const base64Data = match[2]
-              const imageId = wb.addImage({ base64: base64Data, extension: ext })
-              ws1.addImage(imageId, {
-                tl: { col: colIndex + 1, row: imageRowNumber - 1 },
-                ext: { width: 140, height: 110 },
-              })
-            }
-          } catch (e) {
-            console.warn('Could not embed image for', product.productName, e)
+      for (let colIndex = 0; colIndex < selectedProducts.length; colIndex++) {
+        const product = selectedProducts[colIndex]
+        const imgs = product.images || []
+        const visibleIdx = imageIndices[product.id] || 0
+        const imgUrl = imgs[visibleIdx] || product.firstImage
+        if (!imgUrl) continue
+        try {
+          let base64Data, ext
+          const dataUrlMatch = imgUrl.match(/^data:image\/(png|jpeg|jpg|gif);base64,(.+)$/)
+          if (dataUrlMatch) {
+            ext = dataUrlMatch[1] === 'jpg' ? 'jpeg' : dataUrlMatch[1]
+            base64Data = dataUrlMatch[2]
+          } else {
+            // Fetch the image URL and convert to base64
+            const resp = await fetch(imgUrl)
+            const blob = await resp.blob()
+            const arrayBuf = await blob.arrayBuffer()
+            const bytes = new Uint8Array(arrayBuf)
+            let binary = ''
+            bytes.forEach(b => binary += String.fromCharCode(b))
+            base64Data = btoa(binary)
+            ext = blob.type.includes('png') ? 'png' : 'jpeg'
           }
+          const imageId = wb.addImage({ base64: base64Data, extension: ext })
+          ws1.addImage(imageId, {
+            tl: { col: colIndex + 1, row: imageRowNumber - 1 },
+            ext: { width: 140, height: 110 },
+          })
+        } catch (e) {
+          console.warn('Could not embed image for', product.productName, e)
         }
-      })
+      }
     }
 
     // ---- Sheet 2: Nutrition ----
     const ws2 = wb.addWorksheet('Nutrition')
-    const allNutrients = [...new Set(selectedProducts.flatMap(p => Object.keys(p.nutrition || {})))]
+
+    const exportNutrients = [...new Set(
+      selectedProducts.flatMap(p =>
+        (p.nutritionRows || []).map(r => r.nutrient)
+      )
+    )]
 
     ws2.getColumn(1).width = 28
     selectedProducts.forEach((_, i) => {
-      ws2.getColumn(i + 2).width = 32
+      ws2.getColumn(i + 2).width = 36
     })
+
+    // Nutrition Notes section
+    const notesHeaderRow = ws2.addRow(['Nutrition Notes', ...selectedProducts.map(p => p.productName)])
+    notesHeaderRow.font = { bold: true, size: 11 }
+    notesHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8EDF5' } }
+    notesHeaderRow.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
+    const notesRow = ws2.addRow(['Notes', ...selectedProducts.map(p => p.nutritionNotes?.length > 0 ? p.nutritionNotes.join('\n') : 'Not specified')])
+    notesRow.getCell(1).font = { bold: true }
+    notesRow.alignment = { vertical: 'middle', wrapText: true }
+
+    // Blank separator
+    ws2.addRow([])
 
     // Header
     const nutHeaderRow = ws2.addRow(['Nutrient', ...selectedProducts.map(p => p.productName)])
@@ -320,24 +418,28 @@ const Compare = () => {
     nutHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8EDF5' } }
     nutHeaderRow.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
 
-    // Sub-header
-    const subHeaderRow = ws2.addRow(['', ...selectedProducts.map(() => 'Per 100g / Per Serve / %RDA')])
-    subHeaderRow.font = { italic: true, size: 10, color: { argb: 'FF6B7280' } }
-    subHeaderRow.alignment = { horizontal: 'center' }
-
-    allNutrients.forEach(nutrient => {
+    exportNutrients.forEach(nutrient => {
       const row = [nutrient]
       selectedProducts.forEach(p => {
-        const data = p.nutrition?.[nutrient]
-        if (data) {
-          row.push(`${data.per100g || '-'} / ${data.perServe || '-'} / ${data.rda || '-'}`)
-        } else {
-          row.push('Not specified')
-        }
+        const r = (p.nutritionRows || []).find(r2 => r2.nutrient === nutrient)
+        if (!r) { row.push('—'); return }
+        const unit = r.unit || ''
+        const vals = r.values || {}
+        const lines = []
+        if (unit) lines.push(`[${unit}]`)
+        Object.entries(vals).forEach(([colName, val]) => {
+          if (val && val !== '-' && val !== 'not specified') {
+            lines.push(`${colName}: ${val}`)
+          }
+        })
+        row.push(lines.length > 0 ? lines.join('\n') : '—')
       })
       const dataRow = ws2.addRow(row)
       dataRow.getCell(1).font = { bold: true }
-      dataRow.alignment = { vertical: 'middle', wrapText: true }
+      dataRow.alignment = { vertical: 'top', wrapText: true }
+      // Auto-height: count max lines across all product cells for this nutrient
+      const maxLines = Math.max(...row.slice(1).map(cell => (cell || '').split('\n').length), 1)
+      dataRow.height = Math.max(30, maxLines * 16)
     })
 
     // Download
@@ -388,6 +490,37 @@ const Compare = () => {
     return ''
   }
 
+  // Helper: parse a nutrition value string to a number, stripping <, >, ~ prefixes and non-numeric chars
+  const parseNutritionNum = (val) => {
+    if (!val || val === '-' || val === 'NA' || val === 'not specified') return NaN
+    // Strip leading < > ~ ≈ and any spaces, then parse
+    const cleaned = val.toString().replace(/^[<>~≈\s]+/, '').replace(/[^0-9.-]/g, '')
+    return parseFloat(cleaned)
+  }
+
+  // Helper: find first numeric value from a product's nutrition rows matching any of the given nutrient names
+  // Matches against both stdName (standardized from DB) and nutrient (original display name)
+  // For charts: treats all "per 100g" / "Approx. per 100 g" / "Per 100 g" keys as equivalent
+  const findNutrientValue = (product, names) => {
+    for (const name of names) {
+      const lc = name.toLowerCase()
+      const row = (product.nutritionRows || []).find(r =>
+        r.stdName?.toLowerCase() === lc || r.nutrient?.toLowerCase() === lc
+      )
+      if (row) {
+        const vals = row.values || {}
+        // Find any key containing "100" (per 100g in any format)
+        const per100Key = Object.keys(vals).find(k => k.toLowerCase().replace(/\s/g, '').includes('100'))
+        const key = per100Key || Object.keys(vals)[0]
+        if (key && vals[key]) {
+          const num = parseNutritionNum(vals[key])
+          if (!isNaN(num)) return num
+        }
+      }
+    }
+    return 0
+  }
+
   // Prepare radar chart data - try multiple key formats from standardized API
   const nutrientKeyMap = {
     'Protein': ['Protein', 'Protein (g)'],
@@ -399,23 +532,11 @@ const Compare = () => {
   const radarData = Object.entries(nutrientKeyMap).map(([label, keys]) => {
     const dataPoint = { nutrient: label }
     selectedProducts.forEach(product => {
-      let value = null
-      for (const key of keys) {
-        if (product.nutrition?.[key]?.per100g) {
-          value = product.nutrition[key].per100g
-          break
-        }
-      }
-      dataPoint[product.productName] = parseFloat(value) || 0
+      dataPoint[product.productName] = findNutrientValue(product, keys)
     })
     return dataPoint
   })
 
-  // Prepare bar chart data (Price per serve)
-  const priceData = selectedProducts.map(product => ({
-    name: product.productName.substring(0, 15) + '...',
-    price: parseFloat(product.mrp?.replace(/[^0-9.-]/g, '')) || 0
-  }))
 
   return (
     <Layout>
@@ -525,107 +646,112 @@ const Compare = () => {
             ) : viewMode === 'charts' ? (
               /* Charts View */
               <div className="space-y-4 md:space-y-6">
+                {/* Radar — Nutrition Profile */}
                 <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                   <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-4 md:mb-6">
                     Nutrition Profile Comparison
                   </h3>
-                  <ResponsiveContainer width="100%" height={300} className="md:hidden">
+                  <ResponsiveContainer width="100%" height={isMobile ? 300 : 400}>
                     <RadarChart data={radarData}>
                       <PolarGrid />
-                      <PolarAngleAxis dataKey="nutrient" tick={{ fontSize: 10 }} />
+                      <PolarAngleAxis dataKey="nutrient" tick={{ fontSize: isMobile ? 10 : 12 }} />
                       {selectedProducts.map((product, index) => (
                         <Radar
                           key={product.id}
                           name={product.productName}
                           dataKey={product.productName}
-                          stroke={['#2563eb', '#10b981', '#f59e0b', '#ef4444'][index % 4]}
-                          fill={['#2563eb', '#10b981', '#f59e0b', '#ef4444'][index % 4]}
-                          fillOpacity={0.3}
+                          stroke={['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'][index % 8]}
+                          fill={['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'][index % 8]}
+                          fillOpacity={0.2}
                         />
                       ))}
-                    </RadarChart>
-                  </ResponsiveContainer>
-                  <ResponsiveContainer width="100%" height={400} className="hidden md:block">
-                    <RadarChart data={radarData}>
-                      <PolarGrid />
-                      <PolarAngleAxis dataKey="nutrient" />
-                      {selectedProducts.map((product, index) => (
-                        <Radar
-                          key={product.id}
-                          name={product.productName}
-                          dataKey={product.productName}
-                          stroke={['#2563eb', '#10b981', '#f59e0b', '#ef4444'][index % 4]}
-                          fill={['#2563eb', '#10b981', '#f59e0b', '#ef4444'][index % 4]}
-                          fillOpacity={0.3}
-                        />
-                      ))}
+                      <Legend wrapperStyle={{ fontSize: isMobile ? 10 : 12 }} />
+                      <Tooltip />
                     </RadarChart>
                   </ResponsiveContainer>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+                  {/* Energy (kcal) Comparison */}
                   <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                     <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-4 md:mb-6">
-                      Key Nutrients (per 100g)
+                      Energy (kcal per 100g)
                     </h3>
-                    <ResponsiveContainer width="100%" height={250} className="md:hidden">
-                      <BarChart data={selectedProducts.map(p => {
-                        const getVal = (keys) => { for (const k of keys) { if (p.nutrition?.[k]?.per100g) return parseFloat(p.nutrition[k].per100g) || 0 } return 0 }
-                        return {
-                          name: p.productName.substring(0, 10),
-                          Protein: getVal(['Protein', 'Protein (g)']),
-                          Sugar: getVal(['Total Sugars', 'Sugar (g)', 'Added Sugars'])
-                        }
-                      })}>
+                    <ResponsiveContainer width="100%" height={isMobile ? 250 : 300}>
+                      <BarChart data={selectedProducts.map(p => ({
+                          name: p.productName.substring(0, isMobile ? 10 : 15),
+                          Energy: findNutrientValue(p, ['Energy', 'Energy (kcal)', 'Calories'])
+                        }))}>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                        <YAxis tick={{ fontSize: 10 }} />
+                        <XAxis dataKey="name" tick={{ fontSize: isMobile ? 10 : 12 }} />
+                        <YAxis tick={{ fontSize: isMobile ? 10 : 12 }} />
                         <Tooltip />
-                        <Legend wrapperStyle={{ fontSize: 11 }} />
-                        <Bar dataKey="Protein" fill="#2563eb" />
-                        <Bar dataKey="Sugar" fill="#f59e0b" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                    <ResponsiveContainer width="100%" height={300} className="hidden md:block">
-                      <BarChart data={selectedProducts.map(p => {
-                        const getVal = (keys) => { for (const k of keys) { if (p.nutrition?.[k]?.per100g) return parseFloat(p.nutrition[k].per100g) || 0 } return 0 }
-                        return {
-                          name: p.productName.substring(0, 12),
-                          Protein: getVal(['Protein', 'Protein (g)']),
-                          Sugar: getVal(['Total Sugars', 'Sugar (g)', 'Added Sugars'])
-                        }
-                      })}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" />
-                        <YAxis />
-                        <Tooltip />
-                        <Legend />
-                        <Bar dataKey="Protein" fill="#2563eb" />
-                        <Bar dataKey="Sugar" fill="#f59e0b" />
+                        <Bar dataKey="Energy" fill="#ef4444" radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
 
+                  {/* MRP Comparison */}
                   <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                     <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-4 md:mb-6">
-                      Price per Serve (₹)
+                      MRP Comparison (₹)
                     </h3>
-                    <ResponsiveContainer width="100%" height={250} className="md:hidden">
-                      <BarChart data={priceData}>
+                    <ResponsiveContainer width="100%" height={isMobile ? 250 : 300}>
+                      <BarChart data={selectedProducts.map(p => ({
+                          name: p.productName.substring(0, isMobile ? 10 : 15),
+                          MRP: parseFloat(p.mrp?.replace(/[^0-9.-]/g, '')) || 0
+                        }))}>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                        <YAxis tick={{ fontSize: 10 }} />
-                        <Tooltip />
-                        <Bar dataKey="price" fill="#10b981" />
+                        <XAxis dataKey="name" tick={{ fontSize: isMobile ? 10 : 12 }} />
+                        <YAxis tick={{ fontSize: isMobile ? 10 : 12 }} />
+                        <Tooltip formatter={(value) => [`₹${value}`, 'MRP']} />
+                        <Bar dataKey="MRP" fill="#10b981" radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
-                    <ResponsiveContainer width="100%" height={300} className="hidden md:block">
-                      <BarChart data={priceData}>
+                  </div>
+
+                  {/* Sugar vs Protein */}
+                  <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                    <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-4 md:mb-6">
+                      Sugar vs Protein (g per 100g)
+                    </h3>
+                    <ResponsiveContainer width="100%" height={isMobile ? 250 : 300}>
+                      <BarChart data={selectedProducts.map(p => ({
+                          name: p.productName.substring(0, isMobile ? 10 : 15),
+                          Protein: findNutrientValue(p, ['Protein', 'Protein (g)']),
+                          Sugar: findNutrientValue(p, ['Total Sugars', 'Sugar (g)', 'Added Sugars']),
+                          'Added Sugar': findNutrientValue(p, ['Added Sugars', 'Added Sugar (g)'])
+                        }))}>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" />
-                        <YAxis />
+                        <XAxis dataKey="name" tick={{ fontSize: isMobile ? 10 : 12 }} />
+                        <YAxis tick={{ fontSize: isMobile ? 10 : 12 }} />
                         <Tooltip />
-                        <Bar dataKey="price" fill="#10b981" />
+                        <Legend wrapperStyle={{ fontSize: isMobile ? 10 : 12 }} />
+                        <Bar dataKey="Protein" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="Sugar" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="Added Sugar" fill="#f97316" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Sodium & Cholesterol */}
+                  <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
+                    <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-4 md:mb-6">
+                      Sodium & Cholesterol (per 100g)
+                    </h3>
+                    <ResponsiveContainer width="100%" height={isMobile ? 250 : 300}>
+                      <BarChart data={selectedProducts.map(p => ({
+                          name: p.productName.substring(0, isMobile ? 10 : 15),
+                          'Sodium (mg)': findNutrientValue(p, ['Sodium', 'Sodium (mg)']),
+                          'Cholesterol (mg)': findNutrientValue(p, ['Cholesterol', 'Cholesterol (mg)'])
+                        }))}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" tick={{ fontSize: isMobile ? 10 : 12 }} />
+                        <YAxis tick={{ fontSize: isMobile ? 10 : 12 }} />
+                        <Tooltip />
+                        <Legend wrapperStyle={{ fontSize: isMobile ? 10 : 12 }} />
+                        <Bar dataKey="Sodium (mg)" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="Cholesterol (mg)" fill="#ec4899" radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
@@ -634,6 +760,71 @@ const Compare = () => {
             ) : (
               /* Table View */
               <div className="bg-white border border-[#e1e7ef] rounded-lg overflow-hidden">
+                {/* ═══ Product Image Carousel Row ═══ */}
+                <div className="overflow-x-auto -mx-4 md:mx-0 border-b border-[#e1e7ef]">
+                  <div className="inline-block min-w-full align-middle px-4 md:px-0">
+                    <table className="min-w-full">
+                      <tbody>
+                        <tr>
+                          <td className="px-2 md:px-4 py-3 min-w-[120px] md:min-w-[200px] align-middle sticky left-0 bg-white z-10">
+                            <span className="text-xs md:text-sm font-ibm-plex font-medium text-[#65758b] uppercase">Product Images</span>
+                          </td>
+                          {selectedProducts.map((product, index) => {
+                            const imgs = product.images || []
+                            const idx = imageIndices[product.id] || 0
+                            return (
+                              <td key={product.id} className={`px-2 md:px-4 py-3 min-w-[150px] md:min-w-[200px] max-w-[200px] md:max-w-[240px] text-center overflow-hidden ${getProductColumnColor(index)}`}>
+                                {imgs.length > 0 ? (
+                                  <div className="inline-flex flex-col items-center gap-1">
+                                    <div className="flex items-center justify-center gap-1">
+                                      {imgs.length > 1 && (
+                                        <button
+                                          onClick={() => setImageIndices(prev => ({ ...prev, [product.id]: idx === 0 ? imgs.length - 1 : idx - 1 }))}
+                                          className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-gray-200 transition-colors"
+                                        >
+                                          <ChevronLeft className="w-4 h-4 text-[#65758b]" />
+                                        </button>
+                                      )}
+                                      <div className="relative group">
+                                        <div className="w-20 h-20 md:w-24 md:h-24 rounded-lg overflow-hidden border border-[#e1e7ef] bg-gray-50 flex items-center justify-center">
+                                          <img src={imgs[idx]} alt={product.productName} className="max-w-full max-h-full object-contain" />
+                                        </div>
+                                        <button
+                                          onClick={() => setPreviewProduct({ productName: product.productName, images: imgs })}
+                                          className="absolute bottom-1 right-1 w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border border-[#e1e7ef] shadow-sm hover:bg-[#b455a0] hover:text-white hover:border-[#b455a0] transition-all opacity-0 group-hover:opacity-100"
+                                          title="Zoom / View full size"
+                                        >
+                                          <ZoomIn className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                      {imgs.length > 1 && (
+                                        <button
+                                          onClick={() => setImageIndices(prev => ({ ...prev, [product.id]: idx === imgs.length - 1 ? 0 : idx + 1 }))}
+                                          className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-gray-200 transition-colors"
+                                        >
+                                          <ChevronRight className="w-4 h-4 text-[#65758b]" />
+                                        </button>
+                                      )}
+                                    </div>
+                                    {imgs.length > 1 && (
+                                      <span className="text-[10px] text-[#65758b] font-ibm-plex">{idx + 1} / {imgs.length}</span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col items-center justify-center w-20 h-20 md:w-24 md:h-24 mx-auto bg-gray-50 rounded-lg border border-[#e1e7ef]">
+                                    <ImageOff className="w-6 h-6 text-gray-300" />
+                                    <span className="text-[10px] text-gray-400 mt-1">No image</span>
+                                  </div>
+                                )}
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
                 <div className="overflow-x-auto -mx-4 md:mx-0">
                   <div className="inline-block min-w-full align-middle px-4 md:px-0">
                     <table className="min-w-full">
@@ -654,7 +845,7 @@ const Compare = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#e1e7ef]">
-                        {/* Basic Tab */}
+                        {/* ═══ Basic Info Tab ═══ */}
                         {activeTab === 'basic' && (
                           <>
                             <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Basic Information</span></td></tr>
@@ -665,7 +856,9 @@ const Compare = () => {
                               { label: 'Variant', key: 'variant' },
                               { label: 'Net Weight / Pack Size', key: 'packSize' },
                               { label: 'Serve Size', key: 'serveSize' },
+                              { label: 'Servings Per Pack', key: 'servingsPerPack' },
                               { label: 'MRP (₹)', key: 'mrp' },
+                              { label: 'USPF', key: 'uspf' },
                               { label: 'Packing Format', key: 'packingFormat' },
                               { label: 'Manufacturing Date', key: 'manufactured' },
                               { label: 'Expiry Date', key: 'expiry' },
@@ -685,7 +878,7 @@ const Compare = () => {
                                       key={product.id}
                                       className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)} ${getHighlightClass(value, allValues, field.key)}`}
                                     >
-                                      <div className="line-clamp-3">{value}</div>
+                                      <div>{value}</div>
                                     </td>
                                   )
                                 })}
@@ -698,7 +891,7 @@ const Compare = () => {
                               </td>
                               {selectedProducts.map((product, index) => (
                                 <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
-                                  <div className="line-clamp-4">{product.claims?.length > 0 ? product.claims.join(', ') : 'Not specified'}</div>
+                                  <div>{product.claims?.length > 0 ? product.claims.join(', ') : 'Not specified'}</div>
                                 </td>
                               ))}
                             </tr>
@@ -709,41 +902,98 @@ const Compare = () => {
                               </td>
                               {selectedProducts.map((product, index) => (
                                 <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
-                                  <div className="line-clamp-3">{product.tags?.length > 0 ? product.tags.join(', ') : 'Not specified'}</div>
+                                  <div>{product.tags?.length > 0 ? product.tags.join(', ') : 'Not specified'}</div>
                                 </td>
                               ))}
                             </tr>
                           </>
                         )}
 
-                        {/* Nutrition Tab */}
-                        {activeTab === 'nutrition' && (
-                          <>
-                            <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Nutrient (per 100g / serve / %RDA)</span></td></tr>
-                            {[...new Set(selectedProducts.flatMap(p => Object.keys(p.nutrition || {})))].map((nutrient) => (
-                              <tr key={nutrient}>
+                        {/* ═══ Nutrition Tab ═══ */}
+                        {activeTab === 'nutrition' && (() => {
+                          // Collect union of all nutrient names
+                          const allNutrients = [...new Set(
+                            selectedProducts.flatMap(p =>
+                              (p.nutritionRows || []).map(r => r.nutrient)
+                            )
+                          )]
+                          return (
+                            <>
+                              {/* Nutrition Notes on top */}
+                              <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Nutrition Notes</span></td></tr>
+                              <tr>
                                 <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
-                                  {nutrient}
+                                  Notes
                                 </td>
-                                {selectedProducts.map((product, index) => {
-                                  const data = product.nutrition?.[nutrient]
-                                  const value = data ? `${data.per100g || '-'} / ${data.perServe || '-'} / ${data.rda || '-'}` : 'Not specified'
-                                  const per100gValues = selectedProducts.map(p => p.nutrition?.[nutrient]?.per100g)
-                                  return (
-                                    <td
-                                      key={product.id}
-                                      className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)} ${getHighlightClass(data?.per100g, per100gValues, 'nutrition')}`}
-                                    >
-                                      <div className="line-clamp-2">{value}</div>
-                                    </td>
-                                  )
-                                })}
+                                {selectedProducts.map((product, index) => (
+                                  <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
+                                    <div className="whitespace-pre-line">{product.nutritionNotes?.length > 0 ? product.nutritionNotes.join('\n') : 'Not specified'}</div>
+                                  </td>
+                                ))}
                               </tr>
-                            ))}
-                          </>
-                        )}
+                              {/* Dynamic nutrition table */}
+                              <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Nutrient Table</span></td></tr>
+                              {allNutrients.map((nutrient) => {
+                                return (
+                                  <tr key={nutrient}>
+                                    <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10 align-top">
+                                      {nutrient}
+                                    </td>
+                                    {selectedProducts.map((product, index) => {
+                                      const row = (product.nutritionRows || []).find(r => r.nutrient === nutrient)
+                                      if (!row) {
+                                        return (
+                                          <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-gray-400 ${getProductColumnColor(index)} align-top`}>
+                                            —
+                                          </td>
+                                        )
+                                      }
+                                      const unit = row.unit || ''
+                                      const vals = row.values || {}
+                                      const entries = Object.entries(vals).filter(([, v]) => v && v !== '-' && v !== 'not specified')
+                                      // First numeric value for highlighting
+                                      const firstNum = entries.length > 0 ? entries[0][1] : null
+                                      const allFirstNums = selectedProducts.map(p => {
+                                        const r = (p.nutritionRows || []).find(r2 => r2.nutrient === nutrient)
+                                        if (!r) return null
+                                        const e = Object.entries(r.values || {}).find(([, v]) => v && v !== '-' && v !== 'not specified')
+                                        return e ? e[1] : null
+                                      })
+                                      return (
+                                        <td
+                                          key={product.id}
+                                          className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)} ${getHighlightClass(firstNum, allFirstNums, 'nutrition')} align-top`}
+                                        >
+                                          <div>
+                                            {unit && (
+                                              <span className="inline-block bg-gray-100 text-gray-600 text-[10px] font-medium px-1.5 py-0.5 rounded mb-1">
+                                                {unit}
+                                              </span>
+                                            )}
+                                            {entries.length > 0 ? (
+                                              <div className="space-y-0.5">
+                                                {entries.map(([colName, val]) => (
+                                                  <div key={colName} className="flex justify-between gap-2">
+                                                    <span className="text-[#65758b] text-[11px] truncate">{colName}:</span>
+                                                    <span className="font-medium text-right whitespace-nowrap">{val}</span>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            ) : (
+                                              <span className="text-gray-400">—</span>
+                                            )}
+                                          </div>
+                                        </td>
+                                      )
+                                    })}
+                                  </tr>
+                                )
+                              })}
+                            </>
+                          )
+                        })()}
 
-                        {/* Composition Tab */}
+                        {/* ═══ Composition Tab ═══ */}
                         {activeTab === 'composition' && (
                           <>
                             <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Ingredients</span></td></tr>
@@ -753,7 +1003,7 @@ const Compare = () => {
                               </td>
                               {selectedProducts.map((product, index) => (
                                 <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
-                                  <div className="line-clamp-6">{product.ingredients?.length > 0 ? product.ingredients.join(', ') : 'Not specified'}</div>
+                                  <div>{product.ingredients?.length > 0 ? product.ingredients.join(', ') : 'Not specified'}</div>
                                 </td>
                               ))}
                             </tr>
@@ -764,15 +1014,15 @@ const Compare = () => {
                               </td>
                               {selectedProducts.map((product, index) => (
                                 <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
-                                  <div className="line-clamp-3">{product.allergens?.length > 0 ? product.allergens.join(', ') : 'Not specified'}</div>
+                                  <div>{product.allergens?.length > 0 ? product.allergens.join(', ') : 'Not specified'}</div>
                                 </td>
                               ))}
                             </tr>
                             <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Storage & Usage</span></td></tr>
                             {[
-                              { label: 'Shelf Life', key: 'shelfLife' },
                               { label: 'Storage Condition', key: 'storageCondition' },
-                              { label: 'Instructions to Use', key: 'instructionsToUse' }
+                              { label: 'Directions to Use', key: 'directionsToUse' },
+                              { label: 'Preparation Method', key: 'preparationMethod' }
                             ].map((field) => (
                               <tr key={field.key}>
                                 <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
@@ -780,19 +1030,31 @@ const Compare = () => {
                                 </td>
                                 {selectedProducts.map((product, index) => (
                                   <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
-                                    <div className="line-clamp-4">{product[field.key] || 'Not specified'}</div>
+                                    <div className="whitespace-pre-line">{product[field.key] || 'Not specified'}</div>
                                   </td>
                                 ))}
                               </tr>
                             ))}
+                            <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Medical Information</span></td></tr>
+                            <tr>
+                              <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
+                                Warnings
+                              </td>
+                              {selectedProducts.map((product, index) => (
+                                <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
+                                  <div className="whitespace-pre-line">{product.warnings || 'Not specified'}</div>
+                                </td>
+                              ))}
+                            </tr>
                           </>
                         )}
 
-                        {/* Company Tab */}
+                        {/* ═══ Company Tab ═══ */}
                         {activeTab === 'company' && (
                           <>
                             <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Company Information</span></td></tr>
                             {[
+                              { label: 'Brand Owner', key: 'brandOwner' },
                               { label: 'Marketed By', key: 'marketedBy' },
                               { label: 'Manufactured By', key: 'manufacturedBy' },
                               { label: 'Packed By', key: 'packedBy' }
@@ -803,15 +1065,16 @@ const Compare = () => {
                                 </td>
                                 {selectedProducts.map((product, index) => (
                                   <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
-                                    <div className="line-clamp-4">{product[field.key] || 'Not specified'}</div>
+                                    <div className="whitespace-pre-line">{product[field.key] || 'Not specified'}</div>
                                   </td>
                                 ))}
                               </tr>
                             ))}
-                            <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Regulatory Information</span></td></tr>
+                            <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Batch Information</span></td></tr>
                             {[
-                              { label: 'FSSAI License No.', key: 'fssai' },
-                              { label: 'Barcode', key: 'barcode' }
+                              { label: 'Lot / Batch Number', key: 'lotNumber' },
+                              { label: 'Machine Code', key: 'machineCode' },
+                              { label: 'Other Codes', key: 'otherCodes' }
                             ].map((field) => (
                               <tr key={field.key}>
                                 <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
@@ -819,22 +1082,95 @@ const Compare = () => {
                                 </td>
                                 {selectedProducts.map((product, index) => (
                                   <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
-                                    <div className="line-clamp-2">{product[field.key] || 'Not specified'}</div>
+                                    <div className="whitespace-pre-line">{product[field.key] || 'Not specified'}</div>
                                   </td>
                                 ))}
                               </tr>
                             ))}
-                            <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Additional Notes</span></td></tr>
+                            <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Packaging Information</span></td></tr>
+                            {[
+                              { label: 'Packaging Manufacturer', key: 'packagingManufacturer' },
+                              { label: 'Packaging Codes', key: 'packagingCodes' }
+                            ].map((field) => (
+                              <tr key={field.key}>
+                                <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
+                                  {field.label}
+                                </td>
+                                {selectedProducts.map((product, index) => (
+                                  <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
+                                    <div className="whitespace-pre-line">{product[field.key] || 'Not specified'}</div>
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                            <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Regulatory Information</span></td></tr>
+                            {/* FSSAI Numbers */}
                             <tr>
                               <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
-                                Other Notes
+                                FSSAI License No.
                               </td>
                               {selectedProducts.map((product, index) => (
                                 <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
-                                  <div className="line-clamp-4">{product.otherNotes || 'Not specified'}</div>
+                                  <div className="whitespace-pre-line">{product.fssaiNumbers?.length > 0 ? product.fssaiNumbers.join('\n') : 'Not specified'}</div>
                                 </td>
                               ))}
                             </tr>
+                            {/* Barcodes */}
+                            <tr>
+                              <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
+                                Barcodes / EAN
+                              </td>
+                              {selectedProducts.map((product, index) => (
+                                <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
+                                  <div className="whitespace-pre-line">{product.barcodes?.length > 0 ? product.barcodes.join('\n') : 'Not specified'}</div>
+                                </td>
+                              ))}
+                            </tr>
+                            {/* Certifications */}
+                            <tr>
+                              <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
+                                Certifications
+                              </td>
+                              {selectedProducts.map((product, index) => (
+                                <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
+                                  <div>{product.certifications?.length > 0 ? product.certifications.join(', ') : 'Not specified'}</div>
+                                </td>
+                              ))}
+                            </tr>
+                            <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Customer Care</span></td></tr>
+                            {[
+                              { label: 'Phone', key: 'customerCarePhone' },
+                              { label: 'Email', key: 'customerCareEmail' },
+                              { label: 'Website', key: 'customerCareWebsite' },
+                              { label: 'Address', key: 'customerCareAddress' }
+                            ].map((field) => (
+                              <tr key={field.key}>
+                                <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
+                                  {field.label}
+                                </td>
+                                {selectedProducts.map((product, index) => (
+                                  <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
+                                    <div>{product[field.key] || 'Not specified'}</div>
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                            <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Additional Notes & Regulatory</span></td></tr>
+                            {[
+                              { label: 'Regulatory Text', key: 'regulatoryText' },
+                              { label: 'Other Important Text', key: 'otherImportantText' }
+                            ].map((field) => (
+                              <tr key={field.key}>
+                                <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
+                                  {field.label}
+                                </td>
+                                {selectedProducts.map((product, index) => (
+                                  <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
+                                    <div className="whitespace-pre-line">{product[field.key] || 'Not specified'}</div>
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
                           </>
                         )}
                       </tbody>
@@ -1047,36 +1383,15 @@ const Compare = () => {
               })}
           </div>
 
-          {/* Highlight Legend */}
-          <div className="mt-6 pt-6 border-t border-[#e1e7ef]">
-            <h4 className="text-sm font-ibm-plex font-semibold text-[#0f1729] mb-3">
-              Highlight Legend
-            </h4>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-green-50 border border-green-200 rounded"></div>
-                <span className="text-xs font-ibm-plex text-[#65758b]">
-                  Best value / Superior
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-yellow-50 border border-yellow-200 rounded"></div>
-                <span className="text-xs font-ibm-plex text-[#65758b]">
-                  Different from others
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-gray-50 border border-gray-200 rounded"></div>
-                <span className="text-xs font-ibm-plex text-[#65758b]">
-                  Not specified
-                </span>
-              </div>
-            </div>
-          </div>
           </div>
         )}
       </div>
       )}
+      <ProductPreviewModal
+        product={previewProduct}
+        isOpen={!!previewProduct}
+        onClose={() => setPreviewProduct(null)}
+      />
     </Layout>
   )
 }

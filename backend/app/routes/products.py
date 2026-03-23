@@ -48,12 +48,16 @@ NOMENCLATURE_MAP = {
     "saturated fat": "Saturated Fat",
     "saturated fatty acids": "Saturated Fat",
     "sfa": "Saturated Fat",
+    "saturate": "Saturated Fat",
+    "saturated": "Saturated Fat",
     "unsaturated fat": "Unsaturated Fat",
+    "unsaturated fatty acids": "Unsaturated Fat",
     "monounsaturated fat": "Monounsaturated Fat",
     "mufa": "Monounsaturated Fat",
     "polyunsaturated fat": "Polyunsaturated Fat",
     "pufa": "Polyunsaturated Fat",
     "trans fat": "Trans Fat",
+    "trans fatty acids": "Trans Fat",
     "carbohydrate": "Total Carbohydrates",
     "total carbohydrate": "Total Carbohydrates",
     "carbs": "Total Carbohydrates",
@@ -95,14 +99,16 @@ NOMENCLATURE_MAP = {
     "pantothenic acid": "Vitamin B5",
     "vitamin b6": "Vitamin B6",
     "pyridoxine": "Vitamin B6",
-    "vitamin b7": "Biotin",
-    "biotin": "Biotin",
+    "vitamin b7": "Vitamin B7",
+    "biotin": "Vitamin B7",
     "vitamin b9": "Folic Acid",
     "folic acid": "Folic Acid",
     "folate": "Folic Acid",
     "vitamin b12": "Vitamin B12",
     "cobalamin": "Vitamin B12",
     "vitamin k": "Vitamin K",
+    "vitamin k1": "Vitamin K1",
+    "vitamin k2": "Vitamin K2",
     "omega 3": "Omega 3 Fatty Acid",
     "omega 3 fatty acid": "Omega 3 Fatty Acid",
     "omega-3": "Omega 3 Fatty Acid",
@@ -168,6 +174,7 @@ Strict rules:
 - Line must visibly cross the text
 - Line must be separate from characters
 - Symbols like *, #, ^ near a price are NOT cancellation
+- Do NOT mark text as [CROSSED] if only a symbol (*, #, ^, @, -) is present near it. There must be a visible line crossing the text.
 - Dot-matrix printing or random dots are NOT strikethrough
 - If unsure → treat as normal text
 
@@ -339,6 +346,7 @@ Extract EXACTLY as printed:
 - All machine codes.
 - All storage instructions.
 - All claims/certifications.
+- ALWAYS set "pack_details.packing_format" to "" even if packaging type (Bottle, Pouch, Box, etc.) is clearly mentioned in OCR.
 
 DO NOT infer or modify any information.
 DO NOT treat decorative text as meaningful.
@@ -404,16 +412,14 @@ Preserve ALL visible OCR text.
 2. If text does NOT clearly belong to any defined field, store it under:
 "other_important_text": []
 
-This includes slogans, taglines, marketing text, environmental messages, disclaimers,
-regulatory notes, preparation notes, miscellaneous packaging text, and brand communication messages.
+This includes slogans, taglines, marketing text, environmental messages, disclaimers, regulatory notes, preparation notes, miscellaneous packaging text, and brand communication messages.
 Rules:
 - Preserve text exactly as printed.
 - Do NOT summarize or rewrite.
 - Store each line as a separate array item.
 
 Final Safety Rule:
-- After structured extraction, ensure any remaining partial, fragmented, or half-structured
-  OCR text that was not mapped to fields is also preserved in "other_important_text".
+- After structured extraction, ensure any remaining partial, fragmented, or half-structured OCR text that was not mapped to fields is also preserved in "other_important_text".
 - This guarantees no meaningful OCR text is lost.
 
 ==================================================
@@ -421,11 +427,11 @@ USPF RULE (NEW)
 ==================================================
 Any price that contains "/Unit", "/g", "/ml", "/kg", "/pc", "/tablet", "/capsule"
 or similar unit formats is NOT an MRP.
-Extract it as: uspf
+Extract it as: **USPF**
 
 Example:
-₹120.00/Unit → uspf: "₹120.00/Unit"
-₹ 0.14/g → uspf: "₹ 0.14/g"
+₹120.00/Unit → **USPF**: ₹120.00/Unit
+₹ 0.14/g → **USPF**: ₹ 0.14/g
 
 - DO NOT merge it with MRP.
 - DO NOT place it under "Other Important Text".
@@ -467,12 +473,6 @@ Dynamic column handling:
 - Preserve all symbols (*, **, †, ‡) exactly as printed.
 - If a value is missing or unclear → return "not specified".
 
-Handling %RDA printed outside the table:
-- If %RDA values appear separately from the nutrition table (e.g., below, above, or beside it),
-  map them to the correct nutrient rows using the nutrient names.
-- Store these values under the appropriate "%RDA" column header exactly as printed.
-- If a nutrient exists but no %RDA value is found → return "not specified" for that column.
-
 NUTRITION NOTES:
 Store nutrition footnotes, explanations, and reference statements related to the nutrition table under:
 
@@ -487,6 +487,13 @@ Rules:
 - Preserve symbols (*, **, ^, †, etc.) exactly as printed.
 - Do NOT merge these lines into the nutrition table rows.
 - If no nutrition notes are present in the OCR text, return: []
+IMPORTANT:
+Examples below are for reference only. NEVER copy them into the output unless the exact text appears in the OCR.
+
+Examples:
+- "*other than naturally occurring trans fat"
+- "**RDA calculated based on 2000 kcal diet"
+- "^Sucrose"
 
 ==================================================
 CLAIMS EXTRACTION RULE
@@ -545,9 +552,9 @@ When extracting MRP:
 - IGNORE any value marked with [CROSSED: ]
 - Final output MUST be:
 
-  mrp: <currency symbol> <amount> (<tax text>)
+  **MRP**: <currency symbol> <amount> (<tax text>)
 Examples:
-- "MRP ₹\\n54.00\\n(INCL. OF\\nALL TAXES)" →
+- "MRP ₹\n54.00\n(INCL. OF\nALL TAXES)" →
   "₹ 54.00 (INCL. OF ALL TAXES)"
 
 - "[CROSSED: ₹ 48] ₹ 46/-" →
@@ -601,11 +608,12 @@ Normalize "manufacturer_information.type" to ONLY one of these values:
 - "Marketed By"
 
 Mapping:
-- Manufactured By → Manufactured By, Manufacturer, Mfg By, Mfd By, Produced By, Made By, Manufacturing Unit, Manufactured & Packed By
-- Marketed By → Marketed By, Marketer, Marketing Company, Marketed & Distributed By, Distributed By, Distributed and Marketed By
+- Manufactured By → Manufactured By, Manufacturer, Mfg By, Mfd By, Produced By, Made By, Manufacturing Unit, Manufactured & Packed By, Manufactured At, Mfg At, Mfd At, Produced At, Made At, Manufacturing Unit At
+- Marketed By → Marketed By, Marketer, Marketing Company, Marketed & Distributed By, Distributed By, Distributed and Marketed By, Marketed At, Distributed At, Marketed & Distributed At
 
 Rules:
-- Extract manufacturer name, address, and license exactly as printed.
+- Treat "At" the same as "By" ONLY for determining the "type" value.
+- Extract manufacturer name, address, and license exactly as printed (do NOT modify "At" to "By" in extracted text).
 - Only normalize the "type" field to the two allowed values.
 - If multiple manufacturer blocks exist, create separate objects in "manufacturer_information".
 - Do NOT merge different manufacturer blocks.
@@ -630,8 +638,7 @@ JSON STRUCTURE:
       "sub_brand": ""
     }},
     "product_name": "",
-    "variant": "",
-    "product_category": ""
+    "variant": ""
   }},
   "pack_details": {{
     "net_quantity": "",
@@ -660,9 +667,7 @@ JSON STRUCTURE:
   "allergen_information": "",
   "claims": [],
   "medical_information": {{
-    "intended_use": [],
-    "warnings": [],
-    "contraindications": []
+    "warnings": []
   }},
   "usage_instructions": {{
     "directions_to_use": [],
@@ -692,7 +697,6 @@ JSON STRUCTURE:
   "dates": {{
     "manufacturing_date": "",
     "expiry_date": "",
-    "best_before": "",
     "shelf_life": ""
   }},
   "barcodes": [],
@@ -704,7 +708,6 @@ JSON STRUCTURE:
     "address": ""
   }},
   "regulatory_text": [],
-  "footnotes": [],
   "other_important_text": []
 }}
 
@@ -731,7 +734,6 @@ OCR TEXT:
 # ============================================================
 FUZZY_THRESHOLD = 85
 
-
 def safe_print(msg):
     try:
         print(msg)
@@ -740,19 +742,6 @@ def safe_print(msg):
             print(msg.encode("ascii", "replace").decode("ascii"))
         except Exception:
             print("[LOG] (message contains special characters)")
-
-
-def convert_energy_kj_to_kcal(nutrition_table):
-    for row in nutrition_table:
-        name = row.get("nutrient_name", "")
-        if re.search(r"\bkj\b", name, flags=re.IGNORECASE):
-            values = row.get("values", {})
-            amount = values.get("amount")
-            if amount is not None:
-                kcal = round(float(amount) / 4.184, 2)
-                values["amount"] = kcal
-                row["nutrient_name"] = "Energy (kcal)"  
-
 
 def canonicalize(label):
     label = unicodedata.normalize("NFKC", label)
@@ -764,7 +753,7 @@ def canonicalize(label):
     label = re.sub(r"\(.*?\)", "", label)
     label = re.sub(r"[^\w\s:\-]", " ", label)
     label = re.sub(r"\b(kcal|kj|mg|g|mcg|ug|[μµ]g|%)\b", "", label)
-    label = re.sub(r"^of which\s+", "", label)
+    label = re.sub(r"^of which[:\s]+", "", label)
     label = re.sub(r"\s+", " ", label).strip()
     words = label.split()
     normalized_words = []
@@ -774,6 +763,106 @@ def canonicalize(label):
         else:
             normalized_words.append(w)
     return " ".join(normalized_words)
+
+CANONICAL_NOMENCLATURE = {
+    canonicalize(k): v for k, v in NOMENCLATURE_MAP.items()
+}
+
+async def load_nomenclature_map_from_db():
+    """Load nomenclature map from database, falling back to hardcoded map."""
+    try:
+        from app.models.nomenclature import NomenclatureMapping
+        mappings = await NomenclatureMapping.find_all().to_list()
+        if not mappings:
+            return NOMENCLATURE_MAP, CANONICAL_NOMENCLATURE
+        nom_map = {}
+        for m in mappings:
+            nom_map[m.standardized_name.lower()] = m.standardized_name
+            for raw in m.raw_names:
+                nom_map[raw.lower()] = m.standardized_name
+        canonical = {canonicalize(k): v for k, v in nom_map.items()}
+        return nom_map, canonical
+    except Exception as e:
+        print(f"[WARN] Failed to load nomenclature from DB, using hardcoded: {e}")
+        return NOMENCLATURE_MAP, CANONICAL_NOMENCLATURE
+
+def apply_notes_rda(nutrition_block, canonical_nomen=None):
+    """Parse nutrition_notes for %RDA per serve line and overwrite table values."""
+    notes = nutrition_block.get("nutrition_notes", [])
+    table = nutrition_block.get("nutrition_table", [])
+    if not notes or not table:
+        return nutrition_block
+
+    for note in notes:
+        # Match lines like "% RDA^ per Serve (30 g): Energy-5%, Added Sugar*-0%, ..."
+        header_match = re.search(
+            r'%\s*RDA[^:]*per\s+(?:Serve|Serving)\s*(\([^)]*\))?',
+            note, re.IGNORECASE
+        )
+        if not header_match:
+            continue
+
+        # Build the column key to match
+        serve_info = header_match.group(1) or ""
+        col_key_fragment = "% RDA per serve"
+        if serve_info:
+            col_key_fragment += f" {serve_info}"
+
+        # Find the actual column key in the table
+        target_col = None
+        for row in table:
+            for k in row.get("values", {}):
+                if "rda" in k.lower() and "serve" in k.lower():
+                    target_col = k
+                    break
+            if target_col:
+                break
+
+        if not target_col:
+            safe_print(f"[NOTES_RDA] No matching %RDA serve column found in table")
+            continue
+
+        safe_print(f"[NOTES_RDA] Found column: '{target_col}' from note: {note[:80]}...")
+
+        # Extract pairs like "Energy-5%", "Sodium-<10%", "Added Sugar*-0%"
+        after_colon = note.split(":", 1)[1] if ":" in note else note
+        pairs = re.findall(r'([\w\s\*\(\)]+?)\s*[-–—]\s*([<>]?\d+(?:\.\d+)?%)', after_colon)
+
+        safe_print(f"[NOTES_RDA] Extracted {len(pairs)} pairs: {pairs}")
+
+        for raw_name, value in pairs:
+            raw_name = raw_name.strip().rstrip("*^ ")
+            canon_note = canonicalize(raw_name)
+
+            for row in table:
+                nutrient = row.get("nutrient_name", "")
+                original = row.get("original_name", "")
+                canon_n = canonicalize(nutrient)
+                canon_o = canonicalize(original)
+
+                # Check direct match or via nomenclature
+                matched = False
+                if canon_note == canon_n or canon_note == canon_o:
+                    matched = True
+                elif fuzz.token_sort_ratio(canon_note, canon_n) >= FUZZY_THRESHOLD:
+                    matched = True
+                elif fuzz.token_sort_ratio(canon_note, canon_o) >= FUZZY_THRESHOLD:
+                    matched = True
+                else:
+                    _cn = canonical_nomen if canonical_nomen is not None else CANONICAL_NOMENCLATURE
+                    mapped_note = _cn.get(canon_note)
+                    mapped_n = _cn.get(canon_n)
+                    if mapped_note and mapped_n and mapped_note == mapped_n:
+                        matched = True
+
+                if matched:
+                    old_val = row["values"].get(target_col, "")
+                    row["values"][target_col] = value
+                    safe_print(f"[NOTES_RDA] {nutrient}: '{old_val}' → '{value}'")
+                    break
+
+    nutrition_block["nutrition_table"] = table
+    return nutrition_block
 
 
 def standardize_nutrition(nutrition_table, nomenclature_map):
@@ -818,13 +907,159 @@ def standardize_nutrition(nutrition_table, nomenclature_map):
 
         standardized.append({
             "nutrient_name": standard_name,
-            "unit": row.get("unit", ""),          # preserve unit from new OCR format
+            "unit": row.get("unit", ""),
             "values": cleaned_values,
             "original_name": original,
         })
 
     return standardized
 
+def merge_external_rda(structured_json, raw_text, canonical_nomen=None):
+    nutrition_table = structured_json.get("nutrition", {}).get("nutrition_table", [])
+    if not nutrition_table:
+        return structured_json
+    _cn = canonical_nomen if canonical_nomen is not None else CANONICAL_NOMENCLATURE
+    all_rda_headers = set()
+    def match_nutrient(ocr_name, table_name):
+        canon_ocr = canonicalize(ocr_name)
+        canon_table = canonicalize(table_name)
+        mapped_ocr = _cn.get(canon_ocr)
+        mapped_table = _cn.get(canon_table)
+
+        if canon_ocr == canon_table:
+            return True
+
+        if mapped_ocr and mapped_table and mapped_ocr == mapped_table:
+            return True
+
+        if mapped_ocr and canonicalize(mapped_ocr) == canon_table:
+            return True
+
+        if mapped_table and canonicalize(mapped_table) == canon_ocr:
+            return True
+
+        score = fuzz.token_sort_ratio(canon_ocr, canon_table)
+        return score >= FUZZY_THRESHOLD
+
+    existing_rda_columns = set()
+    for row in nutrition_table:
+        for k in row.get("values", {}):
+            if '%' in k:
+                existing_rda_columns.add(k)
+    if existing_rda_columns:
+        print(f"DEBUG: Nutrition table already has '%' columns: {existing_rda_columns} → will overwrite with footnote values")
+
+    lines = raw_text.splitlines()
+    merged_rda_blocks = []
+    current_block = ""
+    for line in lines:
+        if '%' in line:
+            current_block += " " + line.strip()
+        else:
+            if current_block:
+                merged_rda_blocks.append(current_block.strip())
+                current_block = ""
+    if current_block:
+        merged_rda_blocks.append(current_block.strip())
+
+    print(f"Found {len(merged_rda_blocks)} merged %RDA blocks")
+
+    for block_num, block in enumerate(merged_rda_blocks, start=1):
+        print(f"\nProcessing block {block_num}: {block}")
+
+        column_header = "% RDA"
+
+        column_header_match = re.search(
+            r'((?:%\s*)?RDA[^\w%]*(?:\s*(?:per|/)\s*[\w\s\(\)\.]+)?|(?:per\s*[\w\s\(\)\.]+\s*%?\s*(?:contribution\s*to\s*)?RDA))',
+            block,
+            re.IGNORECASE
+        )
+
+        if column_header_match:
+            raw_header = column_header_match.group(1).strip().lower()
+            raw_header = re.sub(r'\s+', ' ', raw_header)
+
+            per_match = re.search(
+                r'per\s*([\w\s]+(?:\(\s*\d+\s*[a-zA-Z]+\s*\))?)',
+                raw_header
+            )
+
+            if per_match:
+                clean_per = per_match.group(1).strip()
+                column_header = f"% RDA per {clean_per}"
+            column_header = re.sub(r'\bto\s*rda\b', '', column_header, flags=re.IGNORECASE)
+            column_header = re.sub(r'\s+', ' ', column_header).strip()    
+        
+        paren_match = re.search(r'\(([^)]*\d+(?:\.\d+)?\s*(g|ml|kg|l)[^)]*)\)', block, re.IGNORECASE)
+        if paren_match and "per serve" in column_header.lower():
+            full_text = paren_match.group(1).strip()
+            
+            if '(' not in column_header:
+                column_header = f"{column_header} ({full_text})"
+        print(f" Column header detected: {column_header}")
+
+        # If table already has a matching % column, use its exact name
+        if existing_rda_columns:
+            for ec in existing_rda_columns:
+                if fuzz.token_sort_ratio(column_header.lower(), ec.lower()) >= 70:
+                    print(f" Reusing existing column header: '{ec}' instead of '{column_header}'")
+                    column_header = ec
+                    break
+        
+        has_rda_any = re.search(r'%?\s*RDA', block, re.IGNORECASE)
+        has_percent = re.search(r'\d+\s*%', block) or re.search(r'\b\d+(\.\d+)?\b', block)
+        is_per_serve_rda = re.search(
+            r'(per\s*(serve|serving).*rda|rda.*per\s*(serve|serving))',
+            block,
+            re.IGNORECASE
+        )
+
+        if not (has_rda_any and has_percent and is_per_serve_rda):
+            print("Skipping non-nutrient block")
+            continue
+        all_rda_headers.add(column_header)
+        pairs = re.findall(r'([\w\s\*\-\(\)/]+?)\s*\(?([\d<>\.%]+)\)?', block)
+        value_first_pairs = re.findall(
+            r'(\d+(?:\.\d+)?\s*%)\s*([A-Za-z][\w\s\*\-\(\)/]*)',
+            block
+        )
+
+        pairs += [(nutrient.strip(), value.strip()) for value, nutrient in value_first_pairs]
+        print(f" Found pairs: {pairs}")
+
+        for nutrient, value in pairs:
+            nutrient = nutrient.strip().rstrip("():*-")
+            nutrient = re.sub(r'\b(max|min|approx|value)\b', '', nutrient, flags=re.IGNORECASE)
+
+            value = value.strip().rstrip(".,;:")
+            matched = False
+
+            for row in nutrition_table:
+                if match_nutrient(nutrient, row["nutrient_name"]):
+                    existing = row["values"].get(column_header)
+                    if existing and existing not in ("not specified", "", None):
+                        print(f" Skipping {nutrient}: already has '{existing}', not overwriting with '{value}'")
+                        matched = True
+                        break
+                    row["values"][column_header] = value
+                    matched = True
+                    print(f" Merged {nutrient} → {value} under {column_header}")
+                    break
+
+            if not matched:
+                print(f" Could not match nutrient '{nutrient}' in nutrition_table")
+
+    for row in nutrition_table:
+        for header in all_rda_headers:
+            if header not in row["values"]:
+                row["values"][header] = "not specified"
+
+    structured_json["nutrition"]["nutrition_table"] = nutrition_table
+    print("\nFinal nutrition_table after merging %RDA values:")
+    for row in nutrition_table:
+        print(f"  {row['nutrient_name']}: {row['values']}")
+
+    return structured_json
 
 def extract_numeric_mrp(mrp_value):
     if not mrp_value or mrp_value in ("not specified", "", "0.00", 0, 0.0):
@@ -844,7 +1079,6 @@ def extract_numeric_mrp(mrp_value):
         except Exception:
             return None
     return None
-
 
 def detect_packing_format(text):
     if not isinstance(text, str):
@@ -868,12 +1102,10 @@ def detect_packing_format(text):
                 return format_name
     return "not specified"
 
-
 def validate_fssai(text):
     if not isinstance(text, str):
         text = str(text) if text else ""
     return list(set(re.findall(r"\b\d{14}\b", text)))
-
 
 def calculate_shelf_life(mfg_str, exp_str):
     """Calculate shelf life in months from two DD/MM/YYYY date strings."""
@@ -891,7 +1123,6 @@ def calculate_shelf_life(mfg_str, exp_str):
             continue
     return None
 
-
 def calculate_cost(task, input_tokens, output_tokens):
     input_tokens = input_tokens or 0
     output_tokens = output_tokens or 0
@@ -904,7 +1135,6 @@ def calculate_cost(task, input_tokens, output_tokens):
         "output_cost":   output_cost,
         "total_cost":    input_cost + output_cost,
     }
-
 
 def clean_json_string(raw):
     """Strip markdown fences and locate the outermost JSON object."""
@@ -939,9 +1169,7 @@ class ProductCreate(BaseModel):
     parent_brand: str
     sub_brand: Optional[str] = None
     variant: Optional[str] = None
-    product_category: Optional[str] = None
     net_quantity: Optional[str] = None
-    net_weight: Optional[str] = None
     pack_size: Optional[str] = None
     serving_size: Optional[str] = None
     servings_per_pack: Optional[str] = None
@@ -952,28 +1180,21 @@ class ProductCreate(BaseModel):
     nutrition_notes: List[str] = []
     ingredients: Optional[str] = None
     allergen_information: Optional[str] = None
-    allergen_info: Optional[str] = None
     claims: List[str] = []
     medical_information: dict = {}
     usage_instructions: dict = {}
-    instructions_to_use: Optional[str] = None
     storage_instructions: List[str] = []
     manufacturer_information: List[dict] = []
-    manufacturer_details: List[dict] = []
     brand_owner: Optional[str] = None
     fssai_information: dict = {}
-    fssai_licenses: List[str] = []
     packaging_information: dict = {}
     batch_information: dict = {}
     manufacturing_date: Optional[str] = None
     expiry_date: Optional[str] = None
-    best_before: Optional[str] = None
     shelf_life: Optional[str] = None
     barcodes: List[str] = []
-    barcode: Optional[str] = None
     certifications: List[str] = []
     regulatory_text: List[str] = []
-    footnotes: List[str] = []
     customer_care: dict = {}
     other_important_text: List[str] = []
     veg_nonveg: Optional[str] = None
@@ -1031,21 +1252,13 @@ async def extract_product_from_images(
         
         from google import genai
 
-        # Vertex AI client — required for gemini-3-flash-preview / gemini-3.1-flash-lite-preview
         client = genai.Client(vertexai=True, api_key=api_key)
         safe_print("[EXTRACTION] Gemini client initialized (Vertex AI)")
 
-        # ── Token accumulators ──────────────────────────────────────────────
         ocr_tokens       = {"input": 0, "output": 0}
         structure_tokens = {"input": 0, "output": 0}
 
-        # ── Exponential-backoff retry wrapper for 429 / quota errors ────────
         async def gemini_call_with_retry(fn, *args, timeout_s=90, max_retries=5, **kwargs):
-            """
-            Runs a synchronous Gemini call in a thread with:
-              - per-call timeout
-              - exponential backoff on 429 / ResourceExhausted
-            """
             delay = 2.0
             for attempt in range(1, max_retries + 1):
                 try:
@@ -1054,7 +1267,7 @@ async def extract_product_from_images(
                         timeout=timeout_s,
                     )
                 except asyncio.TimeoutError:
-                    raise  # bubble up — caller decides what to do
+                    raise
                 except Exception as exc:
                     err_str = str(exc).lower()
                     is_429 = (
@@ -1069,9 +1282,9 @@ async def extract_product_from_images(
                             f"Waiting {delay:.1f}s before retry..."
                         )
                         await asyncio.sleep(delay)
-                        delay = min(delay * 2, 64)  # cap at 64 s
+                        delay = min(delay * 2, 64)
                         continue
-                    raise  # non-429 or max retries exhausted
+                    raise
 
         # ══════════════════════════════════════════════════════════════════════
         # STEP 1 — OCR each image
@@ -1146,12 +1359,13 @@ async def extract_product_from_images(
 
         safe_print("[STRUCTURE] Response received")
 
-        # ── Parse JSON ──────────────────────────────────────────────────────
         raw_json = clean_json_string(struct_response.text or "")
         safe_print(f"[STRUCTURE] JSON length: {len(raw_json)} chars")
 
         product_data = json.loads(raw_json)
         safe_print("[STRUCTURE] JSON parsed successfully")
+        safe_print("\n================ BEFORE POST-PROCESSING ================")
+        safe_print(json.dumps(product_data, indent=2, ensure_ascii=False))
 
         # ══════════════════════════════════════════════════════════════════════
         # POST-PROCESSING
@@ -1161,23 +1375,27 @@ async def extract_product_from_images(
         nutrition_block = product_data.get("nutrition", {})
         nutrition_table = nutrition_block.get("nutrition_table", [])
 
-        if nutrition_table:
-            convert_energy_kj_to_kcal(nutrition_table)
-            nutrition_table = standardize_nutrition(nutrition_table, NOMENCLATURE_MAP)
-            nutrition_block["nutrition_table"] = nutrition_table
+        # Load nomenclature from DB (falls back to hardcoded)
+        db_nom_map, db_canonical = await load_nomenclature_map_from_db()
 
-        # Numeric MRP
+        if nutrition_table:
+            product_data = merge_external_rda(product_data, combined_raw_text, canonical_nomen=db_canonical)
+            nutrition_block = product_data.get("nutrition", {})
+            nutrition_table = nutrition_block.get("nutrition_table", [])
+            nutrition_table = standardize_nutrition(nutrition_table, db_nom_map)
+            nutrition_block["nutrition_table"] = nutrition_table
+            # Apply authoritative %RDA from nutrition_notes (overrides Gemini table values)
+            nutrition_block = apply_notes_rda(nutrition_block, canonical_nomen=db_canonical)
+
         pricing = product_data.get("pricing", {})
         numeric_mrp = extract_numeric_mrp(pricing.get("mrp"))
         if numeric_mrp is not None:
             pricing["mrp"] = numeric_mrp
 
-        # Packing format fallback
         pack_details = product_data.get("pack_details", {})
-        if not pack_details.get("packing_format") or pack_details["packing_format"] in ("", "not specified"):
-            pack_details["packing_format"] = detect_packing_format(json.dumps(product_data))
+        # Always clear packing_format — user selects manually on frontend
+        pack_details["packing_format"] = ""
 
-        # Dates + shelf life
         dates = product_data.get("dates", {})
         mfg = dates.get("manufacturing_date", "")
         exp = dates.get("expiry_date", "")
@@ -1188,7 +1406,6 @@ async def extract_product_from_images(
             if computed:
                 dates["shelf_life"] = computed
 
-        # FSSAI — validate any 14-digit numbers found in raw JSON
         fssai_info = product_data.get("fssai_information", {})
         existing_licenses = fssai_info.get("license_numbers", [])
         detected_licenses = validate_fssai(raw_json)
@@ -1196,7 +1413,6 @@ async def extract_product_from_images(
         fssai_info["license_numbers"] = merged
         product_data["fssai_information"] = fssai_info
 
-        # Veg/NonVeg detection from claims
         claims = product_data.get("claims", [])
         veg_nonveg = ""
         for claim in claims:
@@ -1207,7 +1423,8 @@ async def extract_product_from_images(
             if "vegetarian" in cl:
                 veg_nonveg = "Vegetarian"
 
-        # ── Build cost info ──────────────────────────────────────────────────
+        safe_print("\n================ AFTER POST-PROCESSING ================")
+        safe_print(json.dumps(product_data, indent=2, ensure_ascii=False))
         ocr_cost  = calculate_cost("ocr",       ocr_tokens["input"],       ocr_tokens["output"])
         str_cost  = calculate_cost("structure",  structure_tokens["input"],  structure_tokens["output"])
         cost_info = {
@@ -1217,7 +1434,6 @@ async def extract_product_from_images(
         }
         safe_print(f"[COST] Grand total: ${cost_info['grand_total']:.6f}")
 
-        # ── Build frontend-friendly transformed_data ─────────────────────────
         identity    = product_data.get("product_identity", {})
         brand_block = identity.get("brand", {})
 
@@ -1227,7 +1443,7 @@ async def extract_product_from_images(
                 "brand":         brand_block.get("parent_brand", ""),
                 "subBrand":      brand_block.get("sub_brand", ""),
                 "variant":       identity.get("variant", ""),
-                "category":      identity.get("product_category", ""),
+                "category":      "",
                 "packSize":      pack_details.get("net_quantity", ""),
                 "serveSize":     pack_details.get("serving_size", ""),
                 "servingsPerPack": pack_details.get("servings_per_pack", ""),
@@ -1236,7 +1452,6 @@ async def extract_product_from_images(
                 "uspf":          pricing.get("uspf", ""),
                 "manufactured":  dates.get("manufacturing_date", ""),
                 "expiry":        dates.get("expiry_date", ""),
-                "bestBefore":    dates.get("best_before", ""),
                 "shelfLife":     dates.get("shelf_life", ""),
                 "vegNonVeg":     veg_nonveg,
             },
@@ -1263,7 +1478,6 @@ async def extract_product_from_images(
             "batch":      product_data.get("batch_information", {}),
             "dates":      dates,
             "regulatory": product_data.get("regulatory_text", []),
-            "footnotes":  product_data.get("footnotes", []),
             "other":      product_data.get("other_important_text", []),
             "raw":        product_data,
         }
@@ -1300,14 +1514,16 @@ async def create_product(
 ):
     """Create a new product"""
     try:
+        # Sanitise medical_information – keep only "warnings"
+        raw_med = product.medical_information or {}
+        sanitised_medical = {"warnings": raw_med.get("warnings", [])}
+
         new_product = Product(
             product_name=product.product_name,
             parent_brand=product.parent_brand,
             sub_brand=product.sub_brand,
             variant=product.variant,
-            product_category=product.product_category,
             net_quantity=product.net_quantity,
-            net_weight=product.net_weight,
             pack_size=product.pack_size,
             serving_size=product.serving_size,
             servings_per_pack=product.servings_per_pack,
@@ -1318,28 +1534,21 @@ async def create_product(
             nutrition_notes=product.nutrition_notes,
             ingredients=product.ingredients,
             allergen_information=product.allergen_information,
-            allergen_info=product.allergen_info,
             claims=product.claims,
-            medical_information=product.medical_information,
+            medical_information=sanitised_medical,
             usage_instructions=product.usage_instructions,
-            instructions_to_use=product.instructions_to_use,
             storage_instructions=product.storage_instructions,
             manufacturer_information=product.manufacturer_information,
-            manufacturer_details=product.manufacturer_details,
             brand_owner=product.brand_owner,
             fssai_information=product.fssai_information,
-            fssai_licenses=product.fssai_licenses,
             packaging_information=product.packaging_information,
             batch_information=product.batch_information,
             manufacturing_date=product.manufacturing_date,
             expiry_date=product.expiry_date,
-            best_before=product.best_before,
             shelf_life=product.shelf_life,
             barcodes=product.barcodes,
-            barcode=product.barcode,
             certifications=product.certifications,
             regulatory_text=product.regulatory_text,
-            footnotes=product.footnotes,
             customer_care=product.customer_care,
             other_important_text=product.other_important_text,
             veg_nonveg=product.veg_nonveg,
@@ -1394,7 +1603,6 @@ async def get_product_stats():
                     "category":           p.category,
                     "mrp":                p.mrp,
                     "pack_size":          p.pack_size,
-                    "net_weight":         p.net_weight,
                     "manufacturing_date": p.manufacturing_date,
                     "expiry_date":        p.expiry_date,
                     "created_at":         p.created_at.isoformat(),
@@ -1463,7 +1671,6 @@ async def list_products(
                     "status":           p.status,
                     "pack_size":        p.pack_size,
                     "net_quantity":     p.net_quantity,
-                    "net_weight":       p.net_weight,
                     "created_at":       p.created_at.isoformat(),
                     "manufacturing_date": p.manufacturing_date,
                     "expiry_date":      p.expiry_date,
@@ -1497,11 +1704,9 @@ async def get_product(
             "parent_brand":           product.parent_brand,
             "sub_brand":              product.sub_brand,
             "variant":                product.variant,
-            "product_category":       product.product_category,
             "product_type":           product.product_type,
             # pack
             "net_quantity":           product.net_quantity,
-            "net_weight":             product.net_weight,
             "pack_size":              product.pack_size,
             "serving_size":           product.serving_size,
             "servings_per_pack":      product.servings_per_pack,
@@ -1521,25 +1726,20 @@ async def get_product(
             "storage_instructions":   product.storage_instructions,
             # manufacturer / fssai
             "manufacturer_information": product.manufacturer_information,
-            "manufacturer_details":   product.manufacturer_details,
             "brand_owner":            product.brand_owner,
             "fssai_information":      product.fssai_information,
-            "fssai_licenses":         product.fssai_licenses,
             # packaging / batch
             "packaging_information":  product.packaging_information,
             "batch_information":      product.batch_information,
             # dates
             "manufacturing_date":     product.manufacturing_date,
             "expiry_date":            product.expiry_date,
-            "best_before":            product.best_before,
             "shelf_life":             product.shelf_life,
             # identifiers
             "barcodes":               product.barcodes,
-            "barcode":                product.barcode,
             # regulatory / other
             "certifications":         product.certifications,
             "regulatory_text":        product.regulatory_text,
-            "footnotes":              product.footnotes,
             "customer_care":          product.customer_care,
             "other_important_text":   product.other_important_text,
             "veg_nonveg":             product.veg_nonveg,
@@ -1572,6 +1772,10 @@ async def update_product(
         
         update_data = product_update.model_dump(exclude_unset=True)
         update_data["updated_at"] = datetime.now(timezone.utc)
+        # Sanitise medical_information – keep only "warnings"
+        if "medical_information" in update_data:
+            raw_med = update_data["medical_information"] or {}
+            update_data["medical_information"] = {"warnings": raw_med.get("warnings", [])}
         for field, value in update_data.items():
             setattr(product, field, value)
         

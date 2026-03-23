@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     DATABASE_NAME: str = "nutrieyeq"
     SECRET_KEY: str = secrets.token_hex(32)
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 240
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     SUPER_ADMIN_EMAILS: str = ""
     SMTP_HOST: str = ""

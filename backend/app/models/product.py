@@ -18,12 +18,10 @@ class Product(Document):
     parent_brand: str
     sub_brand: Optional[str] = None
     variant: Optional[str] = None
-    product_category: Optional[str] = None
     product_type: str = "single"
 
     # ── Pack details ──────────────────────────────────────────────────────────
-    net_quantity: Optional[str] = None       # pack_details.net_quantity
-    net_weight: Optional[str] = None         # kept for backward compatibility
+    net_quantity: Optional[str] = None
     pack_size: Optional[str] = None
     serving_size: Optional[str] = None
     servings_per_pack: Optional[str] = None
@@ -40,26 +38,22 @@ class Product(Document):
     # ── Composition ───────────────────────────────────────────────────────────
     ingredients: Optional[str] = None
     allergen_information: Optional[str] = None
-    allergen_info: Optional[str] = None      # kept for backward compatibility
     claims: List[str] = Field(default_factory=list)
 
     # ── Medical ───────────────────────────────────────────────────────────────
     medical_information: Dict[str, Any] = Field(default_factory=dict)
-    # shape: {"intended_use": [], "warnings": [], "contraindications": []}
+    # shape: {"warnings": []}
 
     # ── Usage / Storage ───────────────────────────────────────────────────────
     usage_instructions: Dict[str, Any] = Field(default_factory=dict)
     # shape: {"directions_to_use": [], "preparation_method": []}
-    instructions_to_use: Optional[str] = None   # kept for backward compatibility
     storage_instructions: Optional[List[str]] = Field(default_factory=list)
 
     # ── Manufacturer / FSSAI ──────────────────────────────────────────────────
     manufacturer_information: List[Dict[str, Any]] = Field(default_factory=list)
-    manufacturer_details: List[Dict[str, Any]] = Field(default_factory=list)  # backward compat
     brand_owner: Optional[str] = None
     fssai_information: Dict[str, Any] = Field(default_factory=dict)
     # shape: {"license_numbers": []}
-    fssai_licenses: List[str] = Field(default_factory=list)   # backward compat
 
     # ── Packaging / Batch ─────────────────────────────────────────────────────
     packaging_information: Dict[str, Any] = Field(default_factory=dict)
@@ -70,21 +64,17 @@ class Product(Document):
     # ── Dates ─────────────────────────────────────────────────────────────────
     manufacturing_date: Optional[str] = None
     expiry_date: Optional[str] = None
-    best_before: Optional[str] = None
     shelf_life: Optional[str] = None
 
     # ── Identifiers ───────────────────────────────────────────────────────────
     barcodes: List[str] = Field(default_factory=list)
-    barcode: Optional[str] = None            # kept for backward compatibility
 
     # ── Regulatory / Other ────────────────────────────────────────────────────
     certifications: List[str] = Field(default_factory=list)
     regulatory_text: List[str] = Field(default_factory=list)
-    footnotes: List[str] = Field(default_factory=list)
     customer_care: Dict[str, Any] = Field(default_factory=dict)
     # shape: {"phone": [], "email": "", "website": "", "address": ""}
     other_important_text: List[str] = Field(default_factory=list)
-    symbols: Dict[str, str] = Field(default_factory=dict)   # backward compat
     veg_nonveg: Optional[str] = None
 
     # ── Misc ──────────────────────────────────────────────────────────────────
@@ -104,8 +94,8 @@ class Product(Document):
 
     @field_validator(
         "storage_instructions", "nutrition_notes", "barcodes",
-        "regulatory_text", "footnotes", "other_important_text",
-        "claims", "certifications", "fssai_licenses",
+        "regulatory_text", "other_important_text",
+        "claims", "certifications",
         mode="before",
     )
     @classmethod
@@ -119,7 +109,7 @@ class Product(Document):
         return []
 
     @field_validator(
-        "nutrition_table", "manufacturer_information", "manufacturer_details",
+        "nutrition_table", "manufacturer_information",
         "tags", "images",
         mode="before",
     )
@@ -133,7 +123,7 @@ class Product(Document):
 
     @field_validator(
         "medical_information", "usage_instructions", "packaging_information",
-        "batch_information", "fssai_information", "customer_care", "symbols",
+        "batch_information", "fssai_information", "customer_care",
         mode="before",
     )
     @classmethod

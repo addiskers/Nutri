@@ -7,7 +7,7 @@ import DeleteConfirmModal from '../components/Modals/DeleteConfirmModal'
 import EditNutrientGroupModal from '../components/Modals/EditNutrientGroupModal'
 import EditMappingModal from '../components/Modals/EditMappingModal'
 import EditCategoryModal from '../components/Modals/EditCategoryModal'
-import { Search, ChevronDown, ChevronUp, Plus, Edit2, Trash2, Loader } from 'lucide-react'
+import { Search, ChevronDown, ChevronUp, Plus, Edit2, Trash2, Loader, Download } from 'lucide-react'
 import { categoryService, nomenclatureService } from '../services/api'
 
 const NomenclatureMap = () => {
@@ -25,6 +25,23 @@ const NomenclatureMap = () => {
   const [nutrientGroups, setNutrientGroups] = useState([])
   const [loadingNutrients, setLoadingNutrients] = useState(false)
   const [nutrientsError, setNutrientsError] = useState(null)
+  const [isSeeding, setIsSeeding] = useState(false)
+
+  const handleSeedNomenclature = async () => {
+    setIsSeeding(true)
+    try {
+      const result = await nomenclatureService.seedNomenclature()
+      if (result.success !== false) {
+        alert(`${result.message || 'Seed complete'}`)
+        fetchNomenclature()
+      } else {
+        alert(result.error || 'Failed to seed nomenclature')
+      }
+    } catch (e) {
+      alert('Failed to seed nomenclature')
+    }
+    setIsSeeding(false)
+  }
 
   const [categories, setCategories] = useState([])
   const [loadingCategories, setLoadingCategories] = useState(false)
@@ -443,6 +460,14 @@ const NomenclatureMap = () => {
               />
             </div>
             <button
+              onClick={handleSeedNomenclature}
+              disabled={isSeeding}
+              className="bg-[#f9fafb] border border-[#e1e7ef] flex items-center justify-center gap-2 h-10 px-4 rounded-md font-ibm-plex font-medium text-sm text-[#0f1729] hover:bg-gray-100 transition-colors whitespace-nowrap disabled:opacity-50"
+            >
+              {isSeeding ? <Loader className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              Seed defaults
+            </button>
+            <button
               onClick={() => setShowAddNutrientGroupModal(true)}
               className="bg-[#b455a0] flex items-center justify-center gap-2 h-10 px-4 rounded-md text-white font-ibm-plex font-medium text-sm hover:bg-[#a04890] transition-colors whitespace-nowrap"
             >
@@ -522,7 +547,7 @@ const NomenclatureMap = () => {
                       className="bg-[#f9fafb] border border-[#e1e7ef] flex items-center gap-2 h-9 px-4 rounded-md text-sm font-ibm-plex font-medium text-[#0f1729] hover:bg-gray-100 transition-colors"
                     >
                       <Plus className="w-4 h-4" />
-                      Add synonym
+                      Add mapping
                     </button>
                   </div>
                 </div>
@@ -593,7 +618,7 @@ const NomenclatureMap = () => {
                         <p className="text-sm font-ibm-plex text-[#65758b]">
                           {searchQuery 
                             ? `No mappings found matching "${searchQuery}"` 
-                            : 'No mappings yet. Click "Add synonym" to add mappings.'}
+                            : 'No mappings yet. Click "Add mapping" to add mappings.'}
                         </p>
                       </div>
                     )}

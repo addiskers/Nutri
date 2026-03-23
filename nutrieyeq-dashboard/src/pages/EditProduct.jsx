@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import Layout from '../components/Layout/Layout'
+import DuplicateWarningModal from '../components/Modals/DuplicateWarningModal'
 import { ArrowLeft, Save, X, Copy, Check } from 'lucide-react'
 import { mockCategories } from '../utils/mockData'
+import { nomenclatureService } from '../services/api'
+import NutrientMappingDropdown from '../components/NutrientMappingDropdown'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 const EditProduct = () => {
@@ -14,7 +17,7 @@ const EditProduct = () => {
   const [formData, setFormData] = useState({
     productName: '', brand: '', subBrand: '', variant: '',
     packSize: '', servingsPerPack: '', mrp: '', uspf: '',
-    manufactured: '', expiry: '', bestBefore: '', shelfLife: '',
+    manufactured: '', expiry: '', shelfLife: '',
     serveSize: '', category: '', vegNonVeg: '', packingFormat: ''
   })
 
@@ -33,9 +36,52 @@ const EditProduct = () => {
   const [nutritionNotes, setNutritionNotes]     = useState([])
   const [newNutritionNote, setNewNutritionNote] = useState('')
 
+  // ── Nomenclature state ──────────────────────────────────────────────────
+  const [standardizedNames, setStandardizedNames] = useState([])
+  const [nomenclatureMap, setNomenclatureMap] = useState({})
+
+  const loadNomenclature = async () => {
+    try {
+      const data = await nomenclatureService.getBuildMap()
+      if (data && data.map) {
+        setNomenclatureMap(data.map)
+        const names = [...new Set(Object.values(data.map))].sort()
+        setStandardizedNames(names)
+      }
+    } catch (e) { console.error('Failed to load nomenclature:', e) }
+  }
+
+  useEffect(() => { loadNomenclature() }, [])
+
+  const handleCreateNutrient = async (rowId, newNutrientName) => {
+    const result = await nomenclatureService.createNomenclature({
+      standardized_name: newNutrientName,
+      raw_names: []
+    })
+    if (result.success !== false) {
+      await loadNomenclature()
+      setNutritionRows(prev => prev.map(r => r.id === rowId ? { ...r, nutrient: newNutrientName } : r))
+    } else {
+      alert(result.error || 'Failed to create nutrient')
+      throw new Error(result.error)
+    }
+  }
+
+  // Compute dynamic value column headers from all nutrition rows
+  const valueColumns = (() => {
+    const colSet = new Set()
+    nutritionRows.forEach(r => {
+      Object.keys(r.values || {}).forEach(k => colSet.add(k))
+    })
+    return Array.from(colSet)
+  })()
+
   // ── Composition ───────────────────────────────────────────────────────────
   const [ingredients, setIngredients] = useState('')
   const [allergens, setAllergens]     = useState('')
+
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false)
+  const [duplicateMatchName, setDuplicateMatchName] = useState('')
 
   const [storageData, setStorageData] = useState({ shelfLife: '', storageCondition: '' })
   const [directionsToUse, setDirectionsToUse]     = useState('')
@@ -58,7 +104,6 @@ const EditProduct = () => {
   const [batchData, setBatchData]           = useState({ lotNumber: '', machineCode: '', otherCodes: '' })
   const [customerCareData, setCustomerCareData] = useState({ phones: '', email: '', website: '', address: '' })
   const [regulatoryText, setRegulatoryText]     = useState('')
-  const [footnotes, setFootnotes]               = useState('')
   const [otherImportantText, setOtherImportantText] = useState('')
 
   // ── Copy helper ───────────────────────────────────────────────────────────
@@ -118,10 +163,15 @@ const EditProduct = () => {
     setSelectedTags(selectedTags.includes(tag) ? selectedTags.filter(t => t !== tag) : [...selectedTags, tag])
 
   // ── Nutrition helpers ──────────────────────────────────────────────────────
-  const handleAddNutritionRow = () =>
-    setNutritionRows([...nutritionRows, { id: Date.now(), nutrient: '', unit: '', per100g: '', perServe: '', rda: '' }])
+  const handleAddNutritionRow = () => {
+    const emptyValues = {}
+    valueColumns.forEach(k => { emptyValues[k] = '' })
+    setNutritionRows([...nutritionRows, { id: Date.now(), nutrient: '', originalName: '', unit: '', values: emptyValues }])
+  }
   const handleNutritionChange = (id, field, value) =>
     setNutritionRows(nutritionRows.map(r => r.id === id ? { ...r, [field]: value } : r))
+  const handleNutritionValueChange = (id, colKey, value) =>
+    setNutritionRows(nutritionRows.map(r => r.id === id ? { ...r, values: { ...r.values, [colKey]: value } } : r))
   const handleRemoveNutritionRow = (id) =>
     setNutritionRows(nutritionRows.filter(r => r.id !== id))
 
@@ -152,7 +202,6 @@ const EditProduct = () => {
           uspf:            p.uspf            || '',
           manufactured:    p.manufacturing_date || '',
           expiry:          p.expiry_date     || '',
-          bestBefore:      p.best_before     || '',
           shelfLife:       p.shelf_life      || '',
           serveSize:       p.serving_size    || '',
           category:        p.category        || '',
@@ -162,17 +211,13 @@ const EditProduct = () => {
 
         // Nutrition
         if (Array.isArray(p.nutrition_table)) {
-          setNutritionRows(p.nutrition_table.map((n, i) => {
-            const v = n.values || {}
-            return {
-              id:       i + 1,
-              nutrient: n.nutrient_name || '',
-              unit:     n.unit          || '',
-              per100g:  v['Per 100g']   || v['per100g']  || '',
-              perServe: v['Per Serve']  || v['perServe'] || '',
-              rda:      v['% RDA']      || v['rda']      || '',
-            }
-          }))
+          setNutritionRows(p.nutrition_table.map((n, i) => ({
+            id:            i + 1,
+            nutrient:      n.nutrient_name  || '',
+            originalName:  n.original_name  || '',
+            unit:          n.unit           || '',
+            values:        n.values         || {},
+          })))
         }
         if (Array.isArray(p.nutrition_notes)) setNutritionNotes(p.nutrition_notes)
 
@@ -207,15 +252,27 @@ const EditProduct = () => {
 
         // Company
         const mfrs = p.manufacturer_information || p.manufacturer_details || []
-        if (Array.isArray(mfrs)) {
+        if (Array.isArray(mfrs) && mfrs.length > 0) {
+          const grouped = { marketed: [], manufactured: [], packed: [] }
+          for (const m of mfrs) {
+            const t = (m.type || '').toLowerCase()
+            const parts = [m.name, m.address, m.license_number ? `License: ${m.license_number}` : ''].filter(Boolean)
+            const line = parts.join('\n')
+            if (t.includes('market')) grouped.marketed.push(line)
+            else if (t.includes('pack')) grouped.packed.push(line)
+            else if (t.includes('manufactur')) grouped.manufactured.push(line)
+          }
           setCompanyData({
-            brandOwner:    p.brand_owner || '',
-            marketedBy:    mfrs.find(m => (m.type||'').includes('Market'))?.name   || '',
-            manufacturedBy: mfrs.find(m => (m.type||'').includes('Manufactur'))?.address ||
-                            mfrs.find(m => (m.type||'').includes('Manufactur'))?.name    || '',
-            packedBy:      mfrs.find(m => (m.type||'').includes('Pack'))?.address  ||
-                           mfrs.find(m => (m.type||'').includes('Pack'))?.name     || '',
+            brandOwner: p.brand_owner || '',
+            marketedBy: grouped.marketed.join('\n\n'),
+            manufacturedBy: grouped.manufactured.join('\n\n'),
+            packedBy: grouped.packed.join('\n\n'),
             otherNotes: ''
+          })
+        } else {
+          setCompanyData({
+            brandOwner: p.brand_owner || '',
+            marketedBy: '', manufacturedBy: '', packedBy: '', otherNotes: ''
           })
         }
 
@@ -260,7 +317,6 @@ const EditProduct = () => {
 
         // Regulatory / other
         if (Array.isArray(p.regulatory_text))      setRegulatoryText(p.regulatory_text.join('\n'))
-        if (Array.isArray(p.footnotes))             setFootnotes(p.footnotes.join('\n'))
         if (Array.isArray(p.other_important_text))  setOtherImportantText(p.other_important_text.join('\n'))
 
         // Tags
@@ -275,9 +331,74 @@ const EditProduct = () => {
     loadProduct()
   }, [id, navigate])
 
+  // ── Duplicate check helpers ──────────────────────────────────────────────
+  const diceSimilarity = (a, b) => {
+    a = a.toLowerCase().trim()
+    b = b.toLowerCase().trim()
+    if (a === b) return 1
+    if (a.length < 2 || b.length < 2) return 0
+    const bigrams = new Map()
+    for (let i = 0; i < a.length - 1; i++) {
+      const bg = a.slice(i, i + 2)
+      bigrams.set(bg, (bigrams.get(bg) || 0) + 1)
+    }
+    let intersect = 0
+    for (let i = 0; i < b.length - 1; i++) {
+      const bg = b.slice(i, i + 2)
+      const count = bigrams.get(bg) || 0
+      if (count > 0) { bigrams.set(bg, count - 1); intersect++ }
+    }
+    return (2 * intersect) / (a.length + b.length - 2)
+  }
+
+  const tokenOverlap = (a, b) => {
+    const ta = new Set(a.toLowerCase().trim().split(/\s+/).filter(Boolean))
+    const tb = new Set(b.toLowerCase().trim().split(/\s+/).filter(Boolean))
+    if (ta.size === 0 || tb.size === 0) return 0
+    const [smaller, larger] = ta.size <= tb.size ? [ta, tb] : [tb, ta]
+    let shared = 0
+    for (const t of smaller) if (larger.has(t)) shared++
+    return shared / smaller.size
+  }
+
+  const findDuplicate = async (name) => {
+    try {
+      const token = localStorage.getItem('access_token')
+      const resp = await fetch(`${API_BASE_URL}/products?search=${encodeURIComponent(name)}&limit=20`, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '69420' }
+      })
+      const res = await resp.json()
+      const candidates = res?.products || []
+      for (const p of candidates) {
+        if (p.id === id) continue
+        if (diceSimilarity(name, p.product_name) > 0.8 || tokenOverlap(name, p.product_name) > 0.8)
+          return p.product_name
+      }
+    } catch (_) {}
+    return null
+  }
+
   // ── Save ───────────────────────────────────────────────────────────────────
   const handleSaveProduct = async () => {
     if (!formData.productName || !formData.brand) { alert('Please fill in all required fields (*)'); return }
+    if (nutritionRows.length > 0 && standardizedNames.length > 0) {
+      const unmapped = nutritionRows.filter(r => !r.nutrient || !standardizedNames.includes(r.nutrient))
+      if (unmapped.length > 0) {
+        alert(`${unmapped.length} nutrient row(s) have no valid mapping. Please map all nutrients before saving.`)
+        return
+      }
+    }
+    const match = await findDuplicate(formData.productName)
+    if (match) {
+      setDuplicateMatchName(match)
+      setShowDuplicateModal(true)
+      return
+    }
+    await performSave()
+  }
+
+  const performSave = async () => {
+    setShowDuplicateModal(false)
 
     try {
       const productData = {
@@ -286,7 +407,6 @@ const EditProduct = () => {
         sub_brand:       formData.subBrand       || null,
         variant:         formData.variant        || null,
         net_quantity:    formData.packSize       || null,
-        net_weight:      formData.packSize       || null,
         pack_size:       formData.packSize       || null,
         serving_size:    formData.serveSize      || null,
         servings_per_pack: formData.servingsPerPack || null,
@@ -297,15 +417,15 @@ const EditProduct = () => {
         category:        formData.category       || null,
 
         nutrition_table: nutritionRows.map(row => ({
-          nutrient_name: row.nutrient,
-          unit:          row.unit || '',
-          values: { 'Per 100g': row.per100g, 'Per Serve': row.perServe, '% RDA': row.rda }
+          nutrient_name:  row.nutrient,
+          original_name:  row.originalName || row.nutrient,
+          unit:           row.unit || '',
+          values:         row.values || {},
         })),
         nutrition_notes: nutritionNotes,
 
         ingredients:           ingredients || null,
         allergen_information:  allergens   || null,
-        allergen_info:         allergens   || null,
         claims:                claims,
 
         medical_information: {
@@ -321,21 +441,15 @@ const EditProduct = () => {
         shelf_life: formData.shelfLife || storageData.shelfLife || null,
 
         manufacturer_information: [
-          companyData.manufacturedBy && { type: 'Manufactured By', name: companyData.manufacturedBy, address: '', license_number: '' },
-          companyData.packedBy       && { type: 'Manufactured By', name: companyData.packedBy,       address: '', license_number: '' },
           companyData.marketedBy     && { type: 'Marketed By',     name: companyData.marketedBy,     address: '', license_number: '' },
-        ].filter(Boolean),
-        manufacturer_details: [
-          companyData.manufacturedBy && { type: 'Manufactured by', name: companyData.manufacturedBy },
-          companyData.marketedBy     && { type: 'Marketed by',     name: companyData.marketedBy },
+          companyData.manufacturedBy && { type: 'Manufactured By', name: companyData.manufacturedBy, address: '', license_number: '' },
+          companyData.packedBy       && { type: 'Packed By',       name: companyData.packedBy,       address: '', license_number: '' },
         ].filter(Boolean),
         brand_owner: companyData.brandOwner || null,
 
         fssai_information: { license_numbers: fssaiNumbers },
-        fssai_licenses:    fssaiNumbers,
 
         barcodes:       barcodes,
-        barcode:        barcodes[0] || null,
         certifications: certifications,
 
         packaging_information: {
@@ -356,10 +470,8 @@ const EditProduct = () => {
 
         manufacturing_date: formData.manufactured || null,
         expiry_date:        formData.expiry       || null,
-        best_before:        formData.bestBefore   || null,
 
         regulatory_text:      regulatoryText.split('\n').filter(Boolean),
-        footnotes:            footnotes.split('\n').filter(Boolean),
         other_important_text: otherImportantText.split('\n').filter(Boolean),
 
         tags:   selectedTags,
@@ -504,7 +616,7 @@ const EditProduct = () => {
                         onChange={e => setFormData({ ...formData, packingFormat: e.target.value })}
                         className={inputClass}>
                         <option value="">Select format</option>
-                        {['sachet','bottle','pouch','jar','can','tetra pack','carton','box','tub','pack'].map(f => (
+                        {['sachet','bottle','pouch','jar','can','tetra pack','carton','box','tub','pack','bag','wrapper','tube','blister pack','strip','container','drum','barrel','clamshell','standup pouch'].map(f => (
                           <option key={f} value={f}>{f.charAt(0).toUpperCase()+f.slice(1)}</option>
                         ))}
                       </select>
@@ -531,17 +643,6 @@ const EditProduct = () => {
                         onChange={e => setFormData({ ...formData, expiry: e.target.value })}
                         className={inputClass} />
                       <CopyBtn value={formData.expiry} field="expiry" />
-                    </div>
-                  </div>
-
-                  {/* Best Before */}
-                  <div>
-                    <label className={labelClass}>Best Before</label>
-                    <div className="relative">
-                      <input type="text" placeholder="e.g., 15 months from manufacture" value={formData.bestBefore}
-                        onChange={e => setFormData({ ...formData, bestBefore: e.target.value })}
-                        className={inputClass} />
-                      <CopyBtn value={formData.bestBefore} field="bestBefore" />
                     </div>
                   </div>
 
@@ -620,7 +721,7 @@ const EditProduct = () => {
                   <div className="flex items-center gap-2">
                     {nutritionRows.length > 0 && (
                       <CopyBtnStandalone
-                        value={`Nutrient\tUnit\tPer 100g\tPer Serve\t% RDA\n${nutritionRows.map(r=>`${r.nutrient}\t${r.unit}\t${r.per100g}\t${r.perServe}\t${r.rda}`).join('\n')}`}
+                        value={`Nutrient Name\tMapped Nutrient\tUnit\t${valueColumns.join('\t')}\n${nutritionRows.map(r=>`${r.nutrient}\t${r.originalName||''}\t${r.unit}\t${valueColumns.map(c=>(r.values||{})[c]||'').join('\t')}`).join('\n')}`}
                         field="nutritionTable" />
                     )}
                     <button onClick={handleAddNutritionRow} className={addBtnClass}>Add Row</button>
@@ -628,37 +729,49 @@ const EditProduct = () => {
                 </div>
 
                 <p className="text-sm font-ibm-plex text-[#65758b] mb-4">
-                  Enter values per 100g/100ml. All columns are editable.
+                  Review and edit nutrition data. All columns are editable.
                 </p>
 
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse">
                     <thead>
                       <tr className="border-b border-[#e1e7ef]">
-                        {['Nutrient','Unit','Per 100g','Per Serve','% RDA',''].map(h => (
-                          <th key={h} className="px-1 py-2 text-left">
-                            <span className="text-sm font-ibm-plex font-medium text-[#0f1729]">{h}</span>
+                        <th className="px-1 py-2 text-left"><span className="text-sm font-ibm-plex font-medium text-[#0f1729]">Nutrient Name</span></th>
+                        <th className="px-1 py-2 text-left"><span className="text-sm font-ibm-plex font-medium text-[#0f1729]">Mapped Nutrient</span></th>
+                        <th className="px-1 py-2 text-left"><span className="text-sm font-ibm-plex font-medium text-[#0f1729]">Unit</span></th>
+                        {valueColumns.map(col => (
+                          <th key={col} className="px-1 py-2 text-left">
+                            <span className="text-sm font-ibm-plex font-medium text-[#0f1729] whitespace-nowrap">{col}</span>
                           </th>
                         ))}
+                        <th className="px-1 py-2"></th>
                       </tr>
                     </thead>
                     <tbody>
                       {nutritionRows.map(row => (
                         <tr key={row.id} className="border-b border-[#e1e7ef]">
                           <td className="px-1 py-2">
-                            <input type="text" value={row.nutrient} placeholder="e.g., Protein"
-                              onChange={e => handleNutritionChange(row.id, 'nutrient', e.target.value)}
-                              className="w-full px-0 py-2 bg-transparent border-0 text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none" />
+                            <input type="text" value={row.originalName || ''} placeholder="e.g., crude protein"
+                              onChange={e => handleNutritionChange(row.id, 'originalName', e.target.value)}
+                              className="w-full min-w-[120px] px-0 py-2 bg-transparent border-0 text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none" />
+                          </td>
+                          <td className="px-1 py-2">
+                            <NutrientMappingDropdown
+                              value={row.nutrient}
+                              standardizedNames={standardizedNames}
+                              onSelect={(name) => handleNutritionChange(row.id, 'nutrient', name)}
+                              onCreateNew={(name) => handleCreateNutrient(row.id, name)}
+                            />
                           </td>
                           <td className="px-1 py-2">
                             <input type="text" value={row.unit} placeholder="g"
                               onChange={e => handleNutritionChange(row.id, 'unit', e.target.value)}
                               className="w-16 h-10 px-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] text-center focus:outline-none focus:ring-2 focus:ring-primary" />
                           </td>
-                          {['per100g','perServe','rda'].map(field => (
-                            <td key={field} className="px-1 py-2">
-                              <input type="text" value={row[field]}
-                                onChange={e => handleNutritionChange(row.id, field, e.target.value)}
+                          {valueColumns.map(col => (
+                            <td key={col} className="px-1 py-2">
+                              <input type="text" value={(row.values || {})[col] || ''}
+                                onChange={e => handleNutritionValueChange(row.id, col, e.target.value)}
                                 className="w-24 h-10 px-3 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] text-right focus:outline-none focus:ring-2 focus:ring-primary" />
                             </td>
                           ))}
@@ -719,16 +832,6 @@ const EditProduct = () => {
                 <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Storage & Usage</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mb-4">
                   <div>
-                    <label className={labelClass}>Shelf Life</label>
-                    <div className="relative">
-                      <input type="text" placeholder="e.g., 18 months from manufacture"
-                        value={storageData.shelfLife}
-                        onChange={e => setStorageData({ ...storageData, shelfLife: e.target.value })}
-                        className={inputClass} />
-                      <CopyBtn value={storageData.shelfLife} field="shelfLifeComp" />
-                    </div>
-                  </div>
-                  <div>
                     <label className={labelClass}>Storage Conditions</label>
                     <div className="relative">
                       <input type="text" placeholder="e.g., Store in cool, dry place"
@@ -763,22 +866,14 @@ const EditProduct = () => {
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                 <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Medical Information</h3>
                 <p className="text-xs text-[#65758b] mb-4">Applicable for pharmaceutical or health products. One item per line.</p>
-                <div className="space-y-4">
-                  {[
-                    { key:'intendedUse',      label:'Intended Use',      placeholder:'e.g., For adults 18+' },
-                    { key:'warnings',          label:'Warnings',          placeholder:'e.g., Do not exceed recommended dose' },
-                    { key:'contraindications', label:'Contraindications', placeholder:'e.g., Not suitable during pregnancy' },
-                  ].map(({ key, label, placeholder }) => (
-                    <div key={key}>
-                      <div className="flex items-center justify-between mb-1.5 md:mb-2">
-                        <label className={labelClass.replace('block','')}>{label}</label>
-                        <CopyBtnStandalone value={medicalInfo[key]} field={`med_${key}`} />
-                      </div>
-                      <textarea placeholder={placeholder} value={medicalInfo[key]}
-                        onChange={e => setMedicalInfo({ ...medicalInfo, [key]: e.target.value })} rows={3}
-                        className={textareaClass} />
-                    </div>
-                  ))}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5 md:mb-2">
+                    <label className={labelClass.replace('block','')}>Warnings</label>
+                    <CopyBtnStandalone value={medicalInfo.warnings} field="med_warnings" />
+                  </div>
+                  <textarea placeholder="e.g., Do not exceed recommended dose" value={medicalInfo.warnings}
+                    onChange={e => setMedicalInfo({ ...medicalInfo, warnings: e.target.value })} rows={3}
+                    className={textareaClass} />
                 </div>
               </div>
             </div>
@@ -791,9 +886,9 @@ const EditProduct = () => {
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                 <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Company Information</h3>
                 {[
-                  { key:'marketedBy',    label:'Marketed By',     placeholder:'Marketing company name and address' },
-                  { key:'manufacturedBy',label:'Manufactured By',  placeholder:'Manufacturing unit name and address' },
-                  { key:'packedBy',      label:'Packed By',        placeholder:'Packing unit name and address' },
+                  { key:'marketedBy',    label:'Marketed By',     placeholder:'Name, address, license (one entry per block, separate with blank line)' },
+                  { key:'manufacturedBy',label:'Manufactured By',  placeholder:'Name, address, license (one entry per block, separate with blank line)' },
+                  { key:'packedBy',      label:'Packed By',        placeholder:'Name, address, license (one entry per block, separate with blank line)' },
                 ].map(({ key, label, placeholder }) => (
                   <div key={key} className="mb-3 md:mb-4">
                     <div className="flex items-center justify-between mb-1.5 md:mb-2">
@@ -946,10 +1041,7 @@ const EditProduct = () => {
                 <div className="space-y-4">
                   {[
                     { key:'regulatoryText',   label:'Regulatory Text',     setter:setRegulatoryText,     val:regulatoryText,    placeholder:'Legal/regulatory statements (one per line)' },
-                    { key:'footnotes',         label:'Footnotes',            setter:setFootnotes,          val:footnotes,         placeholder:'Footnotes printed on pack (one per line)' },
                     { key:'otherImportantText',label:'Other Important Text', setter:setOtherImportantText, val:otherImportantText,placeholder:'Slogans, taglines, disclaimers (one per line)' },
-                    { key:'otherNotes',        label:'Other Notes',          val:companyData.otherNotes,
-                      setter:v=>setCompanyData({...companyData,otherNotes:v}), placeholder:'Additional notes' },
                   ].map(({ key, label, setter, val, placeholder }) => (
                     <div key={key}>
                       <div className="flex items-center justify-between mb-1.5 md:mb-2">
@@ -967,6 +1059,12 @@ const EditProduct = () => {
 
         </div>
       </div>
+      <DuplicateWarningModal
+        isOpen={showDuplicateModal}
+        onClose={() => setShowDuplicateModal(false)}
+        onSaveAnyway={performSave}
+        matchedName={duplicateMatchName}
+      />
     </Layout>
   )
 }
