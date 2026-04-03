@@ -2,14 +2,29 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout/Layout'
 import ProductPreviewModal from '../components/Modals/ProductPreviewModal'
+import ProductDetailModal from '../components/Modals/ProductDetailModal'
 import DeleteConfirmModal from '../components/Modals/DeleteConfirmModal'
-import { Package, FolderKanban, Clock, Eye, Edit2, Trash2, Loader } from 'lucide-react'
+import { Package, FolderKanban, Clock, Eye, Edit2, Trash2, Loader, ImageIcon } from 'lucide-react'
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 import { productService, categoryService, userService } from '../services/api'
+
+const formatMrp = (mrp) => {
+  if (!mrp || mrp === '0' || mrp === '0.0' || mrp === 0 || mrp === 0.0) return '—'
+  const str = String(mrp)
+  if (str.includes('₹') || str.includes('Rs')) {
+    const match = str.match(/[\d,]+\.?\d*/)
+    if (match) return `₹${match[0]}`
+    return str
+  }
+  const num = parseFloat(str)
+  if (!isNaN(num) && num > 0) return `₹${num % 1 === 0 ? num.toFixed(0) : num.toFixed(2)}`
+  return '—'
+}
 
 const Dashboard = () => {
   const navigate = useNavigate()
   const [previewProduct, setPreviewProduct] = useState(null)
+  const [detailProduct, setDetailProduct] = useState(null)
   const [deleteProduct, setDeleteProduct] = useState(null)
   const [loading, setLoading] = useState(true)
   const [categories, setCategories] = useState([])
@@ -111,25 +126,32 @@ const Dashboard = () => {
 
   const handlePreviewProduct = async (product) => {
     try {
-      // Fetch full product details including images from the single-product endpoint
       const fullProductData = await productService.getProduct(product.id)
-      
       if (fullProductData) {
-        // Dashboard products use snake_case from API, wrap for modal
-        const fullProduct = {
+        setPreviewProduct({
           productName: product.product_name,
           rawData: fullProductData,
           images: fullProductData.images || []
-        }
-        setPreviewProduct(fullProduct)
+        })
       } else {
-        // Fallback to showing without images
         setPreviewProduct({ productName: product.product_name, rawData: product, images: [] })
       }
     } catch (error) {
       console.error('Failed to fetch product details:', error)
-      // Fallback to showing without images
       setPreviewProduct({ productName: product.product_name, rawData: product, images: [] })
+    }
+  }
+
+  const handleDetailProduct = async (product) => {
+    try {
+      const fullProductData = await productService.getProduct(product.id)
+      setDetailProduct({
+        productName: product.product_name,
+        rawData: fullProductData,
+      })
+    } catch (error) {
+      console.error('Failed to fetch product details:', error)
+      setDetailProduct({ productName: product.product_name, rawData: product })
     }
   }
 
@@ -274,47 +296,35 @@ const Dashboard = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Recent Products Table */}
           <div className="lg:col-span-2 bg-white border border-[#e1e7ef] rounded-lg shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-[#e1e7ef]">
+              <h3 className="text-lg font-ibm-plex font-semibold text-[#0f1729]">Recent Products</h3>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full">
-                <thead className="bg-[#f1f5f9] border-b border-[#e1e7ef]">
-                  <tr>
-                    <th className="px-4 py-4 text-left">
-                      <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
-                        Product Name
+                <thead className="bg-[#f8fafc]">
+                  <tr className="border-b border-[#e1e7ef]">
+                    <th className="px-5 py-3 text-left">
+                      <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
+                        Product
                       </span>
                     </th>
-                    <th className="px-4 py-4 text-center">
-                      <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
-                        Category
-                      </span>
-                    </th>
-                    <th className="px-4 py-4 text-center">
-                      <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
+                    <th className="px-3 py-3 text-right w-24">
+                      <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
                         MRP
                       </span>
                     </th>
-                    <th className="px-4 py-4 text-center hidden md:table-cell">
-                      <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
-                        Upload Date
-                      </span>
-                    </th>
-                    <th className="px-4 py-4 text-center hidden lg:table-cell">
-                      <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
+                    <th className="px-3 py-3 text-center hidden md:table-cell w-28">
+                      <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
                         Pack Size
                       </span>
                     </th>
-                    <th className="px-4 py-4 text-center hidden xl:table-cell">
-                      <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider whitespace-nowrap">
-                        Mfg Date
+                    <th className="px-3 py-3 text-center hidden lg:table-cell w-28">
+                      <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
+                        Expiry
                       </span>
                     </th>
-                    <th className="px-4 py-4 text-center hidden xl:table-cell">
-                      <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider whitespace-nowrap">
-                        Expiry Date
-                      </span>
-                    </th>
-                    <th className="px-4 py-4 text-right">
-                      <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
+                    <th className="px-3 py-3 text-right w-32">
+                      <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
                         Actions
                       </span>
                     </th>
@@ -322,17 +332,16 @@ const Dashboard = () => {
                 </thead>
                 <tbody>
                   {loading ? (
-                    // Loading rows
                     [1, 2, 3, 4, 5].map((i) => (
-                      <tr key={i} className="border-b border-[#e1e7ef]">
-                        <td className="px-4 py-4" colSpan="7">
-                          <div className="h-4 bg-gray-200 rounded animate-pulse"></div>
+                      <tr key={i} className="border-b border-[#f1f5f9]">
+                        <td className="px-5 py-3.5" colSpan="5">
+                          <div className="h-4 bg-gray-100 rounded animate-pulse"></div>
                         </td>
                       </tr>
                     ))
                   ) : recentProducts.length === 0 ? (
                     <tr>
-                      <td colSpan="7" className="px-4 py-8 text-center">
+                      <td colSpan="5" className="px-5 py-10 text-center">
                         <p className="text-sm font-ibm-plex text-[#65758b]">
                           No products available
                         </p>
@@ -342,67 +351,64 @@ const Dashboard = () => {
                     recentProducts.map((product, index) => (
                       <tr
                         key={product.id}
-                        className={`border-b border-[#e1e7ef] hover:bg-gray-50 transition-colors ${
-                          index % 2 === 1 ? 'bg-[#f9fafb]' : ''
-                        }`}
+                        className="border-b border-[#f1f5f9] hover:bg-[#f8fafc] transition-colors"
                       >
-                        <td className="px-4 py-4">
-                          <p className="text-sm font-ibm-plex font-medium text-[#0f1729] line-clamp-2">
+                        <td className="px-5 py-3.5">
+                          <p className="text-sm font-ibm-plex font-semibold text-[#0f1729] truncate max-w-[220px]" title={product.product_name}>
                             {product.product_name || 'Unnamed Product'}
                           </p>
+                          <p className="text-xs font-ibm-plex text-[#65758b] mt-0.5">
+                            {product.parent_brand || ''}{product.category ? ` · ${product.category}` : ''}
+                          </p>
                         </td>
-                        <td className="px-4 py-4 text-center">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {product.category || 'N/A'}
+                        <td className="px-3 py-3.5 text-right">
+                          <span className="text-sm font-ibm-plex font-medium text-[#0f1729] whitespace-nowrap">
+                            {formatMrp(product.mrp)}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-center">
-                          <span className="text-sm font-ibm-plex font-medium text-[#0f1729]">
-                            {product.mrp ? `₹${product.mrp}` : 'N/A'}
+                        <td className="px-3 py-3.5 text-center hidden md:table-cell">
+                          <span className="text-xs font-ibm-plex text-[#65758b] truncate block max-w-[110px] mx-auto" title={product.pack_size || product.net_weight || ''}>
+                            {product.pack_size || product.net_weight || '—'}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-center hidden md:table-cell">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {formatDate(product.created_at)}
+                        <td className="px-3 py-3.5 text-center hidden lg:table-cell">
+                          <span className={`text-xs font-ibm-plex whitespace-nowrap ${
+                            product.expiry_date && product.expiry_date !== 'Not Specified'
+                              ? 'text-[#65758b]'
+                              : 'text-[#c0c7d1]'
+                          }`}>
+                            {product.expiry_date && product.expiry_date !== 'Not Specified' ? product.expiry_date : '—'}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-center hidden lg:table-cell">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {product.pack_size || product.net_weight || 'Not specified'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4 text-center hidden xl:table-cell">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {product.manufacturing_date || 'N/A'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4 text-center hidden xl:table-cell">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {product.expiry_date || 'N/A'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4">
-                          <div className="flex items-center justify-end gap-1">
+                        <td className="px-3 py-3.5">
+                          <div className="flex items-center justify-end gap-0.5">
                             <button
                               onClick={() => handlePreviewProduct(product)}
-                              className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-200 transition-colors"
-                              title="View"
+                              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[#e1e7ef] transition-colors"
+                              title="View Images"
                             >
-                              <Eye className="w-4 h-4 text-[#65758b]" />
+                              <ImageIcon className="w-3.5 h-3.5 text-[#65758b]" />
+                            </button>
+                            <button
+                              onClick={() => handleDetailProduct(product)}
+                              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[#e1e7ef] transition-colors"
+                              title="View Details"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-[#2463eb]" />
                             </button>
                             <button
                               onClick={() => navigate(`/edit-product/${product.id}`)}
-                              className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-200 transition-colors"
+                              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[#e1e7ef] transition-colors"
                               title="Edit"
                             >
-                              <Edit2 className="w-4 h-4 text-[#65758b]" />
+                              <Edit2 className="w-3.5 h-3.5 text-[#65758b]" />
                             </button>
                             <button
                               onClick={() => setDeleteProduct(product)}
-                              className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-200 transition-colors"
+                              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-red-50 transition-colors"
                               title="Delete"
                             >
-                              <Trash2 className="w-4 h-4 text-[#65758b]" />
+                              <Trash2 className="w-3.5 h-3.5 text-red-500" />
                             </button>
                           </div>
                         </td>
@@ -479,6 +485,12 @@ const Dashboard = () => {
         product={previewProduct}
         isOpen={!!previewProduct}
         onClose={() => setPreviewProduct(null)}
+      />
+
+      <ProductDetailModal
+        product={detailProduct}
+        isOpen={!!detailProduct}
+        onClose={() => setDetailProduct(null)}
       />
 
       <DeleteConfirmModal

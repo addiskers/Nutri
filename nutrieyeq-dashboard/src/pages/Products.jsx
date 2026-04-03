@@ -2,13 +2,26 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout/Layout'
 import ProductPreviewModal from '../components/Modals/ProductPreviewModal'
+import ProductDetailModal from '../components/Modals/ProductDetailModal'
 import DeleteConfirmModal from '../components/Modals/DeleteConfirmModal'
 import NoPermissionContent from '../components/NoPermissionContent'
-import { Search, Filter, Eye, Edit2, Trash2, Plus, ChevronDown, ChevronLeft, ChevronRight, Download } from 'lucide-react'
-import { mockCategories } from '../utils/mockData'
-import authService, { productService } from '../services/api'
+import { Search, Filter, Eye, Edit2, Trash2, Plus, ChevronDown, ChevronLeft, ChevronRight, Download, ImageIcon } from 'lucide-react'
+import authService, { productService, categoryService } from '../services/api'
 
 const PAGE_SIZE = 50
+
+const formatMrp = (mrp) => {
+  if (!mrp || mrp === '0' || mrp === '0.0' || mrp === 0 || mrp === 0.0) return ''
+  const str = String(mrp)
+  if (str.includes('₹') || str.includes('Rs')) {
+    const match = str.match(/[\d,]+\.?\d*/)
+    if (match) return `₹${match[0]}`
+    return str
+  }
+  const num = parseFloat(str)
+  if (!isNaN(num) && num > 0) return `₹${num % 1 === 0 ? num.toFixed(0) : num.toFixed(2)}`
+  return str
+}
 
 const Products = () => {
   const navigate = useNavigate()
@@ -19,14 +32,16 @@ const Products = () => {
   const [page, setPage] = useState(1)
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState('All Categories')
+  const [selectedCategory, setSelectedCategory] = useState('')
   const [selectedBrand, setSelectedBrand] = useState('All Brands')
   const [brands, setBrands] = useState([])
+  const [categories, setCategories] = useState([])
 
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false)
   const [showBrandDropdown, setShowBrandDropdown] = useState(false)
 
   const [previewProduct, setPreviewProduct] = useState(null)
+  const [detailProduct, setDetailProduct] = useState(null)
   const [deleteProduct, setDeleteProduct] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -47,7 +62,7 @@ const Products = () => {
         skip: (currentPage - 1) * PAGE_SIZE,
       }
       if (search)                       params.search   = search
-      if (category !== 'All Categories') params.category = category
+      if (category) params.category = category
       if (brand    !== 'All Brands')     params.brand    = brand
 
       const response = await authService.getProducts(params)
@@ -57,10 +72,10 @@ const Products = () => {
           productName:       p.product_name,
           brand:             p.parent_brand || 'N/A',
           category:          p.category || 'Uncategorized',
-          mrp:               p.mrp ? `₹${p.mrp}` : '₹0',
+          mrp:               formatMrp(p.mrp),
           uploadDate:        formatDate(p.created_at),
           packSize:          p.pack_size || p.net_weight || 'Not specified',
-          uploadedBy:        'Admin',
+          uploadedBy:        p.created_by_name || 'Admin',
           manufacturingDate: p.manufacturing_date || 'N/A',
           expiryDate:        p.expiry_date || 'N/A',
           rawData:           p,
@@ -80,6 +95,20 @@ const Products = () => {
   // Load brands once on mount
   useEffect(() => {
     authService.getBrands().then(res => setBrands(res.brands || []))
+  }, [])
+
+  // Load categories once on mount
+  useEffect(() => {
+    categoryService.getCategories({ limit: 100 })
+      .then(res => {
+        const loadedCategories = (res.categories || [])
+          .map(category => (typeof category === 'string' ? category : category.name || category.category_name || category.title || ''))
+          .filter(Boolean)
+        setCategories(loadedCategories)
+      })
+      .catch(err => {
+        console.error('Failed to load categories:', err)
+      })
   }, [])
 
   // Fetch whenever page or filters change
@@ -146,6 +175,19 @@ const Products = () => {
     } catch (error) {
       console.error('Failed to fetch product details:', error)
       setPreviewProduct(product)
+    }
+  }
+
+  const handleDetailProduct = async (product) => {
+    try {
+      const fullProductData = await productService.getProduct(product.id)
+      setDetailProduct({
+        ...product,
+        rawData: fullProductData,
+      })
+    } catch (error) {
+      console.error('Failed to fetch product details:', error)
+      setDetailProduct(product)
     }
   }
 
@@ -226,7 +268,7 @@ const Products = () => {
               </button>
               {showCategoryDropdown && (
                 <div className="absolute top-12 left-0 min-w-[180px] bg-white border border-[#e1e7ef] rounded-md shadow-lg z-50 max-h-60 overflow-y-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                  {mockCategories.map((category) => (
+                  {categories.map((category) => (
                     <button key={category} onClick={() => handleCategorySelect(category)}
                       className={`w-full px-4 py-2.5 text-left text-sm font-ibm-plex hover:bg-gray-50 transition-colors ${selectedCategory === category ? 'bg-primary/10 text-primary font-medium' : 'text-[#0f1729]'}`}>
                       {category}
@@ -253,53 +295,38 @@ const Products = () => {
                 <table className="min-w-full divide-y divide-[#e1e7ef]">
                   <thead className="bg-[#f1f5f9] sticky top-0 z-20 shadow-sm">
                     <tr>
-                      <th className="px-4 py-4 text-left">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
-                          Product Name
+                      <th className="px-4 py-3 text-left">
+                        <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
+                          Product
                         </span>
                       </th>
-                      <th className="px-4 py-4 text-left">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
-                          Brand
-                        </span>
-                      </th>
-                      <th className="px-4 py-4 text-center">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
-                          Category
-                        </span>
-                      </th>
-                      <th className="px-4 py-4 text-center">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
+                      <th className="px-3 py-3 text-right w-20">
+                        <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
                           MRP
                         </span>
                       </th>
-                      <th className="px-4 py-4 text-center">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
-                          Upload Date
-                        </span>
-                      </th>
-                      <th className="px-4 py-4 text-center">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
+                      <th className="px-3 py-3 text-center hidden sm:table-cell">
+                        <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
                           Pack Size
                         </span>
                       </th>
-                      <th className="px-4 py-4 text-center">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider whitespace-nowrap">
+                      <th className="px-3 py-3 text-center hidden md:table-cell">
+                        <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
                           Mfg Date
                         </span>
                       </th>
-                      <th className="px-4 py-4 text-center">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider whitespace-nowrap">
-                          Expiry Date
+                      <th className="px-3 py-3 text-center hidden md:table-cell">
+                        <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
+                          Expiry
                         </span>
                       </th>
-                      <th className="px-4 py-4 text-center">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider whitespace-nowrap">
-                          Uploaded/Edited By
+                      <th className="px-3 py-3 text-center hidden lg:table-cell">
+                        <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
+                          Uploaded By
                         </span>
                       </th>
-                      <th className="px-4 py-4 text-right">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
+                      <th className="px-3 py-3 text-right w-32">
+                        <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
                           Actions
                         </span>
                       </th>
@@ -308,7 +335,7 @@ const Products = () => {
                   <tbody className="bg-white divide-y divide-[#e1e7ef]">
                     {loading ? (
                       <tr>
-                        <td colSpan="10" className="px-4 py-12 text-center">
+                        <td colSpan="7" className="px-4 py-12 text-center">
                           <div className="flex flex-col items-center justify-center gap-3">
                             <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
                             <p className="text-sm font-ibm-plex text-[#65758b]">Loading products...</p>
@@ -317,7 +344,7 @@ const Products = () => {
                       </tr>
                     ) : error ? (
                       <tr>
-                        <td colSpan="10" className="px-4 py-12 text-center">
+                        <td colSpan="7" className="px-4 py-12 text-center">
                           <div className="flex flex-col items-center justify-center gap-3">
                             <p className="text-sm font-ibm-plex text-red-600">{error}</p>
                             <button
@@ -331,7 +358,7 @@ const Products = () => {
                       </tr>
                     ) : filteredProducts.length === 0 ? (
                       <tr>
-                        <td colSpan="10" className="px-4 py-12 text-center">
+                        <td colSpan="7" className="px-4 py-12 text-center">
                           <p className="text-sm font-ibm-plex text-[#65758b]">
                             {searchQuery || selectedCategory !== 'All Categories'
                               ? 'No products found matching your filters.'
@@ -343,77 +370,70 @@ const Products = () => {
                       filteredProducts.map((product, index) => (
                         <tr
                           key={product.id}
-                          className={`hover:bg-gray-50 transition-colors ${
-                            index % 2 === 1 ? 'bg-[#f9fafb]' : ''
-                          }`}
+                          className="border-b border-[#f1f5f9] hover:bg-[#f8fafc] transition-colors"
                         >
-                        <td className="px-4 py-4 whitespace-nowrap">
-                          <p className="text-sm font-ibm-plex font-medium text-[#0f1729]">
+                        <td className="px-4 py-3">
+                          <p className="text-sm font-ibm-plex font-semibold text-[#0f1729] truncate max-w-[260px]" title={product.productName}>
                             {product.productName}
                           </p>
+                          <p className="text-xs font-ibm-plex text-[#65758b] mt-0.5">
+                            {product.brand}{product.category && product.category !== 'Uncategorized' ? ` \u00b7 ${product.category}` : ''}
+                          </p>
                         </td>
-                        <td className="px-4 py-4 whitespace-nowrap">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {product.brand}
+                        <td className="px-3 py-3 text-right">
+                          <span className="text-sm font-ibm-plex font-medium text-[#0f1729] whitespace-nowrap">
+                            {product.mrp || '\u2014'}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-center whitespace-nowrap">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {product.category}
+                        <td className="px-3 py-3 text-center hidden sm:table-cell">
+                          <span className="text-xs font-ibm-plex text-[#65758b] truncate block max-w-[120px] mx-auto" title={product.packSize}>
+                            {product.packSize !== 'Not specified' ? product.packSize : '\u2014'}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-center whitespace-nowrap">
-                          <span className="text-sm font-ibm-plex font-medium text-[#0f1729]">
-                            {product.mrp}
+                        <td className="px-3 py-3 text-center hidden md:table-cell">
+                          <span className="text-xs font-ibm-plex text-[#65758b] whitespace-nowrap">
+                            {product.manufacturingDate !== 'N/A' ? product.manufacturingDate : '\u2014'}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-center whitespace-nowrap">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {product.uploadDate}
+                        <td className="px-3 py-3 text-center hidden md:table-cell">
+                          <span className="text-xs font-ibm-plex text-[#65758b] whitespace-nowrap">
+                            {product.expiryDate !== 'N/A' ? product.expiryDate : '\u2014'}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-center whitespace-nowrap">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {product.packSize}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4 text-center whitespace-nowrap">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {product.manufacturingDate}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4 text-center whitespace-nowrap">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {product.expiryDate}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4 text-center whitespace-nowrap">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
+                        <td className="px-3 py-3 text-center hidden lg:table-cell">
+                          <span className="text-xs font-ibm-plex text-[#65758b] whitespace-nowrap">
                             {product.uploadedBy}
                           </span>
                         </td>
-                        <td className="px-4 py-4 whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-1">
+                        <td className="px-3 py-3">
+                          <div className="flex items-center justify-end gap-0.5">
                             <button
                               onClick={() => handlePreviewProduct(product)}
-                              className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-200 transition-colors"
-                              title="View"
+                              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[#e1e7ef] transition-colors"
+                              title="View Images"
                             >
-                              <Eye className="w-4 h-4 text-[#65758b]" />
+                              <ImageIcon className="w-3.5 h-3.5 text-[#65758b]" />
+                            </button>
+                            <button
+                              onClick={() => handleDetailProduct(product)}
+                              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[#e1e7ef] transition-colors"
+                              title="View Details"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-[#2463eb]" />
                             </button>
                             <button
                               onClick={() => navigate(`/edit-product/${product.id}`)}
-                              className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-200 transition-colors"
+                              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[#e1e7ef] transition-colors"
                               title="Edit"
                             >
-                              <Edit2 className="w-4 h-4 text-[#65758b]" />
+                              <Edit2 className="w-3.5 h-3.5 text-[#65758b]" />
                             </button>
                             <button
                               onClick={() => setDeleteProduct(product)}
-                              className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-200 transition-colors"
+                              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-red-50 transition-colors"
                               title="Delete"
                             >
-                              <Trash2 className="w-4 h-4 text-[#65758b]" />
+                              <Trash2 className="w-3.5 h-3.5 text-red-500" />
                             </button>
                           </div>
                         </td>
@@ -469,6 +489,12 @@ const Products = () => {
         product={previewProduct}
         isOpen={!!previewProduct}
         onClose={() => setPreviewProduct(null)}
+      />
+
+      <ProductDetailModal
+        product={detailProduct}
+        isOpen={!!detailProduct}
+        onClose={() => setDetailProduct(null)}
       />
 
       <DeleteConfirmModal

@@ -22,7 +22,7 @@ router = APIRouter(prefix="/coa", tags=["COA"])
 # ============================================================
 # CONFIGURATION
 # ============================================================
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 
 PRICING = {
     "input": 0.30,
@@ -38,7 +38,7 @@ NOMENCLATURE_MAP = {
     "proteins": "Protein",
     "crude protein": "Protein",
     "total protein": "Protein",
-    "protein (n x 6.25)": "Protein",
+    "protein (n x 6.25)": "protein (n x 6.25)",
     "protein (dry basis)": "Protein (Dry Basis)",
     "protein (wet basis)": "Protein (Wet Basis)",
     # Fats
@@ -192,6 +192,25 @@ NOMENCLATURE_MAP = {
     "mo": "Molybdenum",
     "selenium": "Selenium",
     "se": "Selenium",
+    # Polyols / Sugar Alcohols
+    "sorbitol": "Sorbitol",
+    "sorbitol syrup": "Sorbitol Syrup",
+    "mannitol": "Mannitol",
+    "xylitol": "Xylitol",
+    "maltitol": "Maltitol",
+    "maltitol syrup": "Maltitol Syrup",
+    "isomalt": "Isomalt",
+    "lactitol": "Lactitol",
+    "erythritol": "Erythritol",
+    "glycerin": "Glycerin",
+    "glycerine": "Glycerin",
+    "glycerol": "Glycerin",
+    "hydrogenated glucose syrup": "Hydrogenated Glucose Syrup",
+    "hydrogenated starch hydrolysate": "Hydrogenated Starch Hydrolysate",
+    "polyol": "Polyol",
+    "polyols": "Polyol",
+    "sugar alcohol": "Polyol",
+    "sugar alcohols": "Polyol",
     # Other Nutrients
     "carnitine": "Carnitine",
     "l-carnitine": "Carnitine",
@@ -224,6 +243,10 @@ TARGET_UNITS = {
     "Omega 3 Fatty Acid": "g", "Omega 6 Fatty Acid": "g",
     "Iodine": "mcg", "Copper": "mcg", "Chromium": "mcg", "Manganese": "mg",
     "Molybdenum": "mcg", "Selenium": "mcg",
+    "Sorbitol": "g", "Sorbitol Syrup": "g", "Mannitol": "g", "Xylitol": "g",
+    "Maltitol": "g", "Maltitol Syrup": "g", "Isomalt": "g", "Lactitol": "g",
+    "Erythritol": "g", "Glycerin": "g", "Hydrogenated Glucose Syrup": "g",
+    "Hydrogenated Starch Hydrolysate": "g", "Polyol": "g",
     "Carnitine": "mg", "Choline": "mg", "Inositol": "mg", "Nucleotides": "mg", "Taurine": "mg",
 }
 
@@ -254,11 +277,14 @@ def calculate_cost(input_tokens: int, output_tokens: int) -> dict:
     }
 
 
-def standardize_nutrient_name(raw_name: str) -> str:
-    """Map raw nutrient name to standardized name"""
+def standardize_nutrient_name(raw_name: str, db_map: dict | None = None) -> str:
+    """Map raw nutrient name to standardized name.
+    Checks DB-backed map first, then falls back to hardcoded map."""
     cleaned = raw_name.lower().strip()
     cleaned = re.sub(r"\s*\(.*?\)\s*", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if db_map and cleaned in db_map:
+        return db_map[cleaned]
     return NOMENCLATURE_MAP.get(cleaned, raw_name.title())
 
 
@@ -292,6 +318,10 @@ def get_nutrient_category(nutrient_name: str) -> str:
         "Carbohydrate - Sugar": ["Total Sugars", "Added Sugars", "Sucrose", "Added Sucrose"],
         "Carbohydrate - Fiber": ["Dietary Fiber", "Soluble Fiber", "Insoluble Fiber", 
                                   "FOS (Fructooligosaccharides)"],
+        "Carbohydrate - Polyol": ["Sorbitol", "Sorbitol Syrup", "Mannitol", "Xylitol",
+                                   "Maltitol", "Maltitol Syrup", "Isomalt", "Lactitol",
+                                   "Erythritol", "Glycerin", "Hydrogenated Glucose Syrup",
+                                   "Hydrogenated Starch Hydrolysate", "Polyol"],
         "Mineral": ["Sodium", "Potassium", "Calcium", "Iron", "Zinc", "Magnesium", 
                    "Phosphorus", "Chloride", "Cholesterol"],
         "Vitamin - Fat Soluble": ["Vitamin A", "Vitamin D", "Vitamin D3", "Vitamin E"],
@@ -306,7 +336,7 @@ def get_nutrient_category(nutrient_name: str) -> str:
     return "Other"
 
 
-def process_extracted_coa(raw_data: dict) -> dict:
+def process_extracted_coa(raw_data: dict, db_map: dict | None = None) -> dict:
     """Post-process extracted COA data: standardize names and normalize units"""
     processed = raw_data.copy()
     
@@ -317,7 +347,7 @@ def process_extracted_coa(raw_data: dict) -> dict:
     
     for nutrient in processed["nutritional_data"]:
         raw_name = nutrient.get("nutrient_name_raw", nutrient.get("nutrient_name", ""))
-        std_name = standardize_nutrient_name(raw_name)
+        std_name = standardize_nutrient_name(raw_name, db_map)
         raw_unit = nutrient.get("unit", nutrient.get("unit_raw", "g"))
         
         normalized_nutrient = {
@@ -407,22 +437,6 @@ EXTRACTION RULES:
    - "Max 6" or "≤6" or "<6" → min: null, max: 6
    - "< 1.0" or "less than 1" → actual: 1.0 (use limit as actual)
    - Single value "34.5" → actual: 34.5
-
-4. NUTRIENTS TO EXTRACT (if present):
-   
-   MACRONUTRIENTS:
-   - Moisture, Protein, Total Fat, Saturated Fat, Trans Fat
-   - Total Carbohydrates, Total Sugars, Dietary Fiber
-   - Cholesterol, Ash, Energy
-   
-   MINERALS:
-   - Sodium, Potassium, Calcium, Iron, Zinc
-   - Magnesium, Phosphorus, Chloride
-   
-   VITAMINS:
-   - Vitamin A, D, E, C
-   - B-vitamins (B1, B2, B3, B6, B12)
-   - Folic Acid, Biotin, Pantothenic Acid
 
 JSON STRUCTURE:
 {
@@ -660,8 +674,23 @@ async def extract_coa_from_images(
         coa_data = json.loads(raw_json)
         safe_print("[COA EXTRACTION] JSON parsed successfully")
         
+        # Load DB-backed nomenclature map for standardization
+        db_map = None
+        try:
+            from app.models.coa_nomenclature import COANomenclatureMapping
+            all_mappings = await COANomenclatureMapping.find_all().to_list()
+            if all_mappings:
+                db_map = {}
+                for m in all_mappings:
+                    db_map[m.standardized_name.lower()] = m.standardized_name
+                    for raw in m.raw_names:
+                        db_map[raw.lower()] = m.standardized_name
+                safe_print(f"[COA EXTRACTION] Loaded {len(all_mappings)} DB nomenclature mappings")
+        except Exception as map_err:
+            safe_print(f"[COA EXTRACTION] DB nomenclature not available, using hardcoded: {map_err}")
+        
         # Post-process the data
-        processed_data = process_extracted_coa(coa_data)
+        processed_data = process_extracted_coa(coa_data, db_map)
         
         # Transform to frontend-friendly format
         ingredient_info = processed_data.get("ingredient_info", {})

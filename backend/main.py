@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from app.database import Database
-from app.routes import auth, users, products, categories, nomenclature, coa, formulations
+from app.routes import auth, users, products, categories, nomenclature, coa, coa_nomenclature, formulations
 from app.middleware.security import configure_cors, configure_rate_limiting
 from config.settings import settings
 
@@ -74,6 +74,7 @@ app.include_router(products.router, prefix="/api")
 app.include_router(categories.router, prefix="/api")
 app.include_router(nomenclature.router, prefix="/api")
 app.include_router(coa.router, prefix="/api")
+app.include_router(coa_nomenclature.router, prefix="/api")
 app.include_router(formulations.router, prefix="/api")
 
 

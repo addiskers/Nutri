@@ -832,6 +832,112 @@ export const nomenclatureService = {
   }
 }
 
+// COA Nomenclature Service
+export const coaNomenclatureService = {
+  async getAll(params = {}) {
+    const qp = new URLSearchParams()
+    if (params.skip) qp.append('skip', params.skip)
+    if (params.limit) qp.append('limit', params.limit)
+    if (params.search) qp.append('search', params.search)
+    const response = await fetch(`${API_BASE_URL}/coa-nomenclature?${qp.toString()}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '69420' }
+    })
+    if (response.ok) return await response.json()
+    throw new Error('Failed to fetch COA nomenclature')
+  },
+
+  async getMap() {
+    const response = await fetch(`${API_BASE_URL}/coa-nomenclature/map`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '69420' }
+    })
+    if (response.ok) return await response.json()
+    throw new Error('Failed to fetch COA nomenclature map')
+  },
+
+  async create(data) {
+    try {
+      const response = await apiRequest('/coa-nomenclature', {
+        method: 'POST',
+        body: JSON.stringify(data)
+      })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: result.detail || 'Failed to create COA nomenclature' }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+
+  async update(id, data) {
+    try {
+      const response = await apiRequest(`/coa-nomenclature/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+      })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: result.detail || 'Failed to update COA nomenclature' }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+
+  async delete(id) {
+    try {
+      const response = await apiRequest(`/coa-nomenclature/${id}`, {
+        method: 'DELETE'
+      })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: result.detail || 'Failed to delete COA nomenclature' }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+
+  async addSynonym(id, rawName) {
+    try {
+      const response = await apiRequest(`/coa-nomenclature/${id}/synonyms`, {
+        method: 'POST',
+        body: JSON.stringify({ raw_name: rawName })
+      })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: result.detail || 'Failed to add synonym' }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+
+  async removeSynonym(id, rawName) {
+    try {
+      const response = await apiRequest(`/coa-nomenclature/${id}/synonyms/${encodeURIComponent(rawName)}`, {
+        method: 'DELETE'
+      })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: result.detail || 'Failed to remove synonym' }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+
+  async seed() {
+    try {
+      const response = await apiRequest('/coa-nomenclature/seed', {
+        method: 'POST'
+      })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: result.detail || 'Failed to seed COA nomenclature' }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+}
+
 // User Service
 export const userService = {
   /**

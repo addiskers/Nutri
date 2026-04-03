@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 
 import Layout from '../components/Layout/Layout'
 
@@ -7,6 +7,7 @@ import { Plus, Trash2, Loader2, Search, AlertCircle, Beaker, Download, X, Chevro
 import { coaService, formulationService } from '../services/api'
 import authService from '../services/api'
 import TransferFormulationModal from '../components/Modals/TransferFormulationModal'
+import IngredientMappingModal from '../components/Modals/IngredientMappingModal'
 import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
 
@@ -78,7 +79,35 @@ const Formulation = () => {
   const [showTransferModal, setShowTransferModal] = useState(false)
   const [selectedFormulation, setSelectedFormulation] = useState(null)
 
-  
+  // Ingredient mapping modal
+  const [showMappingModal, setShowMappingModal] = useState(false)
+  const [mappingModalData, setMappingModalData] = useState(null)
+
+  // Energy Calculation Breakdown
+  const [showEnergyBreakdown, setShowEnergyBreakdown] = useState(false)
+
+  const DEFAULT_ENERGY_ROWS = [
+    { id: 'protein', label: 'Protein', matchNames: ['Protein', 'Proteins'], multiplier: 4, enabled: true, type: 'direct' },
+    { id: 'carb', label: 'Carbohydrates', matchNames: ['Total Carbohydrates', 'Carbohydrates', 'Carbohydrate', 'A. Carbohydrates'], multiplier: 4, enabled: true, type: 'carb_base' },
+    { id: 'fiber', label: '− Dietary Fiber', matchNames: ['Dietary Fiber', 'Dietary Fibre', 'Fiber', 'Fibre'], multiplier: 2, enabled: true, type: 'carb_subtract' },
+    { id: 'polyol', label: '− Polyols (Sugar Alcohols)', matchNames: ['Polyol', 'Sorbitol', 'Mannitol', 'Xylitol', 'Maltitol', 'Isomalt', 'Lactitol', 'Glycerin', 'Glycerine', 'Hydrogenated Glucose Syrup', 'Hydrogenated Starch Hydrolysate', 'Sugar Alcohol', 'Sorbitol Syrup', 'Maltitol Syrup'], multiplier: 2, enabled: true, type: 'carb_subtract' },
+    { id: 'erythritol', label: '− Erythritol', matchNames: ['Erythritol'], multiplier: 4, enabled: true, type: 'carb_subtract' },
+    { id: 'fat', label: 'Total Fat', matchNames: ['Total Fat', 'Total fat', 'Fats', 'Fat'], multiplier: 9, enabled: true, type: 'direct' },
+  ]
+
+  const [energyRows, setEnergyRows] = useState(DEFAULT_ENERGY_ROWS)
+  const [showAddEnergyRow, setShowAddEnergyRow] = useState(false)
+  const [newEnergyNutrient, setNewEnergyNutrient] = useState('')
+  const [newEnergyType, setNewEnergyType] = useState('direct')
+  const [newEnergyMultiplier, setNewEnergyMultiplier] = useState(4)
+  const defaultRowIds = new Set(DEFAULT_ENERGY_ROWS.map(r => r.id))
+
+  // Auto-save draft
+  const DRAFT_KEY = 'formulation_draft'
+  const AUTOSAVE_INTERVAL = 30000 
+  const [showDraftBanner, setShowDraftBanner] = useState(false)
+  const draftChecked = useRef(false)
+  const isRestoringDraft = useRef(false)
 
   // RDA Categories available
 
@@ -409,7 +438,98 @@ const Formulation = () => {
     }
   }, [])
 
-  
+  // ── Auto-save draft helpers ──────────────────────────────────────────────
+  const saveDraftToStorage = useCallback(() => {
+    if (isRestoringDraft.current) return
+    if (ingredients.length === 0) return
+    try {
+      const draft = {
+        ingredients,
+        nutrientSelections,
+        customValues,
+        serveSize,
+        savedAt: new Date().toISOString(),
+      }
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
+    } catch (e) {
+      console.warn('[AUTO-SAVE] Failed to save draft:', e)
+    }
+  }, [ingredients, nutrientSelections, customValues, serveSize])
+
+  const clearDraft = useCallback(() => {
+    localStorage.removeItem(DRAFT_KEY)
+  }, [])
+
+  const restoreDraft = useCallback(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY)
+      if (!raw) return
+      const draft = JSON.parse(raw)
+      isRestoringDraft.current = true
+      setIngredients(draft.ingredients || [])
+      setNextId((draft.ingredients?.length || 0) + 1)
+      setNutrientSelections(draft.nutrientSelections || {})
+      setCustomValues(draft.customValues || {})
+      setServeSize(draft.serveSize ?? 55)
+      setShowDraftBanner(false)
+      setTimeout(() => { isRestoringDraft.current = false }, 500)
+    } catch (e) {
+      console.warn('[AUTO-SAVE] Failed to restore draft:', e)
+      clearDraft()
+    }
+  }, [clearDraft])
+
+  const discardDraft = useCallback(() => {
+    clearDraft()
+    setShowDraftBanner(false)
+  }, [clearDraft])
+
+  // Check for existing draft on mount — auto-restore if formulation is empty
+  useEffect(() => {
+    if (draftChecked.current) return
+    draftChecked.current = true
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY)
+      if (raw) {
+        const draft = JSON.parse(raw)
+        if (draft.ingredients && draft.ingredients.length > 0) {
+          // Auto-restore immediately (covers session timeout / disconnect)
+          restoreDraft()
+        }
+      }
+    } catch (e) {
+      localStorage.removeItem(DRAFT_KEY)
+    }
+  }, [])
+
+  // Periodic auto-save every 30 seconds
+  useEffect(() => {
+    const timer = setInterval(() => {
+      saveDraftToStorage()
+    }, AUTOSAVE_INTERVAL)
+    return () => clearInterval(timer)
+  }, [saveDraftToStorage])
+
+  // Auto-save on meaningful state changes
+  useEffect(() => {
+    if (isRestoringDraft.current) return
+    if (ingredients.length > 0) {
+      saveDraftToStorage()
+    }
+  }, [ingredients, nutrientSelections, customValues, serveSize, saveDraftToStorage])
+
+  // beforeunload — save draft + warn user
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (ingredients.length > 0) {
+        saveDraftToStorage()
+        e.preventDefault()
+        e.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [ingredients, saveDraftToStorage])
 
   const loadCOAs = async () => {
 
@@ -470,53 +590,61 @@ const Formulation = () => {
 
   
 
-  // Select COA for ingredient
+  // Select COA for ingredient — opens mapping modal so user picks nutrients
   const selectCOA = async (id, coaId) => {
     if (!coaId) return
-    // Immediately mark the coa_id so re-renders don't lose it
     setIngredients(prev => prev.map(ing =>
       ing.id === id ? { ...ing, coa_id: coaId } : ing
     ))
     try {
       const coa = await coaService.getCOA(coaId)
       if (coa) {
-        // Store all 4 value types per nutrient
-        const nutritionalDataObj = {}
-        if (coa.nutritional_data) {
-          coa.nutritional_data.forEach(nutrient => {
-            const key = nutrient.nutrient_name || nutrient.nutrient_name_raw
-            nutritionalDataObj[key] = {
-              actual: nutrient.actual_value ?? null,
-              min: nutrient.min_value ?? null,
-              max: nutrient.max_value ?? null,
-              average: nutrient.average_value ?? null,
-            }
-          })
-        }
-        setIngredients(prev => prev.map(ing =>
-          ing.id === id ? {
-            ...ing,
-            coa_id: coaId,
-            coa_name: coa.ingredient_name,
-            nutritional_data: nutritionalDataObj
-          } : ing
-        ))
+        setMappingModalData({
+          ingredientId: id,
+          coaId,
+          coaName: coa.ingredient_name,
+          nutrients: coa.nutritional_data || []
+        })
+        setShowMappingModal(true)
       }
     } catch (error) {
       console.error('Failed to load COA details:', error)
     }
   }
 
+  // Called when user confirms nutrient selection in the mapping modal
+  const handleMappingConfirm = (selectedNutrients) => {
+    if (!mappingModalData) return
+    const { ingredientId, coaName } = mappingModalData
+    const nutritionalDataObj = {}
+    selectedNutrients.forEach(nutrient => {
+      const key = nutrient.nutrient_name || nutrient.nutrient_name_raw
+      nutritionalDataObj[key] = {
+        actual: nutrient.actual_value ?? null,
+        min: nutrient.min_value ?? null,
+        max: nutrient.max_value ?? null,
+        average: nutrient.average_value ?? null,
+      }
+    })
+    setIngredients(prev => prev.map(ing =>
+      ing.id === ingredientId
+        ? { ...ing, coa_name: coaName, nutritional_data: nutritionalDataObj }
+        : ing
+    ))
+    setShowMappingModal(false)
+    setMappingModalData(null)
+  }
+
   // Get the selected value for a specific ingredient-nutrient cell
   const getNutrientValue = (ingredientId, nutrientName, nutritionalData) => {
-    const cellData = nutritionalData[nutrientName]
-    if (!cellData) return 0
-    if (typeof cellData === 'number') return cellData
     const selectionKey = `${ingredientId}-${nutrientName}`
     const selectedType = nutrientSelections[selectionKey] || 'actual'
     if (selectedType === 'custom') {
       return customValues[selectionKey] ?? 0
     }
+    const cellData = nutritionalData[nutrientName]
+    if (!cellData) return 0
+    if (typeof cellData === 'number') return cellData
     return cellData[selectedType] ?? cellData.actual ?? cellData.average ?? 0
   }
 
@@ -649,55 +777,91 @@ const Formulation = () => {
 
   
 
-  // Calculate energy for a nutrient
-
-  const calculateEnergy = (nutrientName, total) => {
-
-    const energyMultipliers = {
-
-      'Proteins': 4,
-
-      'Protein': 4,
-
-      'A. Carbohydrates': 4,
-
-      'Carbohydrates': 4,
-
-      'Total Carbohydrates': 4,
-
-      'Dietary Fiber': 2,
-
-      'Dietary Fibre': 2,
-
-      'Fiber': 2,
-
-      'Fibre': 2,
-
-      'Fats': 9,
-
-      'Total Fat': 9,
-
-      'Fat': 9,
-
-      'LA': 9,
-
-      'Linoleic Acid': 9,
-
-      'SFA': 9,
-
-      'MUFA': 9,
-
-      'PUFA': 9
-
+  // Helper: find a nutrient total by checking match names against nutrientTotals
+  const findNutrientTotal = (matchNames, totals) => {
+    for (const name of matchNames) {
+      if (totals[name] !== undefined) return totals[name]
     }
-
-    
-
-    return (energyMultipliers[nutrientName] || 0) * total
-
+    return 0
   }
 
-  
+  // Calculate energy using the breakdown rows
+  const calculateEnergyFromBreakdown = (totals) => {
+    let totalEnergy = 0
+    const rowDetails = []
+
+    const carbRow = energyRows.find(r => r.id === 'carb')
+    const carbBase = carbRow?.enabled ? findNutrientTotal(carbRow.matchNames, totals) * carbRow.multiplier : 0
+    let carbSubtractions = 0
+
+    for (const row of energyRows) {
+      if (!row.enabled) {
+        rowDetails.push({ ...row, nutrientTotal: 0, energyContribution: 0 })
+        continue
+      }
+
+      const nutrientTotal = findNutrientTotal(row.matchNames, totals)
+
+      if (row.type === 'direct') {
+        const contrib = nutrientTotal * row.multiplier
+        totalEnergy += contrib
+        rowDetails.push({ ...row, nutrientTotal, energyContribution: contrib })
+      } else if (row.type === 'carb_base') {
+        rowDetails.push({ ...row, nutrientTotal, energyContribution: null })
+      } else if (row.type === 'carb_subtract') {
+        const sub = nutrientTotal * row.multiplier
+        carbSubtractions += sub
+        rowDetails.push({ ...row, nutrientTotal, energyContribution: -sub })
+      }
+    }
+
+    const netCarbEnergy = Math.max(0, carbBase - carbSubtractions)
+    totalEnergy += netCarbEnergy
+
+    const carbIdx = rowDetails.findIndex(r => r.id === 'carb')
+    if (carbIdx !== -1) {
+      rowDetails[carbIdx].energyContribution = netCarbEnergy
+    }
+
+    return { totalEnergy, rowDetails }
+  }
+
+  // Per-column energy using pre-computed breakdown
+  const getEnergyPerColumn = (nutrientName, total, breakdown) => {
+    for (const row of breakdown.rowDetails) {
+      if (!row.enabled) continue
+      const matches = row.matchNames.some(n => n === nutrientName)
+      if (!matches) continue
+      if (row.type === 'direct' || row.type === 'carb_base') {
+        return row.energyContribution ?? 0
+      }
+    }
+    return 0
+  }
+
+  const addCustomEnergyRow = () => {
+    if (!newEnergyNutrient) return
+    const id = `custom-${Date.now()}`
+    const isSubtract = newEnergyType === 'carb_subtract'
+    const label = isSubtract ? `− ${newEnergyNutrient}` : newEnergyNutrient
+    setEnergyRows(prev => [...prev, {
+      id,
+      label,
+      matchNames: [newEnergyNutrient],
+      multiplier: newEnergyMultiplier,
+      enabled: true,
+      type: newEnergyType,
+      custom: true,
+    }])
+    setNewEnergyNutrient('')
+    setNewEnergyType('direct')
+    setNewEnergyMultiplier(4)
+    setShowAddEnergyRow(false)
+  }
+
+  const removeCustomEnergyRow = (rowId) => {
+    setEnergyRows(prev => prev.filter(r => r.id !== rowId))
+  }
 
   // Get total percentage
 
@@ -714,28 +878,19 @@ const Formulation = () => {
   const nutrientNames = getAllNutrientNames()
 
   const nutrientTotals = {}
-
-  const nutrientEnergies = {}
-
-  
-
   nutrientNames.forEach(nutrient => {
-
-    const total = calculateTotal(nutrient)
-
-    nutrientTotals[nutrient] = total
-
-    nutrientEnergies[nutrient] = calculateEnergy(nutrient, total)
-
+    nutrientTotals[nutrient] = calculateTotal(nutrient)
   })
 
-  
+  // Energy breakdown using the corrected formula
+  const energyBreakdown = calculateEnergyFromBreakdown(nutrientTotals)
+  const totalEnergy = energyBreakdown.totalEnergy
 
-  // Calculate total energy
-
-  const totalEnergy = Object.values(nutrientEnergies).reduce((sum, energy) => sum + energy, 0)
-
-  
+  // Per-column energy for the table row
+  const nutrientEnergies = {}
+  nutrientNames.forEach(nutrient => {
+    nutrientEnergies[nutrient] = getEnergyPerColumn(nutrient, nutrientTotals[nutrient], energyBreakdown)
+  })
 
   // Calculate percentage energy
 
@@ -901,6 +1056,14 @@ const Formulation = () => {
       })
 
       if (result.success) {
+        isRestoringDraft.current = true
+        clearDraft()
+        setIngredients([])
+        setNextId(1)
+        setNutrientSelections({})
+        setCustomValues({})
+        setServeSize(55)
+        setTimeout(() => { isRestoringDraft.current = false }, 500)
         alert(`Formulation "${name}" saved successfully!`)
         setFormulationName('')
         setShowSaveModal(false)
@@ -1305,6 +1468,32 @@ const Formulation = () => {
           </button>
         </div>
 
+        {/* Draft Restore Banner */}
+        {showDraftBanner && (
+          <div className="mb-4 p-4 rounded-lg border border-[#f0ad4e] bg-[#fef9e7] flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-[#f0ad4e] flex-shrink-0" />
+              <span className="text-sm font-ibm-plex text-[#856404]">
+                Unsaved formulation draft found. Would you like to restore it?
+              </span>
+            </div>
+            <div className="flex gap-2 flex-shrink-0">
+              <button
+                onClick={restoreDraft}
+                className="px-3 py-1.5 rounded-md bg-[#009da5] text-white text-sm font-ibm-plex font-medium hover:bg-[#008891] transition-colors"
+              >
+                Restore
+              </button>
+              <button
+                onClick={discardDraft}
+                className="px-3 py-1.5 rounded-md bg-white border border-[#e1e7ef] text-[#65758b] text-sm font-ibm-plex font-medium hover:bg-[#f5f7fa] transition-colors"
+              >
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Formula Tab Content */}
         {activeTab === 'formula' && (
         <>
@@ -1551,10 +1740,10 @@ const Formulation = () => {
                                   }}
                                   className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-[#f1f5f9] transition-colors group"
                                 >
-                                  <span className="text-sm font-ibm-plex text-[#0f1729]">
-                                    {weighted.toFixed(3)}
-                                  </span>
                                   <ChevronDown className="w-3.5 h-3.5 text-[#65758b] group-hover:text-[#b455a0] transition-colors" />
+                                  <span className="text-sm font-ibm-plex text-[#0f1729]">
+                                    {weighted.toFixed(2)}
+                                  </span>
                                 </button>
                                 {isOpen && (
                                   <>
@@ -1609,9 +1798,47 @@ const Formulation = () => {
                                   </>
                                 )}
                               </div>
+                            ) : hasCOA ? (
+                              <div className="relative inline-block">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setOpenDropdown(isOpen ? null : selectionKey)
+                                  }}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-[#f1f5f9] transition-colors group"
+                                >
+                                  <ChevronDown className="w-3.5 h-3.5 text-[#c0c7d1] group-hover:text-[#b455a0] transition-colors" />
+                                  <span className="text-sm font-ibm-plex text-[#c0c7d1]">
+                                    {currentType === 'custom' && customValues[selectionKey] != null ? (customValues[selectionKey] * ingredient.percentage / 100).toFixed(2) : '—'}
+                                  </span>
+                                </button>
+                                {isOpen && (
+                                  <>
+                                    <div className="fixed inset-0 z-20" onClick={() => setOpenDropdown(null)} />
+                                    <div className="absolute right-0 top-full mt-1 z-30 bg-white rounded-lg shadow-lg border border-[#e1e7ef] py-1 min-w-[160px]">
+                                      <div className={`px-3 py-2 text-sm font-ibm-plex ${currentType === 'custom' ? 'bg-[#b455a0]/10' : ''}`}>
+                                        <span className={`text-xs font-medium ${currentType === 'custom' ? 'text-[#b455a0]' : 'text-[#65758b]'}`}>Custom</span>
+                                        <input
+                                          type="number"
+                                          step="any"
+                                          value={customValues[selectionKey] ?? ''}
+                                          placeholder="Enter value..."
+                                          onClick={(e) => e.stopPropagation()}
+                                          onChange={(e) => {
+                                            updateCustomValue(ingredient.id, nutrient, e.target.value)
+                                            updateNutrientSelection(ingredient.id, nutrient, 'custom')
+                                            setOpenDropdown(selectionKey)
+                                          }}
+                                          className="w-full mt-1 px-2 py-1 text-sm font-ibm-plex text-[#0f1729] bg-[#f9fafb] border border-[#e1e7ef] rounded focus:outline-none focus:ring-1 focus:ring-[#b455a0]"
+                                        />
+                                      </div>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
                             ) : (
                               <span className="text-sm font-ibm-plex text-[#c0c7d1]">
-                                {hasCOA && !hasData ? '—' : weighted.toFixed(3)}
+                                {weighted.toFixed(2)}
                               </span>
                             )}
                           </td>
@@ -1668,7 +1895,7 @@ const Formulation = () => {
 
                         <span className="text-sm font-ibm-plex font-bold text-[#0f1729]">
 
-                          {nutrientTotals[nutrient].toFixed(3)}
+                          {nutrientTotals[nutrient].toFixed(2)}
 
                         </span>
 
@@ -1788,33 +2015,270 @@ const Formulation = () => {
 
         
 
-        {/* Legend */}
-
+        {/* Energy Calculation Breakdown */}
         {ingredients.length > 0 && (
+          <div className="bg-white border border-[#e1e7ef] rounded-lg shadow-sm">
+            {/* Toggle Header */}
+            <button
+              onClick={() => setShowEnergyBreakdown(prev => !prev)}
+              className="w-full p-4 flex items-center justify-between hover:bg-[#f9fafb] transition-colors rounded-lg"
+            >
+              <div className="flex items-center gap-3">
+                <h3 className="text-sm font-ibm-plex font-semibold text-[#0f1729]">
+                  Energy Calculation Breakdown
+                </h3>
+                <span className="text-xs font-ibm-plex text-[#65758b] bg-[#f1f5f9] px-2 py-0.5 rounded-full">
+                  {totalEnergy.toFixed(2)} kcal/100g
+                </span>
+              </div>
+              <ChevronDown className={`w-4 h-4 text-[#65758b] transition-transform ${showEnergyBreakdown ? 'rotate-180' : ''}`} />
+            </button>
 
+            {showEnergyBreakdown && (
+              <div className="border-t border-[#e1e7ef] p-4">
+                <p className="text-xs font-ibm-plex text-[#65758b] mb-4">
+                  Toggle nutrients on/off and edit multipliers to control how energy is calculated.
+                  Carb energy = (Carb × multiplier) − (Fiber × multiplier) − (Polyol × multiplier) − (Erythritol × multiplier)
+                </p>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm font-ibm-plex border-collapse">
+                    <thead>
+                      <tr className="bg-[#f1f5f9] border-b border-[#e1e7ef]">
+                        <th className="px-4 py-3 text-center w-12">
+                          <span className="text-xs font-medium text-[#65758b] uppercase tracking-wider">On</span>
+                        </th>
+                        <th className="px-4 py-3 text-left">
+                          <span className="text-xs font-medium text-[#65758b] uppercase tracking-wider">Component</span>
+                        </th>
+                        <th className="px-4 py-3 text-right">
+                          <span className="text-xs font-medium text-[#65758b] uppercase tracking-wider">Total (g/100g)</span>
+                        </th>
+                        <th className="px-4 py-3 text-center">
+                          <span className="text-xs font-medium text-[#65758b] uppercase tracking-wider">×</span>
+                        </th>
+                        <th className="px-4 py-3 text-center w-28">
+                          <span className="text-xs font-medium text-[#65758b] uppercase tracking-wider">Multiplier</span>
+                        </th>
+                        <th className="px-4 py-3 text-center">
+                          <span className="text-xs font-medium text-[#65758b] uppercase tracking-wider">=</span>
+                        </th>
+                        <th className="px-4 py-3 text-right">
+                          <span className="text-xs font-medium text-[#65758b] uppercase tracking-wider">kcal</span>
+                        </th>
+                        <th className="px-4 py-3 text-center w-12">
+                          <span className="text-xs font-medium text-[#65758b] uppercase tracking-wider"></span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {energyBreakdown.rowDetails.map((row) => {
+                        const isSubtract = row.type === 'carb_subtract'
+                        const isCustom = row.custom || !defaultRowIds.has(row.id)
+                        return (
+                          <tr
+                            key={row.id}
+                            className={`border-b border-[#e1e7ef] transition-colors ${
+                              !row.enabled ? 'opacity-40' : ''
+                            } ${isSubtract ? 'bg-[#fef9e7]' : ''}`}
+                          >
+                            <td className="px-4 py-3 text-center">
+                              <input
+                                type="checkbox"
+                                checked={row.enabled}
+                                onChange={() => {
+                                  setEnergyRows(prev => prev.map(r =>
+                                    r.id === row.id ? { ...r, enabled: !r.enabled } : r
+                                  ))
+                                }}
+                                className="w-4 h-4 text-[#009da5] border-[#cbd5e1] rounded focus:ring-[#009da5]"
+                              />
+                            </td>
+
+                            <td className={`px-4 py-3 ${isSubtract ? 'pl-8' : ''}`}>
+                              <span className={`font-medium ${isSubtract ? 'text-[#d97706]' : 'text-[#0f1729]'}`}>
+                                {row.label}
+                              </span>
+                              {row.type === 'carb_base' && (
+                                <span className="ml-2 text-xs text-[#65758b]">(net after subtractions)</span>
+                              )}
+                              {isCustom && (
+                                <span className="ml-2 text-xs text-[#009da5] bg-[#e1f4f5] px-1.5 py-0.5 rounded">custom</span>
+                              )}
+                            </td>
+
+                            <td className="px-4 py-3 text-right tabular-nums text-[#0f1729]">
+                              {row.nutrientTotal.toFixed(2)}
+                            </td>
+
+                            <td className="px-4 py-3 text-center text-[#65758b]">×</td>
+
+                            <td className="px-4 py-3 text-center">
+                              <input
+                                type="number"
+                                step="0.5"
+                                min="0"
+                                value={row.multiplier}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value)
+                                  if (isNaN(val)) return
+                                  setEnergyRows(prev => prev.map(r =>
+                                    r.id === row.id ? { ...r, multiplier: val } : r
+                                  ))
+                                }}
+                                className="w-20 px-2 py-1 text-sm text-center font-ibm-plex text-[#0f1729] bg-[#f9fafb] border border-[#e1e7ef] rounded focus:outline-none focus:ring-1 focus:ring-[#009da5]"
+                              />
+                            </td>
+
+                            <td className="px-4 py-3 text-center text-[#65758b]">=</td>
+
+                            <td className="px-4 py-3 text-right tabular-nums">
+                              <span className={`font-semibold ${
+                                row.energyContribution === null ? 'text-[#65758b]'
+                                  : row.energyContribution < 0 ? 'text-[#d97706]'
+                                    : row.energyContribution > 0 ? 'text-[#059669]'
+                                      : 'text-[#65758b]'
+                              }`}>
+                                {row.energyContribution !== null
+                                  ? `${row.energyContribution < 0 ? '' : '+'}${row.energyContribution.toFixed(2)}`
+                                  : '—'}
+                              </span>
+                            </td>
+
+                            <td className="px-4 py-3 text-center">
+                              {isCustom && (
+                                <button
+                                  onClick={() => removeCustomEnergyRow(row.id)}
+                                  className="text-[#ef4343] hover:text-red-700 transition-colors"
+                                  title="Remove row"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+
+                      {/* Add Row Form */}
+                      {showAddEnergyRow && (
+                        <tr className="border-b border-[#e1e7ef] bg-[#f0fdf4]">
+                          <td className="px-4 py-3 text-center">
+                            <Plus className="w-4 h-4 text-[#059669] mx-auto" />
+                          </td>
+                          <td className="px-4 py-3" colSpan={2}>
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={newEnergyNutrient}
+                                onChange={(e) => setNewEnergyNutrient(e.target.value)}
+                                className="flex-1 px-2 py-1.5 text-sm font-ibm-plex text-[#0f1729] bg-white border border-[#e1e7ef] rounded focus:outline-none focus:ring-1 focus:ring-[#009da5]"
+                              >
+                                <option value="">Select nutrient...</option>
+                                {nutrientNames
+                                  .filter(n => !energyRows.some(r => r.matchNames.includes(n)))
+                                  .map(n => (
+                                    <option key={n} value={n}>{n}</option>
+                                  ))
+                                }
+                              </select>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <select
+                              value={newEnergyType}
+                              onChange={(e) => setNewEnergyType(e.target.value)}
+                              className="px-2 py-1.5 text-xs font-ibm-plex text-[#0f1729] bg-white border border-[#e1e7ef] rounded focus:outline-none focus:ring-1 focus:ring-[#009da5]"
+                            >
+                              <option value="direct">+ Add</option>
+                              <option value="carb_subtract">− Subtract</option>
+                            </select>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <input
+                              type="number"
+                              step="0.5"
+                              min="0"
+                              value={newEnergyMultiplier}
+                              onChange={(e) => setNewEnergyMultiplier(parseFloat(e.target.value) || 0)}
+                              className="w-20 px-2 py-1 text-sm text-center font-ibm-plex text-[#0f1729] bg-white border border-[#e1e7ef] rounded focus:outline-none focus:ring-1 focus:ring-[#009da5]"
+                            />
+                          </td>
+                          <td className="px-4 py-3 text-center" colSpan={2}>
+                            <div className="flex items-center justify-center gap-2">
+                              <button
+                                onClick={addCustomEnergyRow}
+                                disabled={!newEnergyNutrient}
+                                className={`px-3 py-1 text-xs font-ibm-plex font-medium rounded transition-colors ${
+                                  newEnergyNutrient
+                                    ? 'bg-[#009da5] text-white hover:bg-[#008891]'
+                                    : 'bg-[#e1e7ef] text-[#9e9e9e] cursor-not-allowed'
+                                }`}
+                              >
+                                Add
+                              </button>
+                              <button
+                                onClick={() => setShowAddEnergyRow(false)}
+                                className="px-3 py-1 text-xs font-ibm-plex font-medium text-[#65758b] hover:text-[#0f1729] transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </td>
+                          <td></td>
+                        </tr>
+                      )}
+
+                      {/* Total Row */}
+                      <tr className="bg-[#009da5] text-white">
+                        <td colSpan={7} className="px-4 py-3 text-right">
+                          <span className="font-bold">Total Energy</span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className="font-bold tabular-nums">{totalEnergy.toFixed(2)} kcal</span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Action buttons */}
+                <div className="mt-3 flex justify-between">
+                  <button
+                    onClick={() => setShowAddEnergyRow(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-ibm-plex font-medium text-[#009da5] hover:text-[#008891] border border-[#009da5] rounded-md hover:bg-[#e1f4f5] transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add nutrient to energy calc
+                  </button>
+                  <button
+                    onClick={() => setEnergyRows(DEFAULT_ENERGY_ROWS)}
+                    className="px-3 py-1.5 text-xs font-ibm-plex font-medium text-[#65758b] hover:text-[#0f1729] border border-[#e1e7ef] rounded-md hover:bg-[#f1f5f9] transition-colors"
+                  >
+                    Reset to defaults
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Quick Reference Footer */}
+        {ingredients.length > 0 && (
           <div className="bg-white border border-[#e1e7ef] rounded-lg shadow-sm p-4">
-
             <h3 className="text-sm font-ibm-plex font-semibold text-[#0f1729] mb-3">
-
               Energy Conversion Factors
-
             </h3>
-
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs font-ibm-plex text-[#65758b]">
-
-              <div>• Proteins: 4 kcal/g</div>
-
-              <div>• Carbohydrates: 4 kcal/g</div>
-
-              <div>• Dietary Fiber: 2 kcal/g</div>
-
-              <div>• Fats: 9 kcal/g</div>
-
-              <div>• LA (Linoleic Acid): 9 kcal/g</div>
-
-              <div>• SFA/MUFA/PUFA: 9 kcal/g</div>
-
+              <div>• Protein: {energyRows.find(r => r.id === 'protein')?.multiplier ?? 4} kcal/g</div>
+              <div>• Carbohydrates: {energyRows.find(r => r.id === 'carb')?.multiplier ?? 4} kcal/g (gross)</div>
+              <div>• Dietary Fiber: −{energyRows.find(r => r.id === 'fiber')?.multiplier ?? 2} kcal/g (subtracted from carb)</div>
+              <div>• Polyols: −{energyRows.find(r => r.id === 'polyol')?.multiplier ?? 2} kcal/g (subtracted from carb)</div>
+              <div>• Erythritol: 0 kcal/g (−{energyRows.find(r => r.id === 'erythritol')?.multiplier ?? 4} subtracted)</div>
+              <div>• Total Fat: {energyRows.find(r => r.id === 'fat')?.multiplier ?? 9} kcal/g</div>
             </div>
+            <p className="text-xs font-ibm-plex text-[#65758b] mt-2 italic">
+              Carb Energy = (Total Carb × {energyRows.find(r => r.id === 'carb')?.multiplier ?? 4}) − (Fiber × {energyRows.find(r => r.id === 'fiber')?.multiplier ?? 2}) − (Polyol × {energyRows.find(r => r.id === 'polyol')?.multiplier ?? 2}) − (Erythritol × {energyRows.find(r => r.id === 'erythritol')?.multiplier ?? 4})
+            </p>
           </div>
         )}
         </>
@@ -2088,7 +2552,11 @@ const Formulation = () => {
                       min="1"
                       step="1"
                       value={serveSize}
-                      onChange={(e) => setServeSize(parseFloat(e.target.value) || 55)}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setServeSize(val === '' ? '' : (parseFloat(val) || 0))
+                      }}
+                      onBlur={() => { if (!serveSize) setServeSize(55) }}
                       className="w-32 px-3 py-2 text-sm font-ibm-plex text-[#0f1729] bg-[#f9fafb] border border-[#e1e7ef] rounded-md focus:outline-none focus:ring-2 focus:ring-[#009da5]"
                     />
                     <div className="flex gap-2">
@@ -2239,6 +2707,26 @@ const Formulation = () => {
             loadSavedFormulations()
             setSelectedFormulations([])
           }}
+        />
+
+        {/* Ingredient Mapping Modal */}
+        <IngredientMappingModal
+          isOpen={showMappingModal}
+          onClose={() => {
+            if (mappingModalData) {
+              const { ingredientId } = mappingModalData
+              setIngredients(prev => prev.map(ing =>
+                ing.id === ingredientId && Object.keys(ing.nutritional_data).length === 0
+                  ? { ...ing, coa_id: null, coa_name: '' }
+                  : ing
+              ))
+            }
+            setShowMappingModal(false)
+            setMappingModalData(null)
+          }}
+          coaName={mappingModalData?.coaName || ''}
+          nutrients={mappingModalData?.nutrients || []}
+          onConfirm={handleMappingConfirm}
         />
 
       </div>

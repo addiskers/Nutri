@@ -1061,25 +1061,6 @@ def merge_external_rda(structured_json, raw_text, canonical_nomen=None):
 
     return structured_json
 
-def extract_numeric_mrp(mrp_value):
-    if not mrp_value or mrp_value in ("not specified", "", "0.00", 0, 0.0):
-        return None
-    if isinstance(mrp_value, (int, float)):
-        return float(mrp_value) if float(mrp_value) > 0 else None
-    if not isinstance(mrp_value, str):
-        try:
-            return float(mrp_value)
-        except Exception:
-            return None
-    cleaned = re.sub(r"[₹Rs.MRP:INCL\.OFALLTAXES\s]", "", mrp_value, flags=re.IGNORECASE)
-    numbers = re.findall(r"\d+\.?\d*", cleaned)
-    if numbers:
-        try:
-            return float(numbers[0])
-        except Exception:
-            return None
-    return None
-
 def detect_packing_format(text):
     if not isinstance(text, str):
         text = str(text) if text else ""
@@ -1174,7 +1155,7 @@ class ProductCreate(BaseModel):
     serving_size: Optional[str] = None
     servings_per_pack: Optional[str] = None
     packing_format: Optional[str] = None
-    mrp: Optional[float] = None
+    mrp: Optional[str] = None
     uspf: Optional[str] = None
     nutrition_table: List[dict] = []
     nutrition_notes: List[str] = []
@@ -1294,39 +1275,52 @@ async def extract_product_from_images(
         for idx, img_file in enumerate(images):
             filename = img_file.filename
             safe_print(f"[OCR] Processing image {idx + 1}/{len(images)}: {filename}")
-            try:
-                content_bytes = await img_file.read()
-                pil_img = Image.open(BytesIO(content_bytes))
-                if pil_img.mode != "RGB":
-                    pil_img = pil_img.convert("RGB")
-                safe_print(f"[OCR] Image {idx + 1} size: {pil_img.size}")
+            
+            max_ocr_retries = 10
+            base_timeout = 10
+            
+            for retry_attempt in range(1, max_ocr_retries + 1):
+                timeout_duration = base_timeout + (retry_attempt - 1) * 5
+                
+                try:
+                    content_bytes = await img_file.read()
+                    pil_img = Image.open(BytesIO(content_bytes))
+                    if pil_img.mode != "RGB":
+                        pil_img = pil_img.convert("RGB")
+                    safe_print(f"[OCR] Image {idx + 1} size: {pil_img.size} (attempt {retry_attempt}/{max_ocr_retries}, timeout: {timeout_duration}s)")
 
-                ocr_response = await gemini_call_with_retry(
-                    client.models.generate_content,
-                    model=OCR_MODEL,
-                    contents=[OCR_PROMPT, pil_img],
-                    config={
-                        "temperature": 0,
-                        "top_p": 0,
-                        "thinking_config": {"thinking_budget": 0},
-                    },
-                    timeout_s=60,
-                )
+                    ocr_response = await gemini_call_with_retry(
+                        client.models.generate_content,
+                        model=OCR_MODEL,
+                        contents=[OCR_PROMPT, pil_img],
+                        config={
+                            "temperature": 0,
+                            "top_p": 0,
+                            "thinking_config": {"thinking_budget": 0},
+                        },
+                        timeout_s=timeout_duration,
+                    )
 
-                if hasattr(ocr_response, "usage_metadata") and ocr_response.usage_metadata:
-                    um = ocr_response.usage_metadata
-                    ocr_tokens["input"]  += (getattr(um, "prompt_token_count",    None) or 0)
-                    ocr_tokens["output"] += (getattr(um, "candidates_token_count", None) or 0)
+                    if hasattr(ocr_response, "usage_metadata") and ocr_response.usage_metadata:
+                        um = ocr_response.usage_metadata
+                        ocr_tokens["input"]  += (getattr(um, "prompt_token_count", None) or 0)
+                        ocr_tokens["output"] += (getattr(um, "candidates_token_count", None) or 0)
 
-                extracted = ocr_response.text.strip() if ocr_response.text else ""
-                safe_print(f"[OCR] Image {idx + 1} extracted {len(extracted)} chars")
-                if extracted:
-                    raw_text_blocks.append(extracted)
+                    extracted = ocr_response.text.strip() if ocr_response.text else ""
+                    safe_print(f"[OCR] Image {idx + 1} extracted {len(extracted)} chars")
+                    if extracted:
+                        raw_text_blocks.append(extracted)
+                    break
 
-            except asyncio.TimeoutError:
-                safe_print(f"[OCR] Image {idx + 1} timed out after 60s — skipping")
-            except Exception as img_err:
-                safe_print(f"[OCR] Image {idx + 1} failed: {img_err}")
+                except asyncio.TimeoutError:
+                    if retry_attempt < max_ocr_retries:
+                        safe_print(f"[OCR] Image {idx + 1} timed out after {timeout_duration}s (attempt {retry_attempt}/{max_ocr_retries}) — retrying...")
+                        await img_file.seek(0)
+                    else:
+                        safe_print(f"[OCR] Image {idx + 1} timed out after {max_ocr_retries} attempts — skipping")
+                except Exception as img_err:
+                    safe_print(f"[OCR] Image {idx + 1} failed: {img_err}")
+                    break
 
         combined_raw_text = "\n\n".join(raw_text_blocks).strip()
         safe_print(f"[OCR] Combined OCR text length: {len(combined_raw_text)} chars")
@@ -1388,9 +1382,6 @@ async def extract_product_from_images(
             nutrition_block = apply_notes_rda(nutrition_block, canonical_nomen=db_canonical)
 
         pricing = product_data.get("pricing", {})
-        numeric_mrp = extract_numeric_mrp(pricing.get("mrp"))
-        if numeric_mrp is not None:
-            pricing["mrp"] = numeric_mrp
 
         pack_details = product_data.get("pack_details", {})
         # Always clear packing_format — user selects manually on frontend
@@ -1658,6 +1649,22 @@ async def list_products(
             Product.find(query).count(),
         )
 
+        # Resolve created_by user IDs to names
+        user_ids = list({p.created_by for p in products if p.created_by})
+        user_name_map = {}
+        if user_ids:
+            from bson import ObjectId
+            valid_oids = []
+            for uid in user_ids:
+                try:
+                    valid_oids.append(ObjectId(uid))
+                except Exception:
+                    pass
+            if valid_oids:
+                users = await User.find({"_id": {"$in": valid_oids}}).to_list()
+                for u in users:
+                    user_name_map[str(u.id)] = u.name
+
         return {
             "products": [
                 {
@@ -1674,6 +1681,7 @@ async def list_products(
                     "created_at":       p.created_at.isoformat(),
                     "manufacturing_date": p.manufacturing_date,
                     "expiry_date":      p.expiry_date,
+                    "created_by_name":  user_name_map.get(p.created_by, "Admin") if p.created_by else "Admin",
                 }
                 for p in products
             ],

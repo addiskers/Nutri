@@ -480,13 +480,6 @@ const Compare = () => {
     const max = Math.max(...allNums)
     const min = Math.min(...allNums)
 
-    if (numValue === max) {
-      return 'font-semibold text-green-700'
-    }
-    if (numValue === min && allNums.length > 2) {
-      return 'text-yellow-700'
-    }
-
     return ''
   }
 
@@ -1414,19 +1407,7 @@ const getHighlightClass = (value, allValues, field) => {
       .filter(v => !isNaN(v))
 
     if (allNums.length > 1) {
-      const max = Math.max(...allNums)
-      const min = Math.min(...allNums)
-
-      // For price, lower is better
-      if (field === 'mrp' && numValue === min) {
-        return 'bg-green-50 text-green-700 font-medium'
-      }
-      // For nutrients, higher is better
-      if (field !== 'mrp' && numValue === max) {
-        return 'bg-green-50 text-green-700 font-medium'
-      }
-      // Different but not best
-      return 'bg-yellow-50 text-yellow-700'
+      return ''
     }
   }
 

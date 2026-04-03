@@ -1,16 +1,42 @@
-import { useState, useEffect } from 'react'
-import { X, ChevronLeft, ChevronRight, Download, ImageOff } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { X, ChevronLeft, ChevronRight, Download, ImageOff, ZoomIn, ZoomOut } from 'lucide-react'
 
 const ProductPreviewModal = ({ product, isOpen, onClose }) => {
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [imgError, setImgError] = useState(false)
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const isDragging = useRef(false)
+  const dragStart = useRef({ x: 0, y: 0 })
 
   useEffect(() => {
     if (isOpen) {
       setCurrentImageIndex(0)
       setImgError(false)
+      setZoom(1)
+      setPan({ x: 0, y: 0 })
     }
   }, [isOpen, product])
+
+  const resetZoom = () => { setZoom(1); setPan({ x: 0, y: 0 }) }
+
+  const handleWheel = (e) => {
+    e.preventDefault()
+    setZoom(z => Math.min(5, Math.max(1, z + (e.deltaY < 0 ? 0.3 : -0.3))))
+  }
+
+  const handleMouseDown = (e) => {
+    if (zoom <= 1) return
+    isDragging.current = true
+    dragStart.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }
+  }
+
+  const handleMouseMove = (e) => {
+    if (!isDragging.current) return
+    setPan({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y })
+  }
+
+  const handleMouseUp = () => { isDragging.current = false }
 
   if (!isOpen || !product) return null
 
@@ -19,11 +45,13 @@ const ProductPreviewModal = ({ product, isOpen, onClose }) => {
 
   const handlePrevious = () => {
     setImgError(false)
+    resetZoom()
     setCurrentImageIndex((prev) => (prev === 0 ? productImages.length - 1 : prev - 1))
   }
 
   const handleNext = () => {
     setImgError(false)
+    resetZoom()
     setCurrentImageIndex((prev) => (prev === productImages.length - 1 ? 0 : prev + 1))
   }
 
@@ -92,20 +120,44 @@ const ProductPreviewModal = ({ product, isOpen, onClose }) => {
               </p>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             {hasImages && !imgError && (
-              <button
-                onClick={handleDownload}
-                className="flex items-center gap-1.5 px-3 h-8 bg-[#f1f5f9] hover:bg-[#e1e7ef] text-[#0f1729] rounded-md text-sm font-ibm-plex transition-colors"
-                title="Download current image"
-              >
-                <Download className="w-4 h-4" />
-                <span>Download</span>
-              </button>
+              <>
+                <button
+                  onClick={() => setZoom(z => Math.min(5, z + 0.5))}
+                  className="w-8 h-8 flex items-center justify-center rounded-md bg-[#f1f5f9] hover:bg-[#e1e7ef] transition-colors"
+                  title="Zoom in"
+                >
+                  <ZoomIn className="w-4 h-4 text-[#0f1729]" />
+                </button>
+                <button
+                  onClick={() => { setZoom(z => Math.max(1, z - 0.5)); if (zoom <= 1.5) setPan({ x: 0, y: 0 }) }}
+                  className="w-8 h-8 flex items-center justify-center rounded-md bg-[#f1f5f9] hover:bg-[#e1e7ef] transition-colors"
+                  title="Zoom out"
+                >
+                  <ZoomOut className="w-4 h-4 text-[#0f1729]" />
+                </button>
+                {zoom > 1 && (
+                  <button
+                    onClick={resetZoom}
+                    className="px-2 h-8 flex items-center justify-center rounded-md bg-[#f1f5f9] hover:bg-[#e1e7ef] text-xs font-ibm-plex text-[#65758b] transition-colors"
+                    title="Reset zoom"
+                  >
+                    {Math.round(zoom * 100)}%
+                  </button>
+                )}
+                <button
+                  onClick={handleDownload}
+                  className="w-8 h-8 flex items-center justify-center rounded-md bg-[#f1f5f9] hover:bg-[#e1e7ef] transition-colors"
+                  title="Download image"
+                >
+                  <Download className="w-4 h-4 text-[#0f1729]" />
+                </button>
+              </>
             )}
             <button
               onClick={onClose}
-              className="w-8 h-8 flex items-center justify-center rounded hover:bg-gray-100 transition-colors"
+              className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 transition-colors ml-1"
             >
               <X className="w-5 h-5 text-[#0f1729]" />
             </button>
@@ -131,7 +183,15 @@ const ProductPreviewModal = ({ product, isOpen, onClose }) => {
                 <ChevronLeft className="w-6 h-6 text-[#65758b]" />
               </button>
 
-              <div className="w-80 h-80 flex items-center justify-center bg-gray-50 rounded-lg overflow-hidden">
+              <div
+                className="w-80 h-80 flex items-center justify-center bg-gray-50 rounded-lg overflow-hidden"
+                onWheel={handleWheel}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+                style={{ cursor: zoom > 1 ? (isDragging.current ? 'grabbing' : 'grab') : 'zoom-in' }}
+              >
                 {imgError ? (
                   <div className="flex flex-col items-center gap-2">
                     <ImageOff className="w-10 h-10 text-[#b455a0] opacity-30" />
@@ -142,7 +202,13 @@ const ProductPreviewModal = ({ product, isOpen, onClose }) => {
                     key={productImages[currentImageIndex]}
                     src={productImages[currentImageIndex]}
                     alt={`Product image ${currentImageIndex + 1}`}
-                    className="max-w-full max-h-full object-contain"
+                    className="max-w-full max-h-full object-contain select-none"
+                    style={{
+                      transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
+                      transition: isDragging.current ? 'none' : 'transform 0.15s ease',
+                    }}
+                    draggable={false}
+                    onClick={() => { if (zoom === 1) setZoom(2); else resetZoom() }}
                     onError={() => setImgError(true)}
                   />
                 )}

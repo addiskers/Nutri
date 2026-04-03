@@ -5,8 +5,7 @@ import ImageUploadWithCrop from '../components/Forms/ImageUploadWithCrop'
 import NoPermissionContent from '../components/NoPermissionContent'
 import DuplicateWarningModal from '../components/Modals/DuplicateWarningModal'
 import { ArrowLeft, Plus, Save, X, Loader2, Sparkles, Check, AlertCircle, Copy } from 'lucide-react'
-import { mockCategories } from '../utils/mockData'
-import authService, { productService, nomenclatureService } from '../services/api'
+import authService, { productService, nomenclatureService, categoryService } from '../services/api'
 import NutrientMappingDropdown from '../components/NutrientMappingDropdown'
 
 const AddProduct = () => {
@@ -58,6 +57,7 @@ const AddProduct = () => {
   // ── Nomenclature state ──────────────────────────────────────────────────
   const [standardizedNames, setStandardizedNames] = useState([])
   const [nomenclatureMap, setNomenclatureMap] = useState({})
+  const [categories, setCategories] = useState([])
 
   const loadNomenclature = async () => {
     try {
@@ -71,6 +71,19 @@ const AddProduct = () => {
   }
 
   useEffect(() => { loadNomenclature() }, [])
+
+  const loadCategories = async () => {
+    try {
+      const data = await categoryService.getCategories({ limit: 100 })
+      setCategories((data.categories || []).map(category => (
+        typeof category === 'string' ? category : category.name || category.category_name || category.title || ''
+      )).filter(Boolean))
+    } catch (e) {
+      console.error('Failed to load categories:', e)
+    }
+  }
+
+  useEffect(() => { loadCategories() }, [])
 
   const handleCreateNutrient = async (rowId, newNutrientName) => {
     const result = await nomenclatureService.createNomenclature({
@@ -480,7 +493,7 @@ const AddProduct = () => {
         serving_size:    formData.serveSize      || null,
         servings_per_pack: formData.servingsPerPack || null,
         packing_format:  formData.packingFormat  || null,
-        mrp:             formData.mrp ? parseFloat(formData.mrp) : null,
+        mrp:             formData.mrp || null,
         uspf:            formData.uspf           || null,
         veg_nonveg:      formData.vegNonVeg      || null,
         category:        formData.category       || null,
@@ -728,9 +741,9 @@ const AddProduct = () => {
 
                     {/* MRP */}
                     <div>
-                      <label className={labelClass}>MRP (₹)</label>
+                      <label className={labelClass}>MRP</label>
                       <div className="relative">
-                        <input type="number" placeholder="0.00" value={formData.mrp}
+                        <input type="text" placeholder="₹ 0.00" value={formData.mrp}
                           onChange={e => setFormData({ ...formData, mrp: e.target.value })}
                           className={inputClass} />
                         <CopyBtn value={formData.mrp} field="add_mrp" />
@@ -806,7 +819,7 @@ const AddProduct = () => {
                           onChange={e => setFormData({ ...formData, category: e.target.value })}
                           className={inputClass}>
                           <option value="">Select category</option>
-                          {mockCategories.filter(c => c !== 'All Categories').map(c => <option key={c} value={c}>{c}</option>)}
+                          {categories.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                         <CopyBtn value={formData.category} field="add_category" />
                       </div>

@@ -15,6 +15,7 @@ import AddCOA from './pages/AddCOA'
 import COA from './pages/COA'
 import Formulation from './pages/Formulation'
 import NomenclatureMap from './pages/NomenclatureMap'
+import COANomenclatureMap from './pages/COANomenclatureMap'
 import TagsPage from './pages/TagsPage'
 import SettingsPage from './pages/SettingsPage'
 
@@ -85,6 +86,12 @@ function App() {
         <Route path="/formulation" element={
           <ProtectedRoute>
             <Formulation />
+          </ProtectedRoute>
+        } />
+        
+        <Route path="/coa-nomenclature" element={
+          <ProtectedRoute>
+            <COANomenclatureMap />
           </ProtectedRoute>
         } />
         

@@ -28,8 +28,17 @@ class Product(Document):
     packing_format: Optional[str] = None
 
     # ── Pricing ───────────────────────────────────────────────────────────────
-    mrp: Optional[float] = None
+    mrp: Optional[str] = None
     uspf: Optional[str] = None               # Unit Selling Price Format
+
+    @field_validator("mrp", mode="before")
+    @classmethod
+    def coerce_mrp_to_str(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, (int, float)):
+            return str(v)
+        return v
 
     # ── Nutrition ─────────────────────────────────────────────────────────────
     nutrition_table: List[Dict[str, Any]] = Field(default_factory=list)
@@ -151,7 +160,7 @@ class Product(Document):
                 "sub_brand": "Junior Horlicks",
                 "variant": "Chocolate",
                 "net_quantity": "500g",
-                "mrp": 450.00,
+                "mrp": "₹ 450.00",
                 "uspf": "",
                 "veg_nonveg": "veg",
                 "category": "Health Drink"
