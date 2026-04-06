@@ -1,9 +1,11 @@
 """
 COA Routes - Certificate of Analysis Extraction and Management
 """
+import logging
 import os
 import re
 import json
+import unicodedata
 import fitz  # PyMuPDF for PDF handling
 from io import BytesIO
 from typing import List, Optional
@@ -16,6 +18,8 @@ from app.models.user import User
 from app.models.coa import COA
 from app.dependencies.auth import get_current_user, require_permission
 from config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/coa", tags=["COA"])
 
@@ -261,6 +265,35 @@ UNIT_CONVERSIONS = {
 }
 
 
+def canonicalize(label: str) -> str:
+    """Normalize a nutrient label for fuzzy matching: strip units, parens,
+    special chars, normalize spelling and light de-pluralization —
+    mirrors the logic in products.py."""
+    label = unicodedata.normalize("NFKC", label)
+    label = label.lower()
+    SPELLING_MAP = {"fibre": "fiber"}
+    for wrong, correct in SPELLING_MAP.items():
+        label = re.sub(rf"\b{wrong}\b", correct, label)
+    label = re.sub(r"^-+", "", label)
+    label = re.sub(r"\(.*?\)", "", label)
+    label = re.sub(r"[^\w\s:\-]", " ", label)
+    label = re.sub(r"\b(kcal|kj|mg|g|gm|gram|grams|mcg|ug|[μµ]g|%)\b", "", label)
+    label = re.sub(r"^of which[:\s]+", "", label)
+    label = re.sub(r"\s+", " ", label).strip()
+    words = label.split()
+    normalized_words = []
+    for w in words:
+        if len(w) > 3 and w.endswith("s") and not w.endswith(("ss", "us", "ns")):
+            normalized_words.append(w[:-1])
+        else:
+            normalized_words.append(w)
+    return " ".join(normalized_words)
+
+CANONICAL_NOMENCLATURE = {
+    canonicalize(k): v for k, v in NOMENCLATURE_MAP.items()
+}
+
+
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
@@ -277,15 +310,30 @@ def calculate_cost(input_tokens: int, output_tokens: int) -> dict:
     }
 
 
-def standardize_nutrient_name(raw_name: str, db_map: dict | None = None) -> str:
+def standardize_nutrient_name(
+    raw_name: str,
+    db_map: dict | None = None,
+    db_canonical: dict | None = None,
+) -> str:
     """Map raw nutrient name to standardized name.
-    Checks DB-backed map first, then falls back to hardcoded map."""
+    Uses canonicalize() to strip units/punctuation before lookup.
+    Checks DB-backed map first, then canonical hardcoded map."""
     cleaned = raw_name.lower().strip()
     cleaned = re.sub(r"\s*\(.*?\)\s*", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
     if db_map and cleaned in db_map:
         return db_map[cleaned]
-    return NOMENCLATURE_MAP.get(cleaned, raw_name.title())
+    if cleaned in NOMENCLATURE_MAP:
+        return NOMENCLATURE_MAP[cleaned]
+
+    canon = canonicalize(raw_name)
+    if db_canonical and canon in db_canonical:
+        return db_canonical[canon]
+    if canon in CANONICAL_NOMENCLATURE:
+        return CANONICAL_NOMENCLATURE[canon]
+
+    return raw_name.title()
 
 
 def normalize_unit(value: float, from_unit: str, nutrient_name: str) -> tuple:
@@ -336,7 +384,7 @@ def get_nutrient_category(nutrient_name: str) -> str:
     return "Other"
 
 
-def process_extracted_coa(raw_data: dict, db_map: dict | None = None) -> dict:
+def process_extracted_coa(raw_data: dict, db_map: dict | None = None, db_canonical: dict | None = None) -> dict:
     """Post-process extracted COA data: standardize names and normalize units"""
     processed = raw_data.copy()
     
@@ -347,7 +395,7 @@ def process_extracted_coa(raw_data: dict, db_map: dict | None = None) -> dict:
     
     for nutrient in processed["nutritional_data"]:
         raw_name = nutrient.get("nutrient_name_raw", nutrient.get("nutrient_name", ""))
-        std_name = standardize_nutrient_name(raw_name, db_map)
+        std_name = standardize_nutrient_name(raw_name, db_map, db_canonical)
         raw_unit = nutrient.get("unit", nutrient.get("unit_raw", "g"))
         
         normalized_nutrient = {
@@ -410,10 +458,11 @@ EXTRACTION RULES:
 
 1. INGREDIENT IDENTIFICATION:
    - Extract the product/ingredient name exactly as stated
+   - Extract product description if present (brief description of the product)
    - Extract lot/batch number if present
    - Extract manufacturer/supplier name
    - Extract storage condition/instructions if visible (e.g. "Store in cool dry place")
-   - ALL DATES must be in DD/MM/YYYY format
+   - DATES: Preserve dates EXACTLY as printed on the document (e.g. "01.01.2025 TO 20.01.2025", "24 months from the date of production"). Do NOT reformat or parse date ranges — keep the original string.
 
 2. NUTRIENT VALUES - CRITICAL:
    For EACH nutrient found, extract THREE possible values:
@@ -445,6 +494,7 @@ JSON STRUCTURE:
   
   "ingredient_info": {
     "ingredient_name": "exact name from document",
+    "product_description": "brief product description if present or null",
     "product_code": "if present or null",
     "lot_number": "batch/lot number or null",
     "manufacturing_date": "DD/MM/YYYY or null",
@@ -507,6 +557,7 @@ class ExtractedCOAData(BaseModel):
 class COACreate(BaseModel):
     """Schema for creating a COA entry"""
     ingredient_name: str
+    product_description: Optional[str] = None
     product_code: Optional[str] = None
     lot_number: Optional[str] = None
     manufacturing_date: Optional[str] = None
@@ -569,7 +620,7 @@ async def extract_coa_from_images(
         # Check API key
         api_key = settings.GEMINI_API_KEY
         if not api_key:
-            safe_print("[ERROR] Gemini API key not configured")
+            logger.error("Gemini API key not configured")
             raise HTTPException(
                 status_code=500, 
                 detail="Gemini API key not configured. Please set GEMINI_API_KEY in environment."
@@ -587,6 +638,8 @@ async def extract_coa_from_images(
             try:
                 safe_print(f"[COA EXTRACTION] Loading file {idx + 1}/{len(images)}: {img.filename}")
                 content = await img.read()
+                if len(content) > 10 * 1024 * 1024:
+                    raise HTTPException(status_code=400, detail=f"File '{img.filename}' exceeds 10MB limit")
                 
                 # Check if it's a PDF
                 if img.filename.lower().endswith('.pdf'):
@@ -616,10 +669,10 @@ async def extract_coa_from_images(
                     safe_print(f"[COA EXTRACTION] Image {idx + 1} loaded: {pil_img.size} pixels")
                     
             except Exception as e:
-                safe_print(f"[ERROR] Failed to load file {img.filename}: {str(e)}")
+                logger.error(f"Failed to load file {img.filename}: {e}")
                 raise HTTPException(
                     status_code=400, 
-                    detail=f"Invalid file: {img.filename}. Error: {str(e)}"
+                    detail=f"Invalid file: {img.filename}"
                 )
         
         # Call Gemini API
@@ -676,6 +729,7 @@ async def extract_coa_from_images(
         
         # Load DB-backed nomenclature map for standardization
         db_map = None
+        db_canonical = None
         try:
             from app.models.coa_nomenclature import COANomenclatureMapping
             all_mappings = await COANomenclatureMapping.find_all().to_list()
@@ -685,12 +739,13 @@ async def extract_coa_from_images(
                     db_map[m.standardized_name.lower()] = m.standardized_name
                     for raw in m.raw_names:
                         db_map[raw.lower()] = m.standardized_name
+                db_canonical = {canonicalize(k): v for k, v in db_map.items()}
                 safe_print(f"[COA EXTRACTION] Loaded {len(all_mappings)} DB nomenclature mappings")
         except Exception as map_err:
             safe_print(f"[COA EXTRACTION] DB nomenclature not available, using hardcoded: {map_err}")
         
         # Post-process the data
-        processed_data = process_extracted_coa(coa_data, db_map)
+        processed_data = process_extracted_coa(coa_data, db_map, db_canonical)
         
         # Transform to frontend-friendly format
         ingredient_info = processed_data.get("ingredient_info", {})
@@ -698,6 +753,7 @@ async def extract_coa_from_images(
         transformed_data = {
             "ingredient_info": {
                 "ingredient_name": ingredient_info.get("ingredient_name", ""),
+                "product_description": ingredient_info.get("product_description"),
                 "product_code": ingredient_info.get("product_code"),
                 "lot_number": ingredient_info.get("lot_number"),
                 "manufacturing_date": ingredient_info.get("manufacturing_date"),
@@ -723,7 +779,7 @@ async def extract_coa_from_images(
         )
         
     except json.JSONDecodeError as e:
-        safe_print(f"[ERROR] JSON parsing failed: {str(e)}")
+        logger.error(f"JSON parsing failed: {e}")
         return ExtractedCOAData(
             success=False,
             error=f"Failed to parse AI response: {str(e)}"
@@ -731,7 +787,7 @@ async def extract_coa_from_images(
     except HTTPException:
         raise
     except Exception as e:
-        safe_print(f"[ERROR] COA Extraction failed: {str(e)}")
+        logger.error(f"COA Extraction failed: {e}")
         error_msg = f"{type(e).__name__}: {str(e)}"
         return ExtractedCOAData(
             success=False,
@@ -769,6 +825,7 @@ async def create_coa(
         
         new_coa = COA(
             ingredient_name=coa.ingredient_name,
+            product_description=coa.product_description,
             product_code=coa.product_code,
             lot_number=coa.lot_number,
             manufacturing_date=coa.manufacturing_date,
@@ -799,7 +856,8 @@ async def create_coa(
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create COA: {str(e)}")
+        logger.error(f"Failed to create COA: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create COA")
 
 
 @router.get("", response_model=dict)
@@ -817,10 +875,11 @@ async def list_coas(
         if status:
             query["status"] = status
         if search:
+            escaped = re.escape(search)
             query["$or"] = [
-                {"ingredient_name": {"$regex": search, "$options": "i"}},
-                {"supplier_name": {"$regex": search, "$options": "i"}},
-                {"lot_number": {"$regex": search, "$options": "i"}}
+                {"ingredient_name": {"$regex": escaped, "$options": "i"}},
+                {"supplier_name": {"$regex": escaped, "$options": "i"}},
+                {"lot_number": {"$regex": escaped, "$options": "i"}}
             ]
         
         coas = await COA.find(query).skip(skip).limit(limit).to_list()
@@ -852,7 +911,8 @@ async def list_coas(
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch COAs: {str(e)}")
+        logger.error(f"Failed to fetch COAs: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch COAs")
 
 
 @router.get("/{coa_id}", response_model=dict)
@@ -871,6 +931,7 @@ async def get_coa(
         return {
             "id": str(coa.id),
             "ingredient_name": coa.ingredient_name,
+            "product_description": coa.product_description,
             "product_code": coa.product_code,
             "lot_number": coa.lot_number,
             "manufacturing_date": coa.manufacturing_date,
@@ -893,7 +954,8 @@ async def get_coa(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch COA: {str(e)}")
+        logger.error(f"Failed to fetch COA: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch COA")
 
 
 @router.put("/{coa_id}", response_model=dict)
@@ -949,7 +1011,8 @@ async def update_coa(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update COA: {str(e)}")
+        logger.error(f"Failed to update COA: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update COA")
 
 
 @router.delete("/{coa_id}", response_model=dict)
@@ -975,5 +1038,6 @@ async def delete_coa(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete COA: {str(e)}")
+        logger.error(f"Failed to delete COA: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete COA")
 

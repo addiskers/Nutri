@@ -1,6 +1,7 @@
 """
 Nomenclature Mapping Routes - CRUD operations for nutrition name standardization
 """
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -8,6 +9,8 @@ from pydantic import BaseModel
 from app.models.nomenclature import NomenclatureMapping
 from app.models.user import User
 from app.dependencies.auth import get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/nomenclature", tags=["Nomenclature"])
 
@@ -68,9 +71,10 @@ async def create_nomenclature(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to create nomenclature mapping: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to create nomenclature mapping: {str(e)}"
+            detail="Failed to create nomenclature mapping"
         )
 
 
@@ -80,7 +84,8 @@ async def create_nomenclature(
 @router.get("", response_model=dict)
 async def list_nomenclature(
     skip: int = 0,
-    limit: int = 100
+    limit: int = 100,
+    current_user: User = Depends(get_current_user)
 ):
     """List all nomenclature mappings"""
     try:
@@ -102,14 +107,15 @@ async def list_nomenclature(
         }
         
     except Exception as e:
+        logger.error(f"Failed to fetch nomenclature mappings: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch nomenclature mappings: {str(e)}"
+            detail="Failed to fetch nomenclature mappings"
         )
 
 
 @router.get("/map", response_model=dict)
-async def get_nomenclature_map():
+async def get_nomenclature_map(current_user: User = Depends(get_current_user)):
     """Get all mappings as a dictionary for quick lookup"""
     try:
         mappings = await NomenclatureMapping.find_all().to_list()
@@ -129,14 +135,15 @@ async def get_nomenclature_map():
         }
         
     except Exception as e:
+        logger.error(f"Failed to build nomenclature map: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to build nomenclature map: {str(e)}"
+            detail="Failed to build nomenclature map"
         )
 
 
 @router.get("/{mapping_id}", response_model=dict)
-async def get_nomenclature(mapping_id: str):
+async def get_nomenclature(mapping_id: str, current_user: User = Depends(get_current_user)):
     """Get a specific nomenclature mapping"""
     try:
         from bson import ObjectId
@@ -156,9 +163,10 @@ async def get_nomenclature(mapping_id: str):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to fetch nomenclature mapping: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch nomenclature mapping: {str(e)}"
+            detail="Failed to fetch nomenclature mapping"
         )
 
 
@@ -209,9 +217,10 @@ async def update_nomenclature(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to update nomenclature mapping: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to update nomenclature mapping: {str(e)}"
+            detail="Failed to update nomenclature mapping"
         )
 
 
@@ -251,9 +260,10 @@ async def add_synonym(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to add synonym: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to add synonym: {str(e)}"
+            detail="Failed to add synonym"
         )
 
 
@@ -293,9 +303,10 @@ async def remove_synonym(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to remove synonym: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to remove synonym: {str(e)}"
+            detail="Failed to remove synonym"
         )
 
 
@@ -324,9 +335,10 @@ async def delete_nomenclature(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to delete nomenclature mapping: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to delete nomenclature mapping: {str(e)}"
+            detail="Failed to delete nomenclature mapping"
         )
 
 
@@ -381,9 +393,10 @@ async def seed_nomenclature(
         }
 
     except Exception as e:
+        logger.error(f"Failed to seed nomenclature: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to seed nomenclature: {str(e)}"
+            detail="Failed to seed nomenclature"
         )
 
 

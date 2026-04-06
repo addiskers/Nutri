@@ -76,10 +76,7 @@ const COANomenclatureMap = () => {
   }
 
   const handleAddSynonym = (group) => {
-    const existingStandardName = group.mappings.length > 0
-      ? group.mappings[0].standardName
-      : ''
-    setSelectedGroup({ ...group, existingStandardName })
+    setSelectedGroup({ ...group, existingStandardName: group.name })
     setShowAddSynonymModal(true)
   }
 
@@ -345,7 +342,6 @@ const COANomenclatureMap = () => {
                         <div className="text-xs font-ibm-plex font-medium text-[#65758b]">
                           {group.mappedCount} synonym{group.mappedCount !== 1 ? 's' : ''}
                           {group.targetUnit && <span className="ml-2 text-[#009da5]">({group.targetUnit})</span>}
-                          {group.category && <span className="ml-2 text-[#b455a0]">{group.category}</span>}
                         </div>
                       </div>
                       {expandedGroups[group.id] ? (

@@ -2,12 +2,15 @@
 Saved Formulations API Routes
 CRUD operations for saved formulation configurations
 """
+import logging
 from fastapi import APIRouter, HTTPException, status, Depends
 from typing import Optional
 from datetime import datetime, timezone
 from app.models.formulation import SavedFormulation
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.dependencies.auth import get_current_user, require_permission
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/formulations", tags=["Formulations"])
 
@@ -30,7 +33,6 @@ async def save_formulation(
         serve_size = data.get("serve_size", 30.0)
         nutrient_selections = data.get("nutrient_selections", {})
         custom_values = data.get("custom_values", {})
-        created_by = data.get("created_by", "admin")
         
         formulation = SavedFormulation(
             name=name,
@@ -38,7 +40,7 @@ async def save_formulation(
             nutrient_selections=nutrient_selections,
             custom_values=custom_values,
             serve_size=serve_size,
-            created_by=created_by,
+            created_by=current_user.email,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
             status="active"
@@ -54,8 +56,8 @@ async def save_formulation(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[ERROR] Save formulation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Save formulation failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save formulation")
 
 
 @router.get("/list")
@@ -63,23 +65,20 @@ async def list_formulations(
     skip: int = 0, 
     limit: int = 100,
     created_by: Optional[str] = None,
-    current_user_email: Optional[str] = None,
-    is_super_admin: bool = False
+    current_user: User = Depends(get_current_user)
 ):
     """
-    List saved formulations
-    - Super Admin: sees all formulations, can filter by user
-    - Other users: see only their own formulations
+    List saved formulations.
+    Super Admin sees all; others see only their own.
     """
     try:
+        is_super_admin = current_user.role == UserRole.SUPER_ADMIN
         query_filters = [SavedFormulation.status == "active"]
         
-        # If Super Admin and filtering by specific user
         if is_super_admin and created_by:
             query_filters.append(SavedFormulation.created_by == created_by)
-        # If not Super Admin, only show user's own formulations
-        elif not is_super_admin and current_user_email:
-            query_filters.append(SavedFormulation.created_by == current_user_email)
+        elif not is_super_admin:
+            query_filters.append(SavedFormulation.created_by == current_user.email)
         
         formulations = await SavedFormulation.find(*query_filters).sort("-created_at").skip(skip).limit(limit).to_list()
         total = await SavedFormulation.find(*query_filters).count()
@@ -101,12 +100,15 @@ async def list_formulations(
             "total": total
         }
     except Exception as e:
-        print(f"[ERROR] List formulations failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"List formulations failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list formulations")
 
 
 @router.get("/{formulation_id}")
-async def get_formulation(formulation_id: str):
+async def get_formulation(
+    formulation_id: str,
+    current_user: User = Depends(get_current_user)
+):
     """Get a single saved formulation with full ingredient data"""
     try:
         from bson import ObjectId
@@ -114,6 +116,10 @@ async def get_formulation(formulation_id: str):
         
         if not formulation:
             raise HTTPException(status_code=404, detail="Formulation not found")
+        
+        is_super_admin = current_user.role == UserRole.SUPER_ADMIN
+        if not is_super_admin and formulation.created_by != current_user.email:
+            raise HTTPException(status_code=403, detail="Access denied")
         
         return {
             "id": str(formulation.id),
@@ -129,19 +135,26 @@ async def get_formulation(formulation_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[ERROR] Get formulation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Get formulation failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get formulation")
 
 
 @router.delete("/{formulation_id}")
-async def delete_formulation(formulation_id: str):
-    """Delete a saved formulation"""
+async def delete_formulation(
+    formulation_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a saved formulation (owner or Super Admin only)"""
     try:
         from bson import ObjectId
         formulation = await SavedFormulation.get(ObjectId(formulation_id))
         
         if not formulation:
             raise HTTPException(status_code=404, detail="Formulation not found")
+        
+        is_super_admin = current_user.role == UserRole.SUPER_ADMIN
+        if not is_super_admin and formulation.created_by != current_user.email:
+            raise HTTPException(status_code=403, detail="Access denied")
         
         await formulation.delete()
         
@@ -152,20 +165,19 @@ async def delete_formulation(formulation_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[ERROR] Delete formulation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Delete formulation failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete formulation")
 
 
 @router.post("/{formulation_id}/transfer")
-async def transfer_formulation(formulation_id: str, data: dict):
+async def transfer_formulation(
+    formulation_id: str,
+    data: dict,
+    current_user: User = Depends(get_current_user)
+):
     """
-    Transfer formulation ownership to another user or multiple users
-    
-    Request body:
-    {
-        "target_users": ["user_email1@example.com", "user_email2@example.com"],
-        "transfer_type": "copy"  # or "move"
-    }
+    Transfer formulation ownership to another user or multiple users.
+    Only owner or Super Admin can transfer.
     """
     try:
         from bson import ObjectId
@@ -183,6 +195,10 @@ async def transfer_formulation(formulation_id: str, data: dict):
         
         if not formulation:
             raise HTTPException(status_code=404, detail="Formulation not found")
+        
+        is_super_admin = current_user.role == UserRole.SUPER_ADMIN
+        if not is_super_admin and formulation.created_by != current_user.email:
+            raise HTTPException(status_code=403, detail="Access denied")
         
         transferred_count = 0
         
@@ -216,5 +232,5 @@ async def transfer_formulation(formulation_id: str, data: dict):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[ERROR] Transfer formulation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Transfer formulation failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to transfer formulation")

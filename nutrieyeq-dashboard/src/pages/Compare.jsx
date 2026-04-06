@@ -85,16 +85,15 @@ const Compare = () => {
       allergensArr = allergenRaw
     }
 
-    // Parse nutrition_table — keep full dynamic values per row
-    // Prefer original_name for display; fall back to nutrient_name only if original_name is empty/null
+    // Parse nutrition_table — use nutrient_name (standardized/mapped) as the key
+    // so "Energy^" and "Energy" both merge under "Energy (kcal)"
     const nutritionRows = []
     if (Array.isArray(p.nutrition_table)) {
       p.nutrition_table.forEach(row => {
         const stdName = row.nutrient_name || row.nutrient || ''
-        let name = (row.original_name && row.original_name.trim()) ? row.original_name.trim() : stdName
+        let name = stdName
         let unit = row.unit || ''
         if (name) {
-          // Strip unit from name if already embedded, e.g. "Energy (kcal)" → "Energy", unit "kcal"
           if (unit) {
             const suffix = ` (${unit})`
             if (name.endsWith(suffix)) name = name.slice(0, -suffix.length)
@@ -102,7 +101,12 @@ const Compare = () => {
             const match = name.match(/^(.+?)\s*\(([^)]+)\)$/)
             if (match) { name = match[1].trim(); unit = match[2].trim() }
           }
-          nutritionRows.push({ nutrient: name, stdName: stdName || name, unit, values: row.values || {} })
+          const existing = nutritionRows.find(r => r.nutrient === name)
+          if (existing) {
+            Object.assign(existing.values, row.values || {})
+          } else {
+            nutritionRows.push({ nutrient: name, stdName: stdName || name, unit, values: row.values || {} })
+          }
         }
       })
     }
@@ -168,7 +172,6 @@ const Compare = () => {
       category: p.category || '',
       vegNonVeg: p.veg_nonveg || '',
       claims: Array.isArray(p.claims) ? p.claims : [],
-      tags: Array.isArray(p.tags) ? p.tags : [],
       // Nutrition
       nutritionRows,
       nutritionNotes,
@@ -275,7 +278,6 @@ const Compare = () => {
       { label: 'Category', key: 'category' },
       { label: 'Veg/Non-Veg', key: 'vegNonVeg' },
       { label: 'Claims on Pack', key: 'claims', isArray: true },
-      { label: 'Tags', key: 'tags', isArray: true },
       { label: 'Ingredients', key: 'ingredients', section: 'Composition', isArray: true },
       { label: 'Allergens', key: 'allergens', isArray: true },
       { label: 'Storage Condition', key: 'storageCondition', section: 'Storage & Usage' },
@@ -885,17 +887,6 @@ const Compare = () => {
                               {selectedProducts.map((product, index) => (
                                 <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
                                   <div>{product.claims?.length > 0 ? product.claims.join(', ') : 'Not specified'}</div>
-                                </td>
-                              ))}
-                            </tr>
-                            {/* Tags */}
-                            <tr>
-                              <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
-                                Tags
-                              </td>
-                              {selectedProducts.map((product, index) => (
-                                <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
-                                  <div>{product.tags?.length > 0 ? product.tags.join(', ') : 'Not specified'}</div>
                                 </td>
                               ))}
                             </tr>

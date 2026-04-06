@@ -1,6 +1,7 @@
 """
 COA Nomenclature Mapping Routes - CRUD for COA-specific nutrient name standardization
 """
+import re
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -68,12 +69,14 @@ async def list_coa_nomenclature(
     skip: int = 0,
     limit: int = 200,
     search: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
 ):
     query = {}
     if search:
+        escaped = re.escape(search)
         query["$or"] = [
-            {"standardized_name": {"$regex": search, "$options": "i"}},
-            {"raw_names": {"$regex": search, "$options": "i"}},
+            {"standardized_name": {"$regex": escaped, "$options": "i"}},
+            {"raw_names": {"$regex": escaped, "$options": "i"}},
         ]
 
     mappings = await COANomenclatureMapping.find(query).skip(skip).limit(limit).to_list()
@@ -97,7 +100,7 @@ async def list_coa_nomenclature(
 
 
 @router.get("/map", response_model=dict)
-async def get_coa_nomenclature_map():
+async def get_coa_nomenclature_map(current_user: User = Depends(get_current_user)):
     """Reverse lookup map: raw_name (lower) -> standardized_name"""
     mappings = await COANomenclatureMapping.find_all().to_list()
 
@@ -118,8 +121,58 @@ async def get_coa_nomenclature_map():
     }
 
 
+class ResolveRequest(BaseModel):
+    raw_names: List[str]
+
+
+@router.post("/resolve", response_model=dict)
+async def resolve_raw_names(data: ResolveRequest, current_user: User = Depends(get_current_user)):
+    """Fuzzy-resolve a list of raw nutrient names to standardized names
+    using the same canonicalize logic as COA extraction."""
+    from app.routes.coa import canonicalize, NOMENCLATURE_MAP, CANONICAL_NOMENCLATURE
+
+    mappings = await COANomenclatureMapping.find_all().to_list()
+
+    exact_map = {}
+    for m in mappings:
+        exact_map[m.standardized_name.lower()] = m.standardized_name
+        for raw in m.raw_names:
+            exact_map[raw.lower()] = m.standardized_name
+
+    db_canonical = {}
+    for m in mappings:
+        db_canonical[canonicalize(m.standardized_name)] = m.standardized_name
+        for raw in m.raw_names:
+            db_canonical[canonicalize(raw)] = m.standardized_name
+
+    resolved = {}
+    for raw in data.raw_names:
+        name = raw.strip()
+        lower = name.lower()
+
+        if lower in exact_map:
+            resolved[raw] = exact_map[lower]
+            continue
+
+        canon = canonicalize(name)
+        if canon in db_canonical:
+            resolved[raw] = db_canonical[canon]
+            continue
+        if canon in CANONICAL_NOMENCLATURE:
+            resolved[raw] = CANONICAL_NOMENCLATURE[canon]
+            continue
+
+        if lower in NOMENCLATURE_MAP:
+            resolved[raw] = NOMENCLATURE_MAP[lower]
+            continue
+
+        resolved[raw] = None
+
+    return {"resolved": resolved}
+
+
 @router.get("/{mapping_id}", response_model=dict)
-async def get_coa_nomenclature(mapping_id: str):
+async def get_coa_nomenclature(mapping_id: str, current_user: User = Depends(get_current_user)):
     from bson import ObjectId
     mapping = await COANomenclatureMapping.get(ObjectId(mapping_id))
     if not mapping:

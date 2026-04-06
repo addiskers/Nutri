@@ -1,6 +1,7 @@
 """
 Category Management Routes - CRUD operations for product categories
 """
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -8,6 +9,8 @@ from pydantic import BaseModel
 from app.models.category import Category
 from app.models.user import User
 from app.dependencies.auth import get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/categories", tags=["Categories"])
 
@@ -61,9 +64,10 @@ async def create_category(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to create category: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to create category: {str(e)}"
+            detail="Failed to create category"
         )
 
 
@@ -73,7 +77,8 @@ async def create_category(
 @router.get("", response_model=dict)
 async def list_categories(
     skip: int = 0,
-    limit: int = 100
+    limit: int = 100,
+    current_user: User = Depends(get_current_user)
 ):
     """List all categories"""
     try:
@@ -94,14 +99,15 @@ async def list_categories(
         }
         
     except Exception as e:
+        logger.error(f"Failed to fetch categories: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch categories: {str(e)}"
+            detail="Failed to fetch categories"
         )
 
 
 @router.get("/{category_id}", response_model=dict)
-async def get_category(category_id: str):
+async def get_category(category_id: str, current_user: User = Depends(get_current_user)):
     """Get a specific category"""
     try:
         from bson import ObjectId
@@ -121,9 +127,10 @@ async def get_category(category_id: str):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to fetch category: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch category: {str(e)}"
+            detail="Failed to fetch category"
         )
 
 
@@ -172,9 +179,10 @@ async def update_category(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to update category: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to update category: {str(e)}"
+            detail="Failed to update category"
         )
 
 
@@ -203,9 +211,10 @@ async def delete_category(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to delete category: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to delete category: {str(e)}"
+            detail="Failed to delete category"
         )
 
 

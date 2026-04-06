@@ -15,7 +15,8 @@ class Database:
     
     @classmethod
     async def connect_db(cls):
-        print(f"[*] Connecting to MongoDB at {settings.MONGODB_URL}...")
+        masked_url = settings.MONGODB_URL.split('@')[-1] if '@' in settings.MONGODB_URL else settings.MONGODB_URL
+        print(f"[*] Connecting to MongoDB at {masked_url}...")
         
         cls.client = AsyncIOMotorClient(settings.MONGODB_URL)
         await init_beanie(

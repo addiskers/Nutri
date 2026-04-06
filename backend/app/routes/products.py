@@ -2,6 +2,7 @@
 Product Routes - Two-Step OCR + Structure Pipeline
 """
 import asyncio
+import logging
 import os
 import re
 import unicodedata
@@ -21,6 +22,8 @@ from app.dependencies.auth import get_current_user
 router = APIRouter(prefix="/products", tags=["Products"])
 
 from config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 # ============================================================
 # CONFIGURATION
@@ -1284,6 +1287,8 @@ async def extract_product_from_images(
                 
                 try:
                     content_bytes = await img_file.read()
+                    if len(content_bytes) > 10 * 1024 * 1024:
+                        raise HTTPException(status_code=400, detail=f"File '{img_file.filename}' exceeds 10MB limit")
                     pil_img = Image.open(BytesIO(content_bytes))
                     if pil_img.mode != "RGB":
                         pil_img = pil_img.convert("RGB")
@@ -1477,19 +1482,14 @@ async def extract_product_from_images(
         return ExtractedProductData(success=True, data=transformed_data, cost=cost_info)
         
     except json.JSONDecodeError as e:
-        safe_print(f"[ERROR] JSON parse failed: {e}")
+        logger.error(f"[ERROR] JSON parse failed: {e}")
         return ExtractedProductData(success=False, error=f"Failed to parse AI response: {e}")
 
     except HTTPException:
         raise
 
     except Exception as e:
-        safe_print(f"[ERROR] {type(e).__name__}: {e}")
-        import traceback
-        try:
-            safe_print(traceback.format_exc())
-        except Exception:
-            pass
+        logger.error(f"[ERROR] {type(e).__name__}: {e}", exc_info=True)
         error_msg = f"{type(e).__name__}: {str(e)}"
         try:
             error_msg = error_msg.encode("ascii", "replace").decode("ascii")
@@ -1555,11 +1555,12 @@ async def create_product(
         return {"success": True, "message": "Product created successfully", "product_id": str(new_product.id)}
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create product: {e}")
+        logger.error(f"Failed to create product: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create product")
 
 
 @router.get("/stats", response_model=dict)
-async def get_product_stats():
+async def get_product_stats(current_user: User = Depends(get_current_user)):
     """Dashboard stats: counts, recent 7 products, category breakdown — all in one DB round-trip."""
     try:
         now = datetime.now(timezone.utc)
@@ -1602,11 +1603,12 @@ async def get_product_stats():
             ],
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch stats: {e}")
+        logger.error(f"Failed to fetch stats: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch stats")
 
 
 @router.get("/brands", response_model=dict)
-async def get_brands():
+async def get_brands(current_user: User = Depends(get_current_user)):
     """Return all distinct parent_brand values (for filter dropdown)."""
     try:
         results = await Product.find().aggregate([
@@ -1616,7 +1618,8 @@ async def get_brands():
         ]).to_list()
         return {"brands": [r["_id"] for r in results if r["_id"]]}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch brands: {e}")
+        logger.error(f"Failed to fetch brands: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch brands")
 
 
 @router.get("", response_model=dict)
@@ -1627,6 +1630,7 @@ async def list_products(
     status: Optional[str] = None,
     brand: Optional[str] = None,
     search: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
 ):
     """List products with server-side filtering, sorting, and pagination."""
     try:
@@ -1638,10 +1642,11 @@ async def list_products(
         if brand:
             query["parent_brand"] = brand
         if search:
+            escaped = re.escape(search)
             query["$or"] = [
-                {"product_name":  {"$regex": search, "$options": "i"}},
-                {"parent_brand":  {"$regex": search, "$options": "i"}},
-                {"variant":       {"$regex": search, "$options": "i"}},
+                {"product_name":  {"$regex": escaped, "$options": "i"}},
+                {"parent_brand":  {"$regex": escaped, "$options": "i"}},
+                {"variant":       {"$regex": escaped, "$options": "i"}},
             ]
         
         products, total = await asyncio.gather(
@@ -1691,7 +1696,8 @@ async def list_products(
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch products: {e}")
+        logger.error(f"Failed to fetch products: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch products")
 
 
 @router.get("/{product_id}", response_model=dict)
@@ -1762,7 +1768,8 @@ async def get_product(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch product: {e}")
+        logger.error(f"Failed to fetch product: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch product")
 
 
 @router.put("/{product_id}", response_model=dict)
@@ -1793,7 +1800,8 @@ async def update_product(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update product: {e}")
+        logger.error(f"Failed to update product: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update product")
 
 
 @router.delete("/{product_id}", response_model=dict)
@@ -1814,4 +1822,5 @@ async def delete_product(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete product: {e}")
+        logger.error(f"Failed to delete product: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete product")

@@ -1,12 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import Layout from '../components/Layout/Layout'
 import DuplicateWarningModal from '../components/Modals/DuplicateWarningModal'
 import { ArrowLeft, Save, X, Copy, Check } from 'lucide-react'
-import { nomenclatureService, categoryService } from '../services/api'
+import { apiRequest, nomenclatureService, categoryService } from '../services/api'
 import NutrientMappingDropdown from '../components/NutrientMappingDropdown'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 const EditProduct = () => {
   const navigate = useNavigate()
   const { id }   = useParams()
@@ -20,18 +19,14 @@ const EditProduct = () => {
     serveSize: '', category: '', vegNonVeg: '', packingFormat: ''
   })
 
-  // ── Claims / Tags ──────────────────────────────────────────────────────────
+  // ── Claims ─────────────────────────────────────────────────────────────────
   const [claims, setClaims]             = useState([])
   const [newClaim, setNewClaim]         = useState('')
-  const predefinedTags = [
-    'Kids Nutrition','Dairy Mix','Protein Drink','Sugar Free','Gluten Free',
-    'Organic','High Protein','Low Fat','Fortified','Natural',
-    'Premium','Value Pack','Personal Care','Hygiene','Sanitizer','IMA Recommended'
-  ]
-  const [selectedTags, setSelectedTags] = useState([])
 
   // ── Nutrition ──────────────────────────────────────────────────────────────
   const [nutritionRows, setNutritionRows]       = useState([])
+  const nutritionRowsRef = useRef(nutritionRows)
+  useEffect(() => { nutritionRowsRef.current = nutritionRows }, [nutritionRows])
   const [nutritionNotes, setNutritionNotes]     = useState([])
   const [newNutritionNote, setNewNutritionNote] = useState('')
 
@@ -67,9 +62,11 @@ const EditProduct = () => {
   useEffect(() => { loadCategories() }, [])
 
   const handleCreateNutrient = async (rowId, newNutrientName) => {
+    const row = nutritionRowsRef.current.find(r => r.id === rowId)
+    const rawName = row?.originalName?.trim()
     const result = await nomenclatureService.createNomenclature({
       standardized_name: newNutrientName,
-      raw_names: []
+      raw_names: rawName ? [rawName] : []
     })
     if (result.success !== false) {
       await loadNomenclature()
@@ -172,9 +169,6 @@ const EditProduct = () => {
   const handleRemoveBarcode= makeChipRemover(barcodes,      setBarcodes)
   const handleRemoveCert   = makeChipRemover(certifications, setCertifications)
 
-  const handleTagToggle = (tag) =>
-    setSelectedTags(selectedTags.includes(tag) ? selectedTags.filter(t => t !== tag) : [...selectedTags, tag])
-
   // ── Nutrition helpers ──────────────────────────────────────────────────────
   const handleAddNutritionRow = () => {
     const emptyValues = {}
@@ -182,24 +176,18 @@ const EditProduct = () => {
     setNutritionRows([...nutritionRows, { id: Date.now(), nutrient: '', originalName: '', unit: '', values: emptyValues }])
   }
   const handleNutritionChange = (id, field, value) =>
-    setNutritionRows(nutritionRows.map(r => r.id === id ? { ...r, [field]: value } : r))
+    setNutritionRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r))
   const handleNutritionValueChange = (id, colKey, value) =>
-    setNutritionRows(nutritionRows.map(r => r.id === id ? { ...r, values: { ...r.values, [colKey]: value } } : r))
+    setNutritionRows(prev => prev.map(r => r.id === id ? { ...r, values: { ...r.values, [colKey]: value } } : r))
   const handleRemoveNutritionRow = (id) =>
-    setNutritionRows(nutritionRows.filter(r => r.id !== id))
+    setNutritionRows(prev => prev.filter(r => r.id !== id))
 
   // ── Load product ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!id) return
     const loadProduct = async () => {
       try {
-        const resp = await fetch(`${API_BASE_URL}/products/${id}`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-            'Content-Type': 'application/json',
-            'ngrok-skip-browser-warning': '69420'
-          }
-        })
+        const resp = await apiRequest(`/products/${id}`)
         if (!resp.ok) throw new Error('Failed to load product')
         const p = await resp.json()
 
@@ -332,9 +320,6 @@ const EditProduct = () => {
         if (Array.isArray(p.regulatory_text))      setRegulatoryText(p.regulatory_text.join('\n'))
         if (Array.isArray(p.other_important_text))  setOtherImportantText(p.other_important_text.join('\n'))
 
-        // Tags
-        if (Array.isArray(p.tags)) setSelectedTags(p.tags)
-
       } catch (err) {
         console.error('[EDIT] Error loading product:', err)
         alert('Failed to load product: ' + err.message)
@@ -376,10 +361,7 @@ const EditProduct = () => {
 
   const findDuplicate = async (name) => {
     try {
-      const token = localStorage.getItem('access_token')
-      const resp = await fetch(`${API_BASE_URL}/products?search=${encodeURIComponent(name)}&limit=20`, {
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '69420' }
-      })
+      const resp = await apiRequest(`/products?search=${encodeURIComponent(name)}&limit=20`)
       const res = await resp.json()
       const candidates = res?.products || []
       for (const p of candidates) {
@@ -487,17 +469,11 @@ const EditProduct = () => {
         regulatory_text:      regulatoryText.split('\n').filter(Boolean),
         other_important_text: otherImportantText.split('\n').filter(Boolean),
 
-        tags:   selectedTags,
         status: 'published',
       }
 
-      const resp = await fetch(`${API_BASE_URL}/products/${id}`, {
+      const resp = await apiRequest(`/products/${id}`, {
         method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        },
         body: JSON.stringify(productData)
       })
       const result = await resp.json()
@@ -710,18 +686,6 @@ const EditProduct = () => {
                 {claims.length > 0 && <ChipList items={claims} onRemove={handleRemoveClaim} colorClass="bg-primary/10 border border-primary/20 text-[#0f1729]" />}
               </div>
 
-              {/* Tags */}
-              <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
-                <SectionHeader title="Tags" copyValue={selectedTags.join(', ')} copyField="tags" />
-                <div className="flex flex-wrap gap-2">
-                  {predefinedTags.map((tag, idx) => (
-                    <button key={idx} onClick={() => handleTagToggle(tag)}
-                      className={`px-3 py-1 rounded-full transition-colors ${selectedTags.includes(tag) ? 'bg-primary/10 border-2 border-primary' : 'border border-[#e1e7ef] hover:border-primary/50'}`}>
-                      <span className={`text-xs font-ibm-plex font-semibold ${selectedTags.includes(tag) ? 'text-primary' : 'text-[#0f1729]'}`}>{tag}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
           )}
 

@@ -1,15 +1,16 @@
+import os
+import sys
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
 from typing import Optional
-import secrets
 
 
 class Settings(BaseSettings):
     MONGODB_URL: str = "mongodb://localhost:27017"
     DATABASE_NAME: str = "nutrieyeq"
-    SECRET_KEY: str = secrets.token_hex(32)
+    SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 240
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     SUPER_ADMIN_EMAILS: str = ""
     SMTP_HOST: str = ""
@@ -26,6 +27,15 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     GEMINI_API_KEY: Optional[str] = None
     
+    @field_validator('SECRET_KEY', mode='before')
+    @classmethod
+    def validate_secret_key(cls, v):
+        if not v or len(str(v)) < 32:
+            print("\n[FATAL] SECRET_KEY environment variable is missing or too short (min 32 chars).")
+            print("  Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\"")
+            sys.exit(1)
+        return v
+
     @field_validator('DEBUG', mode='before')
     @classmethod
     def parse_debug(cls, v):

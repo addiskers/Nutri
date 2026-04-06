@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { X, Users, Copy, ArrowRight, CheckCircle, AlertCircle, Search, Filter } from 'lucide-react'
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+import { apiRequest } from '../../services/api'
 
 const TransferFormulationModal = ({ isOpen, onClose, formulations = [], onTransferComplete }) => {
   const [users, setUsers] = useState([])
@@ -24,14 +23,7 @@ const TransferFormulationModal = ({ isOpen, onClose, formulations = [], onTransf
 
   const fetchUsers = async () => {
     try {
-      const token = localStorage.getItem('access_token')
-      const response = await fetch(`${API_BASE_URL}/users?page=1&page_size=100`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        }
-      })
+      const response = await apiRequest('/users?page=1&page_size=100')
 
       if (response.ok) {
         const data = await response.json()
@@ -88,20 +80,13 @@ const TransferFormulationModal = ({ isOpen, onClose, formulations = [], onTransf
     setSuccess('')
 
     try {
-      const token = localStorage.getItem('access_token')
       let successCount = 0
       let errorCount = 0
 
-      // Transfer each formulation
       for (const formulation of formulations) {
         try {
-          const response = await fetch(`${API_BASE_URL}/formulations/${formulation.id}/transfer`, {
+          const response = await apiRequest(`/formulations/${formulation.id}/transfer`, {
             method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json',
-              'ngrok-skip-browser-warning': '69420'
-            },
             body: JSON.stringify({
               target_users: selectedUsers,
               transfer_type: transferType

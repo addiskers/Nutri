@@ -1,4 +1,5 @@
-from fastapi import Request, HTTPException, status
+from fastapi import Request, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -12,8 +13,13 @@ limiter = Limiter(key_func=get_remote_address)
 
 def configure_cors(app):
     if settings.DEBUG:
-        allowed_origins = ["*"]
-        print("[WARNING] CORS allows all origins (DEBUG=True)")
+        allowed_origins = [
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:3000",
+        ]
+        print(f"[WARNING] CORS debug origins: {allowed_origins}")
     else:
         allowed_origins = [
             settings.FRONTEND_URL,
@@ -25,8 +31,8 @@ def configure_cors(app):
         allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allow_headers=["*"],
-        expose_headers=["*"]
+        allow_headers=["Authorization", "Content-Type", "ngrok-skip-browser-warning"],
+        expose_headers=["Content-Disposition"]
     )
     
     print("[OK] CORS configured")
@@ -38,14 +44,9 @@ def configure_rate_limiting(app):
     
     @app.exception_handler(RateLimitExceeded)
     async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
-        return HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Rate limit exceeded. Please try again later."
+            content={"detail": "Rate limit exceeded. Please try again later."}
         )
     
     print("[OK] Rate limiting configured")
-
-
-def rate_limit(times: int = 5, seconds: int = 60):
-    return limiter.limit(f"{times}/{seconds}seconds")
-

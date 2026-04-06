@@ -2,7 +2,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
 const getToken = () => localStorage.getItem('access_token')
 
-async function apiRequest(endpoint, options = {}) {
+export async function apiRequest(endpoint, options = {}) {
   const token = getToken()
   
   const config = {
@@ -162,14 +162,7 @@ export const productService = {
       if (params.status) queryParams.append('status', params.status)
       if (params.search) queryParams.append('search', params.search)
 
-      // Direct fetch without auth for public endpoint
-      const response = await fetch(`${API_BASE_URL}/products?${queryParams.toString()}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        }
-      })
+      const response = await apiRequest(`/products?${queryParams.toString()}`)
 
       if (response.ok) {
         return await response.json()
@@ -190,13 +183,7 @@ export const productService = {
    */
   async getDashboardStats() {
     try {
-      const response = await fetch(`${API_BASE_URL}/products/stats`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        }
-      })
+      const response = await apiRequest('/products/stats')
       if (response.ok) return await response.json()
       throw new Error(`Failed to fetch stats: ${response.statusText}`)
     } catch (error) {
@@ -539,13 +526,7 @@ export const authService = {
       if (params.brand)         queryParams.append('brand',    params.brand)
       if (params.search)        queryParams.append('search',   params.search)
 
-      const response = await fetch(`${API_BASE_URL}/products?${queryParams.toString()}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        }
-      })
+      const response = await apiRequest(`/products?${queryParams.toString()}`)
 
       if (response.ok) {
         return await response.json()
@@ -564,10 +545,7 @@ export const authService = {
    */
   async getBrands() {
     try {
-      const response = await fetch(`${API_BASE_URL}/products/brands`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '69420' }
-      })
+      const response = await apiRequest('/products/brands')
       if (response.ok) return await response.json()
       throw new Error('Failed to fetch brands')
     } catch (error) {
@@ -581,13 +559,7 @@ export const authService = {
    */
   async getDashboardStats() {
     try {
-      const response = await fetch(`${API_BASE_URL}/products/stats`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        }
-      })
+      const response = await apiRequest('/products/stats')
       if (response.ok) return await response.json()
       throw new Error(`Failed to fetch stats: ${response.statusText}`)
     } catch (error) {
@@ -634,20 +606,11 @@ export const nomenclatureService = {
       if (params.skip) queryParams.append('skip', params.skip)
       if (params.limit) queryParams.append('limit', params.limit)
 
-      const response = await fetch(`${API_BASE_URL}/nomenclature?${queryParams.toString()}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        }
-      })
+      const response = await apiRequest(`/nomenclature?${queryParams.toString()}`)
 
       if (response.ok) {
         return await response.json()
       } else {
-        console.error('API response not OK:', response.status, response.statusText)
-        const errorData = await response.json().catch(() => ({}))
-        console.error('Error details:', errorData)
         throw new Error(`Failed to fetch nomenclature: ${response.statusText}`)
       }
     } catch (error) {
@@ -796,13 +759,7 @@ export const nomenclatureService = {
    */
   async getBuildMap() {
     try {
-      const response = await fetch(`${API_BASE_URL}/nomenclature/map`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        }
-      })
+      const response = await apiRequest('/nomenclature/map')
       if (response.ok) {
         return await response.json()
       }
@@ -839,21 +796,28 @@ export const coaNomenclatureService = {
     if (params.skip) qp.append('skip', params.skip)
     if (params.limit) qp.append('limit', params.limit)
     if (params.search) qp.append('search', params.search)
-    const response = await fetch(`${API_BASE_URL}/coa-nomenclature?${qp.toString()}`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '69420' }
-    })
+    const response = await apiRequest(`/coa-nomenclature?${qp.toString()}`)
     if (response.ok) return await response.json()
     throw new Error('Failed to fetch COA nomenclature')
   },
 
   async getMap() {
-    const response = await fetch(`${API_BASE_URL}/coa-nomenclature/map`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '69420' }
-    })
+    const response = await apiRequest('/coa-nomenclature/map')
     if (response.ok) return await response.json()
     throw new Error('Failed to fetch COA nomenclature map')
+  },
+
+  async resolve(rawNames) {
+    try {
+      const response = await apiRequest('/coa-nomenclature/resolve', {
+        method: 'POST',
+        body: JSON.stringify({ raw_names: rawNames })
+      })
+      if (response.ok) return await response.json()
+      return { resolved: {} }
+    } catch {
+      return { resolved: {} }
+    }
   },
 
   async create(data) {
@@ -979,20 +943,11 @@ export const categoryService = {
       if (params.skip) queryParams.append('skip', params.skip)
       if (params.limit) queryParams.append('limit', params.limit)
 
-      const response = await fetch(`${API_BASE_URL}/categories?${queryParams.toString()}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        }
-      })
+      const response = await apiRequest(`/categories?${queryParams.toString()}`)
 
       if (response.ok) {
         return await response.json()
       } else {
-        console.error('API response not OK:', response.status, response.statusText)
-        const errorData = await response.json().catch(() => ({}))
-        console.error('Error details:', errorData)
         throw new Error(`Failed to fetch categories: ${response.statusText}`)
       }
     } catch (error) {
@@ -1297,6 +1252,7 @@ export const formulationService = {
       const queryParams = new URLSearchParams()
       if (params.skip) queryParams.append('skip', params.skip)
       if (params.limit) queryParams.append('limit', params.limit)
+      if (params.created_by) queryParams.append('created_by', params.created_by)
       const response = await apiRequest(`/formulations/list?${queryParams.toString()}`)
       if (response.ok) {
         return await response.json()

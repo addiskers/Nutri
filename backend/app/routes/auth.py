@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Request
 from datetime import datetime, timedelta, timezone
 
 
@@ -16,25 +16,27 @@ from app.utils.security import (
 )
 from app.utils.email import send_login_otp_email, send_password_reset_email, send_user_approval_email
 from app.dependencies.auth import get_current_user
+from app.middleware.security import limiter
 from config.settings import settings
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 @router.post("/register", response_model=MessageResponse)
-async def register(user_data: UserRegister):
-    existing_user = await User.find_one(User.email == user_data.email.lower())
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with this email already exists"
-        )
-    
+@limiter.limit("3/minute")
+async def register(request: Request, user_data: UserRegister):
     is_valid, error_msg = validate_password_strength(user_data.password)
     if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error_msg
+        )
+
+    existing_user = await User.find_one(User.email == user_data.email.lower())
+    if existing_user:
+        return MessageResponse(
+            message="Registration successful! Your account is pending admin approval.",
+            success=True
         )
     
     # Check if this is the first user in the system
@@ -98,7 +100,8 @@ async def register(user_data: UserRegister):
 
 
 @router.post("/login")
-async def login(credentials: UserLogin):
+@limiter.limit("5/minute")
+async def login(request: Request, credentials: UserLogin):
     user = await User.find_one(User.email == credentials.email.lower())
     if not user or not user.hashed_password:
         raise HTTPException(
@@ -125,7 +128,6 @@ async def login(credentials: UserLogin):
             detail="Your account has been deactivated"
         )
     
-    print(f"[INFO] Generating OTP for {user.email}")
     otp = generate_otp()
     user.reset_token = otp
     user.reset_token_expires = datetime.now(timezone.utc) + timedelta(minutes=10)
@@ -133,29 +135,27 @@ async def login(credentials: UserLogin):
     
     try:
         await send_login_otp_email(user.email, otp, user.name)
-        print(f"[SUCCESS] OTP email sent to {user.email}")
     except Exception as e:
         print(f"[ERROR] Failed to send OTP email: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send OTP email. Please try again."
+            detail="Failed to send verification email. Please try again."
         )
     
-    print(f"[INFO] Login OTP sent to: {user.email}")
-    
     return MessageResponse(
-        message=f"OTP sent to {user.email}. Please verify to continue.",
+        message="OTP sent to your email. Please verify to continue.",
         success=True
     )
 
 
 @router.post("/verify-otp", response_model=TokenResponse)
-async def verify_login_otp(otp_data: VerifyLoginOTP):
+@limiter.limit("5/minute")
+async def verify_login_otp(request: Request, otp_data: VerifyLoginOTP):
     user = await User.find_one(User.email == otp_data.email.lower())
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid OTP"
         )
     
     if not user.reset_token or user.reset_token != otp_data.otp:
@@ -197,19 +197,18 @@ async def verify_login_otp(otp_data: VerifyLoginOTP):
 
 
 @router.post("/forgot-password", response_model=MessageResponse)
-async def forgot_password(request: ForgotPassword):
+@limiter.limit("3/minute")
+async def forgot_password(request: Request, forgot_data: ForgotPassword):
     """
     Request password reset OTP
     """
-    user = await User.find_one(User.email == request.email.lower())
+    user = await User.find_one(User.email == forgot_data.email.lower())
     if not user:
-        # Don't reveal if user exists
         return MessageResponse(
             message="If the email exists, a password reset OTP has been sent.",
             success=True
         )
     
-    # Generate OTP
     otp = generate_otp()
     user.reset_token = otp
     user.reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=settings.PASSWORD_RESET_TOKEN_EXPIRE_HOURS)
@@ -230,19 +229,19 @@ async def forgot_password(request: ForgotPassword):
 
 
 @router.post("/reset-password", response_model=MessageResponse)
-async def reset_password(request: ResetPassword):
+@limiter.limit("5/minute")
+async def reset_password(request: Request, reset_data: ResetPassword):
     """
     Reset password using OTP
     """
-    user = await User.find_one(User.email == request.email.lower())
+    user = await User.find_one(User.email == reset_data.email.lower())
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid OTP"
         )
     
-    # Verify OTP
-    if not user.reset_token or user.reset_token != request.otp:
+    if not user.reset_token or user.reset_token != reset_data.otp:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid OTP"
@@ -255,16 +254,14 @@ async def reset_password(request: ResetPassword):
             detail="OTP expired"
         )
     
-    # Validate new password
-    is_valid, error_msg = validate_password_strength(request.new_password)
+    is_valid, error_msg = validate_password_strength(reset_data.new_password)
     if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error_msg
         )
     
-    # Update password
-    user.hashed_password = hash_password(request.new_password)
+    user.hashed_password = hash_password(reset_data.new_password)
     user.reset_token = None
     user.reset_token_expires = None
     user.updated_at = datetime.now(timezone.utc)

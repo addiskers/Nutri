@@ -102,12 +102,7 @@ const NomenclatureMap = () => {
   }
 
   const handleAddSynonym = (group) => {
-    // Get existing standardized name if group has mappings
-    const existingStandardName = group.mappings.length > 0 
-      ? group.mappings[0].standardName 
-      : ''
-    
-    setSelectedGroup({ ...group, existingStandardName })
+    setSelectedGroup({ ...group, existingStandardName: group.name })
     setShowAddSynonymModal(true)
   }
 

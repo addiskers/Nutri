@@ -2,9 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout/Layout'
 import { User, Lock, Mail, Briefcase, Shield, Calendar, CheckCircle, AlertCircle } from 'lucide-react'
-import authService from '../services/api'
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+import { apiRequest } from '../services/api'
 
 const SettingsPage = () => {
   const navigate = useNavigate()
@@ -29,20 +27,12 @@ const SettingsPage = () => {
   const fetchUserProfile = async () => {
     try {
       setLoading(true)
-      const token = localStorage.getItem('access_token')
-      
-      if (!token) {
+      if (!localStorage.getItem('access_token')) {
         navigate('/login')
         return
       }
 
-      const response = await fetch(`${API_BASE_URL}/auth/me`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        }
-      })
+      const response = await apiRequest('/auth/me')
 
       if (response.status === 401) {
         localStorage.clear()
@@ -81,15 +71,9 @@ const SettingsPage = () => {
 
     try {
       setChangingPassword(true)
-      const token = localStorage.getItem('access_token')
 
-      const response = await fetch(`${API_BASE_URL}/auth/change-password`, {
+      const response = await apiRequest('/auth/change-password', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        },
         body: JSON.stringify({
           current_password: passwordData.currentPassword,
           new_password: passwordData.newPassword

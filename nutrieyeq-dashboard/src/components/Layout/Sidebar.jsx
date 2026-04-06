@@ -9,7 +9,6 @@ import {
   FolderOpen, 
   Beaker,
   FolderKanban,
-  Tags,
   Users,
   Settings,
   ChevronLeft
@@ -32,7 +31,6 @@ const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
   const managementMenuItems = [
     { icon: FolderKanban, label: 'Nomenclature Map', path: '/nomenclature', permission: 'view_nomenclature' },
     { icon: FolderKanban, label: 'COA Nomenclature', path: '/coa-nomenclature', permission: 'view_nomenclature' },
-    { icon: Tags, label: 'Tags', path: '/tags', permission: null },
     { icon: Users, label: 'Users', path: '/users', permission: 'view_users' },
     { icon: Settings, label: 'Settings', path: '/settings', permission: null },
   ]

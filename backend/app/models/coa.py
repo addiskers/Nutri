@@ -21,6 +21,7 @@ class NutrientData(Dict):
 
 class COA(Document):
     ingredient_name: str
+    product_description: Optional[str] = None
     product_code: Optional[str] = None
     lot_number: Optional[str] = None
     manufacturing_date: Optional[str] = None

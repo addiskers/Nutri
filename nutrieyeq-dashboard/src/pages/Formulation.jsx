@@ -2,9 +2,9 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 
 import Layout from '../components/Layout/Layout'
 
-import { Plus, Trash2, Loader2, Search, AlertCircle, Beaker, Download, X, ChevronDown, Users } from 'lucide-react'
+import { Plus, Trash2, Loader2, Search, AlertCircle, Beaker, Download, X, ChevronDown, Users, Edit3 } from 'lucide-react'
 
-import { coaService, formulationService } from '../services/api'
+import { coaService, formulationService, apiRequest } from '../services/api'
 import authService from '../services/api'
 import TransferFormulationModal from '../components/Modals/TransferFormulationModal'
 import IngredientMappingModal from '../components/Modals/IngredientMappingModal'
@@ -618,7 +618,7 @@ const Formulation = () => {
     const { ingredientId, coaName } = mappingModalData
     const nutritionalDataObj = {}
     selectedNutrients.forEach(nutrient => {
-      const key = nutrient.nutrient_name || nutrient.nutrient_name_raw
+      const key = nutrient.mapped_name || nutrient.nutrient_name || nutrient.nutrient_name_raw
       nutritionalDataObj[key] = {
         actual: nutrient.actual_value ?? null,
         min: nutrient.min_value ?? null,
@@ -938,13 +938,8 @@ const Formulation = () => {
   const loadSavedFormulations = async () => {
     setIsLoadingSaved(true)
     try {
-      const params = {
-        limit: 100,
-        current_user_email: currentUser?.email,
-        is_super_admin: isSuperAdmin
-      }
+      const params = { limit: 100 }
       
-      // Add user filter if Super Admin is filtering by specific user
       if (isSuperAdmin && userFilter !== 'All') {
         params.created_by = userFilter
       }
@@ -963,14 +958,7 @@ const Formulation = () => {
     if (!isSuperAdmin) return
     
     try {
-      const token = localStorage.getItem('access_token')
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api'}/users?page=1&page_size=100`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        }
-      })
+      const response = await apiRequest('/users?page=1&page_size=100')
       
       if (response.ok) {
         const data = await response.json()
@@ -1672,29 +1660,40 @@ const Formulation = () => {
 
                       <td className="px-3 py-3 sticky left-0 bg-white z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
 
-                        <select
+                        <div className="flex items-center gap-1">
+                          <select
 
-                          value={ingredient.coa_id || ''}
+                            value={ingredient.coa_id || ''}
 
-                          onChange={(e) => selectCOA(ingredient.id, e.target.value)}
+                            onChange={(e) => selectCOA(ingredient.id, e.target.value)}
 
-                          className="w-full px-2 py-1 text-sm font-ibm-plex text-[#0f1729] bg-[#f9fafb] border border-[#e1e7ef] rounded focus:outline-none focus:ring-2 focus:ring-[#009da5]"
+                            className="flex-1 min-w-0 px-2 py-1 text-sm font-ibm-plex text-[#0f1729] bg-[#f9fafb] border border-[#e1e7ef] rounded focus:outline-none focus:ring-2 focus:ring-[#009da5]"
 
-                        >
+                          >
 
-                          <option value="">Select ingredient...</option>
+                            <option value="">Select ingredient...</option>
 
-                          {coaList.map(coa => (
+                            {coaList.map(coa => (
 
-                            <option key={coa.id} value={coa.id}>
+                              <option key={coa.id} value={coa.id}>
 
-                              {coa.ingredient_name}
+                                {coa.ingredient_name}
 
-                            </option>
+                              </option>
 
-                          ))}
+                            ))}
 
-                        </select>
+                          </select>
+                          {ingredient.coa_id && Object.keys(ingredient.nutritional_data || {}).length > 0 && (
+                            <button
+                              onClick={() => selectCOA(ingredient.id, ingredient.coa_id)}
+                              className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded border border-[#e1e7ef] bg-[#f9fafb] hover:bg-[#e1e7ef] transition-colors"
+                              title="Change nutrient mapping"
+                            >
+                              <Edit3 className="w-3.5 h-3.5 text-[#009da5]" />
+                            </button>
+                          )}
+                        </div>
 
                       </td>
 
@@ -1730,18 +1729,18 @@ const Formulation = () => {
                         const cellData = ingredient.nutritional_data[nutrient]
                         const hasData = cellData && typeof cellData === 'object'
                         return (
-                          <td key={nutrient} className="px-3 py-2 text-right">
+                          <td key={nutrient} className="px-3 py-2 text-right min-w-[100px] w-[100px]">
                             {hasCOA && hasData ? (
-                              <div className="relative inline-block">
+                              <div className="relative inline-flex justify-end">
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     setOpenDropdown(isOpen ? null : selectionKey)
                                   }}
-                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-[#f1f5f9] transition-colors group"
+                                  className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-[#f1f5f9] transition-colors group"
                                 >
-                                  <ChevronDown className="w-3.5 h-3.5 text-[#65758b] group-hover:text-[#b455a0] transition-colors" />
-                                  <span className="text-sm font-ibm-plex text-[#0f1729]">
+                                  <ChevronDown className="w-3 h-3 text-[#65758b] group-hover:text-[#b455a0] transition-colors flex-shrink-0" />
+                                  <span className="text-sm font-ibm-plex text-[#0f1729] tabular-nums">
                                     {weighted.toFixed(2)}
                                   </span>
                                 </button>
@@ -1799,16 +1798,16 @@ const Formulation = () => {
                                 )}
                               </div>
                             ) : hasCOA ? (
-                              <div className="relative inline-block">
+                              <div className="relative inline-flex justify-end">
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     setOpenDropdown(isOpen ? null : selectionKey)
                                   }}
-                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-[#f1f5f9] transition-colors group"
+                                  className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-[#f1f5f9] transition-colors group"
                                 >
-                                  <ChevronDown className="w-3.5 h-3.5 text-[#c0c7d1] group-hover:text-[#b455a0] transition-colors" />
-                                  <span className="text-sm font-ibm-plex text-[#c0c7d1]">
+                                  <ChevronDown className="w-3 h-3 text-[#c0c7d1] group-hover:text-[#b455a0] transition-colors flex-shrink-0" />
+                                  <span className="text-sm font-ibm-plex text-[#c0c7d1] tabular-nums">
                                     {currentType === 'custom' && customValues[selectionKey] != null ? (customValues[selectionKey] * ingredient.percentage / 100).toFixed(2) : '—'}
                                   </span>
                                 </button>
@@ -1837,7 +1836,7 @@ const Formulation = () => {
                                 )}
                               </div>
                             ) : (
-                              <span className="text-sm font-ibm-plex text-[#c0c7d1]">
+                              <span className="text-sm font-ibm-plex text-[#c0c7d1] tabular-nums">
                                 {weighted.toFixed(2)}
                               </span>
                             )}
@@ -1891,9 +1890,9 @@ const Formulation = () => {
 
                     {nutrientNames.map(nutrient => (
 
-                      <td key={nutrient} className="px-3 py-3 text-right">
+                      <td key={nutrient} className="px-3 py-3 text-right min-w-[100px] w-[100px]">
 
-                        <span className="text-sm font-ibm-plex font-bold text-[#0f1729]">
+                        <span className="text-sm font-ibm-plex font-bold text-[#0f1729] tabular-nums">
 
                           {nutrientTotals[nutrient].toFixed(2)}
 

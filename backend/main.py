@@ -83,8 +83,7 @@ async def root():
     return {
         "app": settings.APP_NAME,
         "version": "1.0.0",
-        "status": "running",
-        "docs": "/docs"
+        "status": "running"
     }
 
 

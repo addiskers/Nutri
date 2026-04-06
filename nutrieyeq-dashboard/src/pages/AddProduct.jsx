@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout/Layout'
 import ImageUploadWithCrop from '../components/Forms/ImageUploadWithCrop'
@@ -39,18 +39,14 @@ const AddProduct = () => {
     serveSize: '', category: '', vegNonVeg: '', packingFormat: ''
   })
 
-  // ── Claims / Tags ──────────────────────────────────────────────────────────
+  // ── Claims ─────────────────────────────────────────────────────────────────
   const [claims, setClaims]             = useState([])
   const [newClaim, setNewClaim]         = useState('')
-  const predefinedTags = [
-    'Kids Nutrition','Dairy Mix','Protein Drink','Sugar Free','Gluten Free',
-    'Organic','High Protein','Low Fat','Fortified','Natural',
-    'Premium','Value Pack','Personal Care','Hygiene','Sanitizer','IMA Recommended'
-  ]
-  const [selectedTags, setSelectedTags] = useState([])
 
   // ── Nutrition ──────────────────────────────────────────────────────────────
   const [nutritionRows, setNutritionRows]       = useState([])
+  const nutritionRowsRef = useRef(nutritionRows)
+  useEffect(() => { nutritionRowsRef.current = nutritionRows }, [nutritionRows])
   const [nutritionNotes, setNutritionNotes]     = useState([])
   const [newNutritionNote, setNewNutritionNote] = useState('')
 
@@ -86,9 +82,11 @@ const AddProduct = () => {
   useEffect(() => { loadCategories() }, [])
 
   const handleCreateNutrient = async (rowId, newNutrientName) => {
+    const row = nutritionRowsRef.current.find(r => r.id === rowId)
+    const rawName = row?.originalName?.trim()
     const result = await nomenclatureService.createNomenclature({
       standardized_name: newNutrientName,
-      raw_names: []
+      raw_names: rawName ? [rawName] : []
     })
     if (result.success !== false) {
       await loadNomenclature()
@@ -387,7 +385,7 @@ const AddProduct = () => {
     setNutritionRows([...nutritionRows, { id: Date.now(), nutrient: '', originalName: '', unit: '', values: emptyValues }])
   }
   const handleNutritionChange = (id, field, value) =>
-    setNutritionRows(nutritionRows.map(r => r.id === id ? { ...r, [field]: value } : r))
+    setNutritionRows(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r))
   const handleNutritionValueChange = (id, colKey, value) =>
     setNutritionRows(nutritionRows.map(r => r.id === id ? { ...r, values: { ...r.values, [colKey]: value } } : r))
   const handleRemoveNutritionRow = (id) =>
@@ -414,9 +412,6 @@ const AddProduct = () => {
   const handleRemoveFssai       = makeChipRemover(fssaiNumbers,  setFssaiNumbers)
   const handleRemoveBarcode     = makeChipRemover(barcodes,      setBarcodes)
   const handleRemoveCert        = makeChipRemover(certifications, setCertifications)
-
-  const handleTagToggle = (tag) =>
-    setSelectedTags(selectedTags.includes(tag) ? selectedTags.filter(t => t !== tag) : [...selectedTags, tag])
 
   // ── Duplicate check helpers ──────────────────────────────────────────────
   const diceSimilarity = (a, b) => {
@@ -557,7 +552,6 @@ const AddProduct = () => {
         regulatory_text:      regulatoryText.split('\n').filter(Boolean),
         other_important_text: otherImportantText.split('\n').filter(Boolean),
 
-        tags:   selectedTags,
         images: images.filter(img => img.dataUrl).map(img => img.dataUrl),
         status: 'published',
       }
@@ -851,18 +845,6 @@ const AddProduct = () => {
                   {claims.length > 0 && <ChipList items={claims} onRemove={handleRemoveClaim} colorClass="bg-primary/10 border border-primary/20 text-[#0f1729]" />}
                 </div>
 
-                {/* Tags */}
-                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
-                  <SectionHeader title="Tags" copyValue={selectedTags.join(', ')} copyField="add_tags" />
-                  <div className="flex flex-wrap gap-2">
-                    {predefinedTags.map((tag, idx) => (
-                      <button key={idx} onClick={() => handleTagToggle(tag)}
-                        className={`border px-3 py-1 rounded-full transition-colors ${selectedTags.includes(tag) ? 'bg-[#b455a0] border-[#b455a0] text-white' : 'border-[#e1e7ef] hover:border-[#b455a0] hover:bg-primary/5'}`}>
-                        <span className="text-xs font-ibm-plex font-semibold">{tag}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
               </div>
             )}
 

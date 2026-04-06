@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { X, Shield, CheckCircle, AlertCircle, CheckSquare, Square } from 'lucide-react'
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+import { apiRequest } from '../../services/api'
 
 // All 19 available permissions (14 original + 5 new COA permissions)
 const ALL_PERMISSIONS = [
@@ -78,24 +77,16 @@ const PermissionsPanel = ({ isOpen, onClose, user, currentUserRole, onUpdate }) 
     setError('')
     
     try {
-      const token = localStorage.getItem('access_token')
-      
       const updateData = {
         permissions: selectedPermissions
       }
 
-      // Include role if it has changed
       if (selectedRole !== user.role) {
         updateData.role = selectedRole
       }
 
-      const response = await fetch(`${API_BASE_URL}/users/${user.id}`, {
+      const response = await apiRequest(`/users/${user.id}`, {
         method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        },
         body: JSON.stringify(updateData)
       })
 
@@ -106,13 +97,7 @@ const PermissionsPanel = ({ isOpen, onClose, user, currentUserRole, onUpdate }) 
         const currentUser = JSON.parse(localStorage.getItem('user') || '{}')
         if (currentUser.id === user.id) {
           try {
-            const meResponse = await fetch(`${API_BASE_URL}/auth/me`, {
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-                'ngrok-skip-browser-warning': '69420'
-              }
-            })
+            const meResponse = await apiRequest('/auth/me')
             if (meResponse.ok) {
               const updatedUser = await meResponse.json()
               localStorage.setItem('user', JSON.stringify(updatedUser))
