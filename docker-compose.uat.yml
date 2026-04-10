@@ -7,7 +7,8 @@ services:
       MONGO_INITDB_DATABASE: ${DATABASE_NAME:-nutrieyeq_uat}
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
-    # No host port mapping — MongoDB only accessible within Docker network
+    ports:
+      - "127.0.0.1:27018:27017"
     volumes:
       - uat_mongodb_data:/data/db
       - uat_mongodb_config:/data/configdb
