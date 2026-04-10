@@ -44,9 +44,22 @@ const Register = () => {
     setError('')
   }
 
+  const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+
+    if (!formData.name.trim()) {
+      setError('Name is required')
+      return
+    }
+
+    if (!isValidEmail(formData.email)) {
+      setError('Please enter a valid email address')
+      return
+    }
+
     setLoading(true)
 
     if (formData.password !== formData.confirmPassword) {

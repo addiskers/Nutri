@@ -330,9 +330,11 @@ const EditProduct = () => {
   }, [id, navigate])
 
   // ── Duplicate check helpers ──────────────────────────────────────────────
+  const normalize = (s) => s.replace(/[®™©]/g, '').replace(/\s+/g, ' ').toLowerCase().trim()
+
   const diceSimilarity = (a, b) => {
-    a = a.toLowerCase().trim()
-    b = b.toLowerCase().trim()
+    a = normalize(a)
+    b = normalize(b)
     if (a === b) return 1
     if (a.length < 2 || b.length < 2) return 0
     const bigrams = new Map()
@@ -350,8 +352,8 @@ const EditProduct = () => {
   }
 
   const tokenOverlap = (a, b) => {
-    const ta = new Set(a.toLowerCase().trim().split(/\s+/).filter(Boolean))
-    const tb = new Set(b.toLowerCase().trim().split(/\s+/).filter(Boolean))
+    const ta = new Set(normalize(a).split(/\s+/).filter(Boolean))
+    const tb = new Set(normalize(b).split(/\s+/).filter(Boolean))
     if (ta.size === 0 || tb.size === 0) return 0
     const [smaller, larger] = ta.size <= tb.size ? [ta, tb] : [tb, ta]
     let shared = 0
@@ -359,15 +361,42 @@ const EditProduct = () => {
     return shared / smaller.size
   }
 
+  const searchProducts = async (term) => {
+    try {
+      const resp = await apiRequest(`/products?search=${encodeURIComponent(term)}&limit=20`)
+      const res = await resp.json()
+      return res?.products || []
+    } catch (_) { return [] }
+  }
+
   const findDuplicate = async (name) => {
     try {
-      const resp = await apiRequest(`/products?search=${encodeURIComponent(name)}&limit=20`)
-      const res = await resp.json()
-      const candidates = res?.products || []
-      for (const p of candidates) {
+      const candidateMap = new Map()
+      const addCandidates = (products) => {
+        for (const p of (products || [])) candidateMap.set(p.id || p.product_name, p)
+      }
+
+      addCandidates(await searchProducts(name))
+
+      const keywords = normalize(name).split(/\s+/).filter(w => w.length >= 3)
+      for (const word of keywords) {
+        addCandidates(await searchProducts(word))
+      }
+
+      if (formData.brand) {
+        addCandidates(await searchProducts(formData.brand))
+      }
+
+      for (const p of candidateMap.values()) {
         if (p.id === id) continue
-        if (diceSimilarity(name, p.product_name) > 0.8 || tokenOverlap(name, p.product_name) > 0.8)
-          return p.product_name
+        const pName = p.product_name || ''
+        if (diceSimilarity(name, pName) > 0.7 || tokenOverlap(name, pName) > 0.7)
+          return pName
+
+        const combined = `${formData.brand} ${name}`
+        const pCombined = `${p.parent_brand || ''} ${pName}`
+        if (diceSimilarity(combined, pCombined) > 0.7 || tokenOverlap(combined, pCombined) > 0.7)
+          return pName
       }
     } catch (_) {}
     return null

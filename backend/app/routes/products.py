@@ -12,12 +12,13 @@ from io import BytesIO
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from dateutil.relativedelta import relativedelta
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
 from pydantic import BaseModel
 from PIL import Image
 from app.models.user import User
 from app.models.product import Product
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, require_permission
+from app.middleware.security import limiter
 
 router = APIRouter(prefix="/products", tags=["Products"])
 
@@ -738,13 +739,7 @@ OCR TEXT:
 FUZZY_THRESHOLD = 85
 
 def safe_print(msg):
-    try:
-        print(msg)
-    except UnicodeEncodeError:
-        try:
-            print(msg.encode("ascii", "replace").decode("ascii"))
-        except Exception:
-            print("[LOG] (message contains special characters)")
+    logger.debug("%s", msg)
 
 def canonicalize(label):
     label = unicodedata.normalize("NFKC", label)
@@ -786,7 +781,7 @@ async def load_nomenclature_map_from_db():
         canonical = {canonicalize(k): v for k, v in nom_map.items()}
         return nom_map, canonical
     except Exception as e:
-        print(f"[WARN] Failed to load nomenclature from DB, using hardcoded: {e}")
+        logger.warning("Failed to load nomenclature from DB, using hardcoded: %s", e)
         return NOMENCLATURE_MAP, CANONICAL_NOMENCLATURE
 
 def apply_notes_rda(nutrition_block, canonical_nomen=None):
@@ -950,7 +945,7 @@ def merge_external_rda(structured_json, raw_text, canonical_nomen=None):
             if '%' in k:
                 existing_rda_columns.add(k)
     if existing_rda_columns:
-        print(f"DEBUG: Nutrition table already has '%' columns: {existing_rda_columns} → will overwrite with footnote values")
+        logger.debug("Nutrition table already has '%%' columns: %s", existing_rda_columns)
 
     lines = raw_text.splitlines()
     merged_rda_blocks = []
@@ -965,10 +960,10 @@ def merge_external_rda(structured_json, raw_text, canonical_nomen=None):
     if current_block:
         merged_rda_blocks.append(current_block.strip())
 
-    print(f"Found {len(merged_rda_blocks)} merged %RDA blocks")
+    logger.debug("Found %d merged %%RDA blocks", len(merged_rda_blocks))
 
     for block_num, block in enumerate(merged_rda_blocks, start=1):
-        print(f"\nProcessing block {block_num}: {block}")
+        logger.debug("Processing block %d: %s", block_num, block)
 
         column_header = "% RDA"
 
@@ -999,13 +994,13 @@ def merge_external_rda(structured_json, raw_text, canonical_nomen=None):
             
             if '(' not in column_header:
                 column_header = f"{column_header} ({full_text})"
-        print(f" Column header detected: {column_header}")
+        logger.debug("Column header detected: %s", column_header)
 
         # If table already has a matching % column, use its exact name
         if existing_rda_columns:
             for ec in existing_rda_columns:
                 if fuzz.token_sort_ratio(column_header.lower(), ec.lower()) >= 70:
-                    print(f" Reusing existing column header: '{ec}' instead of '{column_header}'")
+                    logger.debug("Reusing existing column header: '%s' instead of '%s'", ec, column_header)
                     column_header = ec
                     break
         
@@ -1018,7 +1013,7 @@ def merge_external_rda(structured_json, raw_text, canonical_nomen=None):
         )
 
         if not (has_rda_any and has_percent and is_per_serve_rda):
-            print("Skipping non-nutrient block")
+            logger.debug("Skipping non-nutrient block")
             continue
         all_rda_headers.add(column_header)
         pairs = re.findall(r'([\w\s\*\-\(\)/]+?)\s*\(?([\d<>\.%]+)\)?', block)
@@ -1028,7 +1023,7 @@ def merge_external_rda(structured_json, raw_text, canonical_nomen=None):
         )
 
         pairs += [(nutrient.strip(), value.strip()) for value, nutrient in value_first_pairs]
-        print(f" Found pairs: {pairs}")
+        logger.debug("Found pairs: %s", pairs)
 
         for nutrient, value in pairs:
             nutrient = nutrient.strip().rstrip("():*-")
@@ -1041,16 +1036,16 @@ def merge_external_rda(structured_json, raw_text, canonical_nomen=None):
                 if match_nutrient(nutrient, row["nutrient_name"]):
                     existing = row["values"].get(column_header)
                     if existing and existing not in ("not specified", "", None):
-                        print(f" Skipping {nutrient}: already has '{existing}', not overwriting with '{value}'")
+                        logger.debug("Skipping %s: already has '%s'", nutrient, existing)
                         matched = True
                         break
                     row["values"][column_header] = value
                     matched = True
-                    print(f" Merged {nutrient} → {value} under {column_header}")
+                    logger.debug("Merged %s -> %s under %s", nutrient, value, column_header)
                     break
 
             if not matched:
-                print(f" Could not match nutrient '{nutrient}' in nutrition_table")
+                logger.debug("Could not match nutrient '%s' in nutrition_table", nutrient)
 
     for row in nutrition_table:
         for header in all_rda_headers:
@@ -1058,9 +1053,7 @@ def merge_external_rda(structured_json, raw_text, canonical_nomen=None):
                 row["values"][header] = "not specified"
 
     structured_json["nutrition"]["nutrition_table"] = nutrition_table
-    print("\nFinal nutrition_table after merging %RDA values:")
-    for row in nutrition_table:
-        print(f"  {row['nutrient_name']}: {row['values']}")
+    logger.debug("Final nutrition_table after merging %%RDA values: %d rows", len(nutrition_table))
 
     return structured_json
 
@@ -1204,9 +1197,11 @@ class ProductResponse(BaseModel):
 # ============================================================
 
 @router.post("/extract", response_model=ExtractedProductData)
+@limiter.limit("10/minute")
 async def extract_product_from_images(
+    request: Request,
     images: List[UploadFile] = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("add_products")),
 ):
     """
     Two-step extraction:
@@ -1483,25 +1478,20 @@ async def extract_product_from_images(
         
     except json.JSONDecodeError as e:
         logger.error(f"[ERROR] JSON parse failed: {e}")
-        return ExtractedProductData(success=False, error=f"Failed to parse AI response: {e}")
+        return ExtractedProductData(success=False, error="Failed to parse AI response")
 
     except HTTPException:
         raise
 
     except Exception as e:
-        logger.error(f"[ERROR] {type(e).__name__}: {e}", exc_info=True)
-        error_msg = f"{type(e).__name__}: {str(e)}"
-        try:
-            error_msg = error_msg.encode("ascii", "replace").decode("ascii")
-        except Exception:
-            pass
-        return ExtractedProductData(success=False, error=f"Extraction failed: {error_msg}")
+        logger.error("Product extraction failed: %s", e, exc_info=True)
+        return ExtractedProductData(success=False, error="Extraction failed. Please try again.")
 
 
 @router.post("", response_model=dict)
 async def create_product(
     product: ProductCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("add_products")),
 ):
     """Create a new product"""
     try:
@@ -1560,7 +1550,7 @@ async def create_product(
 
 
 @router.get("/stats", response_model=dict)
-async def get_product_stats(current_user: User = Depends(get_current_user)):
+async def get_product_stats(current_user: User = Depends(require_permission("view_products"))):
     """Dashboard stats: counts, recent 7 products, category breakdown — all in one DB round-trip."""
     try:
         now = datetime.now(timezone.utc)
@@ -1608,7 +1598,7 @@ async def get_product_stats(current_user: User = Depends(get_current_user)):
 
 
 @router.get("/brands", response_model=dict)
-async def get_brands(current_user: User = Depends(get_current_user)):
+async def get_brands(current_user: User = Depends(require_permission("view_products"))):
     """Return all distinct parent_brand values (for filter dropdown)."""
     try:
         results = await Product.find().aggregate([
@@ -1630,10 +1620,11 @@ async def list_products(
     status: Optional[str] = None,
     brand: Optional[str] = None,
     search: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("view_products")),
 ):
     """List products with server-side filtering, sorting, and pagination."""
     try:
+        limit = min(limit, 200)
         query = {}
         if category:
             query["category"] = category
@@ -1703,7 +1694,7 @@ async def list_products(
 @router.get("/{product_id}", response_model=dict)
 async def get_product(
     product_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("view_products")),
 ):
     """Get a single product by ID"""
     try:
@@ -1776,7 +1767,7 @@ async def get_product(
 async def update_product(
     product_id: str,
     product_update: ProductCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("edit_products")),
 ):
     """Update a product"""
     try:
@@ -1807,7 +1798,7 @@ async def update_product(
 @router.delete("/{product_id}", response_model=dict)
 async def delete_product(
     product_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("delete_products")),
 ):
     """Delete a product"""
     try:

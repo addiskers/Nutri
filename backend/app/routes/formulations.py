@@ -4,8 +4,9 @@ CRUD operations for saved formulation configurations
 """
 import logging
 from fastapi import APIRouter, HTTPException, status, Depends
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
+from pydantic import BaseModel, Field
 from app.models.formulation import SavedFormulation
 from app.models.user import User, UserRole
 from app.dependencies.auth import get_current_user, require_permission
@@ -14,25 +15,35 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/formulations", tags=["Formulations"])
 
+MAX_PAGE_SIZE = 200
+MAX_TARGET_USERS = 50
+
+
+class SaveFormulationRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    ingredients: List[Dict[str, Any]] = Field(..., min_length=1, max_length=500)
+    serve_size: float = Field(default=30.0, ge=0, le=100000)
+    nutrient_selections: Dict[str, Any] = Field(default_factory=dict)
+    custom_values: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TransferFormulationRequest(BaseModel):
+    target_users: List[str] = Field(..., min_length=1, max_length=MAX_TARGET_USERS)
+    transfer_type: str = Field(default="copy", pattern=r"^(copy|move)$")
+
 
 @router.post("/save")
 async def save_formulation(
-    data: dict,
+    data: SaveFormulationRequest,
     current_user: User = Depends(require_permission("use_coa_in_formulation"))
 ):
     """Save a new formulation (requires use_coa_in_formulation permission)"""
     try:
-        name = data.get("name", "").strip()
-        if not name:
-            raise HTTPException(status_code=400, detail="Formulation name is required")
-        
-        ingredients = data.get("ingredients", [])
-        if not ingredients:
-            raise HTTPException(status_code=400, detail="At least one ingredient is required")
-        
-        serve_size = data.get("serve_size", 30.0)
-        nutrient_selections = data.get("nutrient_selections", {})
-        custom_values = data.get("custom_values", {})
+        name = data.name.strip()
+        ingredients = data.ingredients
+        serve_size = data.serve_size
+        nutrient_selections = data.nutrient_selections
+        custom_values = data.custom_values
         
         formulation = SavedFormulation(
             name=name,
@@ -72,6 +83,7 @@ async def list_formulations(
     Super Admin sees all; others see only their own.
     """
     try:
+        limit = min(limit, MAX_PAGE_SIZE)
         is_super_admin = current_user.role == UserRole.SUPER_ADMIN
         query_filters = [SavedFormulation.status == "active"]
         
@@ -142,7 +154,7 @@ async def get_formulation(
 @router.delete("/{formulation_id}")
 async def delete_formulation(
     formulation_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("use_coa_in_formulation"))
 ):
     """Delete a saved formulation (owner or Super Admin only)"""
     try:
@@ -172,8 +184,8 @@ async def delete_formulation(
 @router.post("/{formulation_id}/transfer")
 async def transfer_formulation(
     formulation_id: str,
-    data: dict,
-    current_user: User = Depends(get_current_user)
+    data: TransferFormulationRequest,
+    current_user: User = Depends(require_permission("use_coa_in_formulation"))
 ):
     """
     Transfer formulation ownership to another user or multiple users.
@@ -181,15 +193,9 @@ async def transfer_formulation(
     """
     try:
         from bson import ObjectId
-        
-        target_users = data.get("target_users", [])
-        transfer_type = data.get("transfer_type", "copy")
-        
-        if not target_users:
-            raise HTTPException(status_code=400, detail="At least one target user is required")
-        
-        if transfer_type not in ["copy", "move"]:
-            raise HTTPException(status_code=400, detail="Transfer type must be 'copy' or 'move'")
+
+        target_users = data.target_users
+        transfer_type = data.transfer_type
         
         formulation = await SavedFormulation.get(ObjectId(formulation_id))
         

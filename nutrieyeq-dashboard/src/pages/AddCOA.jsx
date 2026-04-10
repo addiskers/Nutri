@@ -118,11 +118,7 @@ const AddCOA = () => {
     setExtractionComplete(false)
     
     try {
-      console.log('[AddCOA] Starting extraction with', uploadedFiles.length, 'files')
-      
-      // Call extraction API
       const result = await coaService.extractFromImages(uploadedFiles)
-      console.log('[AddCOA] Extraction result:', result)
       
       if (result.success && result.data) {
         // Populate form with extracted data
@@ -133,7 +129,6 @@ const AddCOA = () => {
         setExtractionError(result.error || 'Extraction failed')
       }
     } catch (error) {
-      console.error('Extraction error:', error)
       setExtractionError(error.message || 'Failed to extract data from COA files')
     } finally {
       setIsExtracting(false)
@@ -142,7 +137,6 @@ const AddCOA = () => {
 
   // Populate form from extracted data
   const populateFormFromExtraction = (data) => {
-    console.log('[AddCOA] Populating form with extracted data:', data)
     
     // Populate ingredient info
     if (data.ingredient_info) {
@@ -237,8 +231,6 @@ const AddCOA = () => {
         status: 'active'
       }
       
-      console.log('[AddCOA] Saving COA data:', coaData)
-      
       const result = await coaService.createCOA(coaData)
       
       if (result.success) {
@@ -252,7 +244,6 @@ const AddCOA = () => {
         alert(`Failed to save COA: ${result.error}`)
       }
     } catch (error) {
-      console.error('Save error:', error)
       alert('Failed to save COA data')
     } finally {
       setIsSaving(false)

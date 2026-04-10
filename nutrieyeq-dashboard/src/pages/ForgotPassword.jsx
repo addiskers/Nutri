@@ -27,9 +27,17 @@ const ForgotPassword = () => {
     }
   ]
 
+  const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+
+    if (!isValidEmail(email)) {
+      setError('Please enter a valid email address')
+      return
+    }
+
     setLoading(true)
 
     try {

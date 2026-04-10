@@ -2,6 +2,38 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
 const getToken = () => localStorage.getItem('access_token')
 
+export function clearAuthData() {
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('refresh_token')
+  localStorage.removeItem('user')
+}
+
+function storeAuthData(data) {
+  localStorage.setItem('access_token', data.access_token)
+  localStorage.setItem('refresh_token', data.refresh_token)
+  if (data.user) localStorage.setItem('user', JSON.stringify(data.user))
+}
+
+function safeParseUser() {
+  try {
+    const raw = localStorage.getItem('user')
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    localStorage.removeItem('user')
+    return null
+  }
+}
+
+async function unauthenticatedRequest(endpoint, options = {}) {
+  return fetch(`${API_BASE_URL}${endpoint}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  })
+}
+
 export async function apiRequest(endpoint, options = {}) {
   const token = getToken()
   
@@ -9,8 +41,6 @@ export async function apiRequest(endpoint, options = {}) {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      'ngrok-skip-browser-warning': '69420',
-      'User-Agent': 'CustomClient',
       ...options.headers,
       ...(token && { 'Authorization': `Bearer ${token}` })
     }
@@ -25,7 +55,7 @@ export async function apiRequest(endpoint, options = {}) {
         config.headers['Authorization'] = `Bearer ${getToken()}`
         return fetch(`${API_BASE_URL}${endpoint}`, config)
       } else {
-        localStorage.clear()
+        clearAuthData()
         window.location.href = '/login'
         throw new Error('Session expired. Please login again.')
       }
@@ -33,12 +63,39 @@ export async function apiRequest(endpoint, options = {}) {
     
     return response
   } catch (error) {
-    console.error('API Request Error:', error)
     throw error
   }
 }
 
-// Refresh access token
+async function apiUpload(endpoint, formData) {
+  const token = getToken()
+  
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    method: 'POST',
+    headers: {
+      ...(token && { 'Authorization': `Bearer ${token}` })
+    },
+    body: formData
+  })
+
+  if (response.status === 401 && token) {
+    const refreshed = await refreshAccessToken()
+    if (refreshed) {
+      return fetch(`${API_BASE_URL}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${getToken()}` },
+        body: formData
+      })
+    } else {
+      clearAuthData()
+      window.location.href = '/login'
+      throw new Error('Session expired. Please login again.')
+    }
+  }
+
+  return response
+}
+
 async function refreshAccessToken() {
   const refreshToken = localStorage.getItem('refresh_token')
   if (!refreshToken) return false
@@ -46,22 +103,17 @@ async function refreshAccessToken() {
   try {
     const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': '69420'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refreshToken })
     })
     
     if (response.ok) {
       const data = await response.json()
-      localStorage.setItem('access_token', data.access_token)
-      localStorage.setItem('refresh_token', data.refresh_token)
-      localStorage.setItem('user', JSON.stringify(data.user))
+      storeAuthData(data)
       return true
     }
-  } catch (error) {
-    console.error('Token refresh failed:', error)
+  } catch {
+    // refresh failed silently
   }
   
   return false
@@ -69,41 +121,23 @@ async function refreshAccessToken() {
 
 export const productService = {
   async extractFromImages(images) {
-    console.log('[FRONTEND] Starting extraction with', images.length, 'images')
     try {
       const formData = new FormData()
       
       for (let i = 0; i < images.length; i++) {
         const image = images[i]
-        console.log(`[FRONTEND] Processing image ${i + 1}/${images.length}`)
         
         if (typeof image === 'string' && image.startsWith('data:')) {
           const response = await fetch(image)
           const blob = await response.blob()
-          console.log(`[FRONTEND] Image ${i + 1} converted to blob: ${blob.size} bytes`)
           formData.append('images', blob, `image_${i}.jpg`)
         } else if (image instanceof File || image instanceof Blob) {
-          console.log(`[FRONTEND] Image ${i + 1} is File/Blob: ${image.size} bytes`)
           formData.append('images', image, `image_${i}.jpg`)
         }
       }
       
-      const token = localStorage.getItem('access_token')
-      console.log('[FRONTEND] Token present:', !!token)
-      console.log('[FRONTEND] Calling API:', `${API_BASE_URL}/products/extract`)
-      
-      const response = await fetch(`${API_BASE_URL}/products/extract`, {
-        method: 'POST',
-        headers: {
-          'ngrok-skip-browser-warning': '69420',
-          ...(token && { 'Authorization': `Bearer ${token}` })
-        },
-        body: formData
-      })
-      
-      console.log('[FRONTEND] Response status:', response.status)
+      const response = await apiUpload('/products/extract', formData)
       const result = await response.json()
-      console.log('[FRONTEND] Response data:', result)
       
       if (response.ok) {
         return result
@@ -114,7 +148,6 @@ export const productService = {
         }
       }
     } catch (error) {
-      console.error('[FRONTEND] Extraction error:', error)
       return {
         success: false,
         error: error.message || 'Network error during extraction'
@@ -270,12 +303,8 @@ export const authService = {
    */
   async register(name, email, password, department) {
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/register`, {
+      const response = await unauthenticatedRequest('/auth/register', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        },
         body: JSON.stringify({ name, email, password, department })
       })
       
@@ -296,19 +325,14 @@ export const authService = {
    */
   async login(email, password) {
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+      const response = await unauthenticatedRequest('/auth/login', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        },
         body: JSON.stringify({ email, password })
       })
       
       const result = await response.json()
       
       if (response.ok) {
-        // Check backend's success field, not just HTTP status
         if (result.success === false) {
           return { success: false, error: result.message || 'Login failed' }
         }
@@ -326,21 +350,15 @@ export const authService = {
    */
   async verifyLoginOtp(email, otp) {
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/verify-otp`, {
+      const response = await unauthenticatedRequest('/auth/verify-otp', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        },
         body: JSON.stringify({ email, otp })
       })
       
       const result = await response.json()
       
       if (response.ok) {
-        localStorage.setItem('access_token', result.access_token)
-        localStorage.setItem('refresh_token', result.refresh_token)
-        localStorage.setItem('user', JSON.stringify(result.user))
+        storeAuthData(result)
         return { success: true, user: result.user }
       } else {
         return { success: false, error: result.detail || 'OTP verification failed' }
@@ -355,12 +373,8 @@ export const authService = {
    */
   async forgotPassword(email) {
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
+      const response = await unauthenticatedRequest('/auth/forgot-password', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        },
         body: JSON.stringify({ email })
       })
       
@@ -381,12 +395,8 @@ export const authService = {
    */
   async resetPassword(email, otp, newPassword) {
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/reset-password`, {
+      const response = await unauthenticatedRequest('/auth/reset-password', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        },
         body: JSON.stringify({ email, otp, new_password: newPassword })
       })
       
@@ -428,45 +438,34 @@ export const authService = {
    * Get current user info
    */
   async getCurrentUserInfo() {
-    const response = await apiRequest('/auth/me', {
-      method: 'GET'
-    })
-    
-    if (response.ok) {
-      const user = await response.json()
-      localStorage.setItem('user', JSON.stringify(user))
-      return user
+    try {
+      const response = await apiRequest('/auth/me', { method: 'GET' })
+      
+      if (response.ok) {
+        const user = await response.json()
+        localStorage.setItem('user', JSON.stringify(user))
+        return user
+      }
+    } catch {
+      // silently fail
     }
-    
     return null
   },
 
-  /**
-   * Refresh current user data (for real-time permission updates)
-   */
   async refreshUserData() {
     try {
-      const token = localStorage.getItem('access_token')
-      if (!token) return null
+      if (!getToken()) return null
 
-      const response = await fetch(`${API_BASE_URL}/auth/me`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      })
+      const response = await apiRequest('/auth/me', { method: 'GET' })
 
       if (response.ok) {
         const user = await response.json()
         localStorage.setItem('user', JSON.stringify(user))
-        
-        // Trigger a page reload to apply new permissions
         window.location.reload()
         return user
       }
-    } catch (error) {
-      console.error('Failed to refresh user data:', error)
+    } catch {
+      // silently fail
     }
     return null
   },
@@ -475,18 +474,12 @@ export const authService = {
    * Logout
    */
   logout() {
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
-    localStorage.removeItem('user')
+    clearAuthData()
     window.location.href = '/login'
   },
   
-  /**
-   * Get stored user
-   */
   getCurrentUser() {
-    const userStr = localStorage.getItem('user')
-    return userStr ? JSON.parse(userStr) : null
+    return safeParseUser()
   },
   
   /**
@@ -902,6 +895,75 @@ export const coaNomenclatureService = {
   },
 }
 
+// Nutrient Hierarchy Service
+export const nutrientHierarchyService = {
+  async getAll() {
+    const response = await apiRequest('/nutrient-hierarchy')
+    if (response.ok) return await response.json()
+    throw new Error('Failed to fetch nutrient hierarchy')
+  },
+
+  async getTree() {
+    const response = await apiRequest('/nutrient-hierarchy/tree')
+    if (response.ok) return await response.json()
+    throw new Error('Failed to fetch nutrient hierarchy tree')
+  },
+
+  async create(data) {
+    try {
+      const response = await apiRequest('/nutrient-hierarchy', {
+        method: 'POST',
+        body: JSON.stringify(data)
+      })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: result.detail || 'Failed to create hierarchy node' }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+
+  async update(id, data) {
+    try {
+      const response = await apiRequest(`/nutrient-hierarchy/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+      })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: result.detail || 'Failed to update hierarchy node' }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+
+  async remove(id, cascade = false) {
+    try {
+      const response = await apiRequest(`/nutrient-hierarchy/${id}?cascade=${cascade}`, {
+        method: 'DELETE'
+      })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: result.detail || 'Failed to delete hierarchy node' }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+
+  async seed() {
+    try {
+      const response = await apiRequest('/nutrient-hierarchy/seed', {
+        method: 'POST'
+      })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: result.detail || 'Failed to seed hierarchy' }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+}
+
 // User Service
 export const userService = {
   /**
@@ -1044,43 +1106,23 @@ export const coaService = {
    * Extract COA data from images using AI
    */
   async extractFromImages(images) {
-    console.log('[FRONTEND] Starting COA extraction with', images.length, 'images')
     try {
       const formData = new FormData()
       
-      // Add each image to form data
       for (let i = 0; i < images.length; i++) {
         const image = images[i]
-        console.log(`[FRONTEND] Processing COA image ${i + 1}/${images.length}`)
         
-        // Convert base64 to blob if needed
         if (typeof image === 'string' && image.startsWith('data:')) {
           const response = await fetch(image)
           const blob = await response.blob()
-          console.log(`[FRONTEND] Image ${i + 1} converted to blob: ${blob.size} bytes`)
           formData.append('images', blob, `coa_image_${i}.jpg`)
         } else if (image instanceof File || image instanceof Blob) {
-          console.log(`[FRONTEND] Image ${i + 1} is File/Blob: ${image.size} bytes`)
           formData.append('images', image, image.name || `coa_image_${i}.jpg`)
         }
       }
       
-      const token = localStorage.getItem('access_token')
-      console.log('[FRONTEND] Token present:', !!token)
-      console.log('[FRONTEND] Calling API:', `${API_BASE_URL}/coa/extract`)
-      
-      const response = await fetch(`${API_BASE_URL}/coa/extract`, {
-        method: 'POST',
-        headers: {
-          'ngrok-skip-browser-warning': '69420',
-          ...(token && { 'Authorization': `Bearer ${token}` })
-        },
-        body: formData
-      })
-      
-      console.log('[FRONTEND] Response status:', response.status)
+      const response = await apiUpload('/coa/extract', formData)
       const result = await response.json()
-      console.log('[FRONTEND] Response data:', result)
       
       if (response.ok) {
         return result
@@ -1091,7 +1133,6 @@ export const coaService = {
         }
       }
     } catch (error) {
-      console.error('[FRONTEND] COA extraction error:', error)
       return {
         success: false,
         error: error.message || 'Network error during COA extraction'

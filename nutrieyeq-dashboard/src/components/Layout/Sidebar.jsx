@@ -31,6 +31,7 @@ const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
   const managementMenuItems = [
     { icon: FolderKanban, label: 'Nomenclature Map', path: '/nomenclature', permission: 'view_nomenclature' },
     { icon: FolderKanban, label: 'COA Nomenclature', path: '/coa-nomenclature', permission: 'view_nomenclature' },
+    { icon: FolderKanban, label: 'Nutrient Hierarchy', path: '/nutrient-hierarchy', permission: 'view_nomenclature' },
     { icon: Users, label: 'Users', path: '/users', permission: 'view_users' },
     { icon: Settings, label: 'Settings', path: '/settings', permission: null },
   ]

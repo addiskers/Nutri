@@ -22,7 +22,7 @@ class UserRegister(BaseModel):
 
 class UserLogin(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., max_length=128)
     
     class Config:
         json_schema_extra = {
@@ -73,8 +73,8 @@ class ResetPassword(BaseModel):
 
 
 class ChangePassword(BaseModel):
-    current_password: str
-    new_password: str = Field(..., min_length=8)
+    current_password: str = Field(..., max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
     
     class Config:
         json_schema_extra = {
@@ -137,6 +137,17 @@ class UserResponse(BaseModel):
                 "is_verified": True,
                 "created_at": "2026-01-22T10:00:00Z",
                 "last_login": "2026-01-22T15:30:00Z"
+            }
+        }
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
             }
         }
 

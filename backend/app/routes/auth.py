@@ -8,16 +8,20 @@ def _as_utc(dt: datetime) -> datetime:
 from app.models.user import User, UserRole
 from app.schemas.auth import (
     UserRegister, UserLogin, VerifyLoginOTP, ForgotPassword, ResetPassword, ChangePassword,
-    TokenResponse, UserResponse, MessageResponse
+    RefreshTokenRequest, TokenResponse, UserResponse, MessageResponse
 )
 from app.utils.security import (
-    create_access_token, create_refresh_token, 
-    hash_password, verify_password, generate_otp, validate_password_strength
+    create_access_token, create_refresh_token, decode_token,
+    hash_password, verify_password, generate_otp, hash_otp, verify_otp,
+    validate_password_strength
 )
 from app.utils.email import send_login_otp_email, send_password_reset_email, send_user_approval_email
 from app.dependencies.auth import get_current_user
 from app.middleware.security import limiter
 from config.settings import settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -64,7 +68,7 @@ async def register(request: Request, user_data: UserRegister):
     await new_user.insert()
     
     if is_first_user:
-        print(f"[INFO] First user registered as Super Admin: {new_user.email}")
+        logger.info("First user registered as Super Admin")
         return MessageResponse(
             message="Welcome! You are the first user and have been granted Super Admin privileges.",
             success=True
@@ -73,7 +77,7 @@ async def register(request: Request, user_data: UserRegister):
     # Send approval emails to existing admins for non-first users
     try:
         super_admins = await User.find(User.role == UserRole.SUPER_ADMIN, User.is_active == True).to_list()
-        print(f"[INFO] Found {len(super_admins)} super admins to notify")
+        logger.info("Found %d super admins to notify", len(super_admins))
         
         for admin in super_admins:
             try:
@@ -85,13 +89,13 @@ async def register(request: Request, user_data: UserRegister):
                     new_user_id=str(new_user.id),
                     department=new_user.department or "Not specified"
                 )
-                print(f"[SUCCESS] Approval email sent to admin: {admin.email}")
+                logger.info("Approval email sent to admin")
             except Exception as e:
-                print(f"[WARNING] Failed to send approval email to {admin.email}: {e}")
+                logger.warning("Failed to send approval email: %s", type(e).__name__)
     except Exception as e:
-        print(f"[ERROR] Failed to get super admins or send emails: {e}")
+        logger.error("Failed to notify super admins: %s", type(e).__name__)
     
-    print(f"[INFO] New user registered: {new_user.email}")
+    logger.info("New user registered")
     
     return MessageResponse(
         message="Registration successful! Your account is pending admin approval.",
@@ -116,7 +120,7 @@ async def login(request: Request, credentials: UserLogin):
         )
     
     if not user.is_approved:
-        print(f"[WARNING] User {user.email} not approved yet")
+        logger.warning("Login attempt by unapproved user")
         return MessageResponse(
             message="Your account is pending admin approval",
             success=False
@@ -129,14 +133,14 @@ async def login(request: Request, credentials: UserLogin):
         )
     
     otp = generate_otp()
-    user.reset_token = otp
-    user.reset_token_expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+    user.login_otp = hash_otp(otp)
+    user.login_otp_expires = datetime.now(timezone.utc) + timedelta(minutes=10)
     await user.save()
-    
+
     try:
         await send_login_otp_email(user.email, otp, user.name)
     except Exception as e:
-        print(f"[ERROR] Failed to send OTP email: {e}")
+        logger.error("Failed to send OTP email: %s", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to send verification email. Please try again."
@@ -158,20 +162,20 @@ async def verify_login_otp(request: Request, otp_data: VerifyLoginOTP):
             detail="Invalid OTP"
         )
     
-    if not user.reset_token or user.reset_token != otp_data.otp:
+    if not user.login_otp or not verify_otp(otp_data.otp, user.login_otp):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid OTP"
         )
     
-    if not user.reset_token_expires or _as_utc(user.reset_token_expires) < datetime.now(timezone.utc):
+    if not user.login_otp_expires or _as_utc(user.login_otp_expires) < datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="OTP expired. Please request a new one."
         )
     
-    user.reset_token = None
-    user.reset_token_expires = None
+    user.login_otp = None
+    user.login_otp_expires = None
     user.last_login = datetime.now(timezone.utc)
     await user.save()
     
@@ -185,7 +189,7 @@ async def verify_login_otp(request: Request, otp_data: VerifyLoginOTP):
     access_token = create_access_token(token_data)
     refresh_token = create_refresh_token(token_data)
     
-    print(f"[INFO] User logged in: {user.email}")
+    logger.info("User logged in")
     
     return TokenResponse(
         access_token=access_token,
@@ -193,6 +197,65 @@ async def verify_login_otp(request: Request, otp_data: VerifyLoginOTP):
         token_type="bearer",
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         user=UserResponse.from_user(user)
+    )
+
+
+@router.post("/refresh", response_model=TokenResponse)
+@limiter.limit("10/minute")
+async def refresh_token(request: Request, body: RefreshTokenRequest):
+    """Exchange a valid refresh token for a new access + refresh token pair (rotation)."""
+    payload = decode_token(body.refresh_token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+
+    if payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type",
+        )
+
+    user_id = payload.get("user_id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
+
+    user = await User.get(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is deactivated",
+        )
+    if not user.is_approved:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is not approved",
+        )
+
+    token_data = {
+        "user_id": str(user.id),
+        "email": user.email,
+        "role": user.role,
+    }
+
+    new_access = create_access_token(token_data)
+    new_refresh = create_refresh_token(token_data)
+
+    return TokenResponse(
+        access_token=new_access,
+        refresh_token=new_refresh,
+        token_type="bearer",
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        user=UserResponse.from_user(user),
     )
 
 
@@ -210,18 +273,34 @@ async def forgot_password(request: Request, forgot_data: ForgotPassword):
         )
     
     otp = generate_otp()
-    user.reset_token = otp
+    user.reset_token = hash_otp(otp)
     user.reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=settings.PASSWORD_RESET_TOKEN_EXPIRE_HOURS)
     await user.save()
-    
-    # Send email
+
     try:
-        await send_password_reset_email(user.email, otp, user.name)
+        sent = await send_password_reset_email(user.email, otp, user.name)
+        if not sent:
+            user.reset_token = None
+            user.reset_token_expires = None
+            await user.save()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to send reset email. Please try again later."
+            )
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"[ERROR] Failed to send password reset email: {e}")
-    
-    print(f"[INFO] Password reset OTP sent to: {user.email}")
-    
+        logger.error("Failed to send password reset email: %s", type(e).__name__)
+        user.reset_token = None
+        user.reset_token_expires = None
+        await user.save()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send reset email. Please try again later."
+        )
+
+    logger.info("Password reset OTP sent")
+
     return MessageResponse(
         message="If the email exists, a password reset OTP has been sent.",
         success=True
@@ -241,7 +320,7 @@ async def reset_password(request: Request, reset_data: ResetPassword):
             detail="Invalid OTP"
         )
     
-    if not user.reset_token or user.reset_token != reset_data.otp:
+    if not user.reset_token or not verify_otp(reset_data.otp, user.reset_token):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid OTP"
@@ -267,7 +346,7 @@ async def reset_password(request: Request, reset_data: ResetPassword):
     user.updated_at = datetime.now(timezone.utc)
     await user.save()
     
-    print(f"[INFO] Password reset for: {user.email}")
+    logger.info("Password reset completed")
     
     return MessageResponse(
         message="Password reset successful. You can now login with your new password.",
@@ -276,34 +355,33 @@ async def reset_password(request: Request, reset_data: ResetPassword):
 
 
 @router.post("/change-password", response_model=MessageResponse)
+@limiter.limit("5/minute")
 async def change_password(
-    request: ChangePassword,
+    request: Request,
+    password_data: ChangePassword,
     current_user: User = Depends(get_current_user)
 ):
     """
     Change password for authenticated user
     """
-    # Verify current password
-    if not verify_password(request.current_password, current_user.hashed_password):
+    if not verify_password(password_data.current_password, current_user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Current password is incorrect"
         )
     
-    # Validate new password
-    is_valid, error_msg = validate_password_strength(request.new_password)
+    is_valid, error_msg = validate_password_strength(password_data.new_password)
     if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error_msg
         )
     
-    # Update password
-    current_user.hashed_password = hash_password(request.new_password)
+    current_user.hashed_password = hash_password(password_data.new_password)
     current_user.updated_at = datetime.now(timezone.utc)
     await current_user.save()
     
-    print(f"[INFO] Password changed for: {current_user.email}")
+    logger.info("Password changed")
     
     return MessageResponse(
         message="Password changed successfully",
@@ -328,7 +406,7 @@ async def logout(current_user: User = Depends(get_current_user)):
     
     Note: JWT tokens are stateless, so this is mainly for client-side cleanup.
     """
-    print(f"[INFO] User logged out: {current_user.email}")
+    logger.info("User logged out")
     return MessageResponse(
         message="Logged out successfully",
         success=True

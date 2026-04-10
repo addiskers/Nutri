@@ -7,6 +7,7 @@ from app.models.nomenclature import NomenclatureMapping
 from app.models.coa import COA
 from app.models.formulation import SavedFormulation
 from app.models.coa_nomenclature import COANomenclatureMapping
+from app.models.nutrient_hierarchy import NutrientHierarchyNode
 from config.settings import settings
 
 
@@ -21,7 +22,7 @@ class Database:
         cls.client = AsyncIOMotorClient(settings.MONGODB_URL)
         await init_beanie(
             database=cls.client[settings.DATABASE_NAME],
-            document_models=[User, Product, Category, NomenclatureMapping, COA, SavedFormulation, COANomenclatureMapping]
+            document_models=[User, Product, Category, NomenclatureMapping, COA, SavedFormulation, COANomenclatureMapping, NutrientHierarchyNode]
         )
         
         print(f"[OK] Connected to MongoDB database: {settings.DATABASE_NAME}")

@@ -18,9 +18,17 @@ const Login = () => {
     password: ''
   })
 
+  const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+
   const handleEmailLogin = async (e) => {
     e.preventDefault()
     setError('')
+
+    if (!isValidEmail(formData.email)) {
+      setError('Please enter a valid email address')
+      return
+    }
+
     setLoading(true)
 
     try {

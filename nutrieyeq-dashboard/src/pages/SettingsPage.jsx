@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout/Layout'
 import { User, Lock, Mail, Briefcase, Shield, Calendar, CheckCircle, AlertCircle } from 'lucide-react'
-import { apiRequest } from '../services/api'
+import { apiRequest, clearAuthData } from '../services/api'
 
 const SettingsPage = () => {
   const navigate = useNavigate()
@@ -35,7 +35,7 @@ const SettingsPage = () => {
       const response = await apiRequest('/auth/me')
 
       if (response.status === 401) {
-        localStorage.clear()
+        clearAuthData()
         navigate('/login')
         return
       }

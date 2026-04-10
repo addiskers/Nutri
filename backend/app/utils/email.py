@@ -1,47 +1,42 @@
+import logging
 import aiosmtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from jinja2 import Template
 from config.settings import settings
 
+logger = logging.getLogger(__name__)
+
 
 async def send_email(to_email: str, subject: str, html_content: str) -> bool:
     if not settings.SMTP_USER or not settings.SMTP_PASSWORD:
-        print("[WARNING] Email configuration not set. Email not sent.")
-        print(f"[DEBUG] SMTP_USER: {settings.SMTP_USER}")
-        print(f"[DEBUG] SMTP_PASSWORD: {'*' * len(settings.SMTP_PASSWORD) if settings.SMTP_PASSWORD else 'None'}")
+        logger.warning("Email configuration not set. Email not sent.")
         return False
-    
+
     try:
-        print(f"[INFO] Attempting to send email to: {to_email}")
-        print(f"[INFO] Using SMTP: {settings.SMTP_HOST}:{settings.SMTP_PORT}")
-        print(f"[INFO] From: {settings.FROM_EMAIL}")
-        
+        logger.info("Sending email (subject=%s)", subject)
+
         message = MIMEMultipart("alternative")
         message["From"] = f"{settings.FROM_NAME} <{settings.FROM_EMAIL}>"
         message["To"] = to_email
         message["Subject"] = subject
-        
+
         html_part = MIMEText(html_content, "html")
         message.attach(html_part)
-        
-        print("[INFO] Connecting to SMTP server...")
+
         await aiosmtplib.send(
             message,
             hostname=settings.SMTP_HOST,
             port=settings.SMTP_PORT,
             username=settings.SMTP_USER,
             password=settings.SMTP_PASSWORD,
-            start_tls=True  
+            start_tls=True
         )
-        
-        print(f"[SUCCESS] Email sent successfully to {to_email}")
+
+        logger.info("Email sent successfully")
         return True
     except Exception as e:
-        print(f"[ERROR] Failed to send email: {type(e).__name__}")
-        print(f"[ERROR] Error details: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error("Failed to send email: %s", type(e).__name__, exc_info=True)
         return False
 
 

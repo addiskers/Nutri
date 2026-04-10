@@ -10,14 +10,17 @@ import fitz  # PyMuPDF for PDF handling
 from io import BytesIO
 from typing import List, Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
 from pydantic import BaseModel
 from PIL import Image
 
 from app.models.user import User
 from app.models.coa import COA
 from app.dependencies.auth import get_current_user, require_permission
+from app.middleware.security import limiter
 from config.settings import settings
+
+MAX_PDF_PAGES = 50
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,9 @@ NOMENCLATURE_MAP = {
     "crude protein": "Protein",
     "total protein": "Protein",
     "protein (n x 6.25)": "protein (n x 6.25)",
+    "protein (n x 6.38)": "Protein (N x 6.38)",
+    "protein as is (n x 6.38)": "Protein as is (N x 6.38)",
+    "protein (n x 6.38) dry basis": "Protein (N x 6.38) Dry Basis",
     "protein (dry basis)": "Protein (Dry Basis)",
     "protein (wet basis)": "Protein (Wet Basis)",
     # Fats
@@ -215,6 +221,9 @@ NOMENCLATURE_MAP = {
     "polyols": "Polyol",
     "sugar alcohol": "Polyol",
     "sugar alcohols": "Polyol",
+    # Other Carbs
+    "other carbohydrates": "Other Carbs",
+    "other carbs": "Other Carbs",
     # Other Nutrients
     "carnitine": "Carnitine",
     "l-carnitine": "Carnitine",
@@ -229,6 +238,8 @@ NOMENCLATURE_MAP = {
 # Target units for normalization
 TARGET_UNITS = {
     "Protein": "g", "Protein (Dry Basis)": "g", "Protein (Wet Basis)": "g",
+    "protein (n x 6.25)": "g", "Protein (N x 6.38)": "g",
+    "Protein as is (N x 6.38)": "g", "Protein (N x 6.38) Dry Basis": "g",
     "Total Fat": "g", "Saturated Fat": "g", "Monounsaturated Fat": "g",
     "Polyunsaturated Fat": "g", "Linoleic Acid": "g", "Alpha-Linolenic Acid": "g",
     "DHA": "mg", "EPA": "mg", "Trans Fat": "g",
@@ -252,6 +263,7 @@ TARGET_UNITS = {
     "Erythritol": "g", "Glycerin": "g", "Hydrogenated Glucose Syrup": "g",
     "Hydrogenated Starch Hydrolysate": "g", "Polyol": "g",
     "Carnitine": "mg", "Choline": "mg", "Inositol": "mg", "Nucleotides": "mg", "Taurine": "mg",
+    "Other Carbs": "g",
 }
 
 UNIT_CONVERSIONS = {
@@ -370,6 +382,7 @@ def get_nutrient_category(nutrient_name: str) -> str:
                                    "Maltitol", "Maltitol Syrup", "Isomalt", "Lactitol",
                                    "Erythritol", "Glycerin", "Hydrogenated Glucose Syrup",
                                    "Hydrogenated Starch Hydrolysate", "Polyol"],
+        "Carbohydrate - Other": ["Other Carbs"],
         "Mineral": ["Sodium", "Potassium", "Calcium", "Iron", "Zinc", "Magnesium", 
                    "Phosphorus", "Chloride", "Cholesterol"],
         "Vitamin - Fat Soluble": ["Vitamin A", "Vitamin D", "Vitamin D3", "Vitamin E"],
@@ -589,9 +602,11 @@ class COAResponse(BaseModel):
 # ============================================================
 
 @router.post("/extract", response_model=ExtractedCOAData)
+@limiter.limit("10/minute")
 async def extract_coa_from_images(
+    request: Request,
     images: List[UploadFile] = File(...),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("add_coa"))
 ):
     """
     Extract COA data from uploaded images using Gemini AI
@@ -644,9 +659,15 @@ async def extract_coa_from_images(
                 # Check if it's a PDF
                 if img.filename.lower().endswith('.pdf'):
                     safe_print(f"[COA EXTRACTION] Converting PDF to images...")
-                    # Use PyMuPDF to convert PDF pages to images
                     pdf_document = fitz.open(stream=content, filetype="pdf")
                     total_pages = len(pdf_document)
+                    
+                    if total_pages > MAX_PDF_PAGES:
+                        pdf_document.close()
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"PDF has {total_pages} pages, maximum allowed is {MAX_PDF_PAGES}"
+                        )
                     
                     for page_num in range(total_pages):
                         page = pdf_document[page_num]
@@ -779,19 +800,18 @@ async def extract_coa_from_images(
         )
         
     except json.JSONDecodeError as e:
-        logger.error(f"JSON parsing failed: {e}")
+        logger.error("COA JSON parsing failed: %s", e)
         return ExtractedCOAData(
             success=False,
-            error=f"Failed to parse AI response: {str(e)}"
+            error="Failed to parse AI response"
         )
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"COA Extraction failed: {e}")
-        error_msg = f"{type(e).__name__}: {str(e)}"
+        logger.error("COA extraction failed: %s", e, exc_info=True)
         return ExtractedCOAData(
             success=False,
-            error=f"Extraction failed: {error_msg}"
+            error="Extraction failed. Please try again."
         )
 
 
@@ -870,6 +890,7 @@ async def list_coas(
 ):
     """List all COA entries with optional filters (requires view_coa permission)"""
     try:
+        limit = min(limit, 200)
         query = {}
         
         if status:

@@ -17,6 +17,7 @@ import COA from './pages/COA'
 import Formulation from './pages/Formulation'
 import NomenclatureMap from './pages/NomenclatureMap'
 import COANomenclatureMap from './pages/COANomenclatureMap'
+import NutrientHierarchyMap from './pages/NutrientHierarchyMap'
 
 import SettingsPage from './pages/SettingsPage'
 
@@ -114,6 +115,14 @@ function App() {
           <ProtectedRoute>
             <PermissionGuard permission="edit_nomenclature" pageName="COA Nomenclature">
               <COANomenclatureMap />
+            </PermissionGuard>
+          </ProtectedRoute>
+        } />
+        
+        <Route path="/nutrient-hierarchy" element={
+          <ProtectedRoute>
+            <PermissionGuard permission="edit_nomenclature" pageName="Nutrient Hierarchy">
+              <NutrientHierarchyMap />
             </PermissionGuard>
           </ProtectedRoute>
         } />

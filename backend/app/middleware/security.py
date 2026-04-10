@@ -8,7 +8,10 @@ from slowapi.middleware import SlowAPIMiddleware
 from config.settings import settings
 
 
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=[f"{settings.RATE_LIMIT_PER_MINUTE}/minute"],
+)
 
 
 def configure_cors(app):
@@ -31,7 +34,7 @@ def configure_cors(app):
         allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "ngrok-skip-browser-warning"],
+        allow_headers=["Authorization", "Content-Type"],
         expose_headers=["Content-Disposition"]
     )
     

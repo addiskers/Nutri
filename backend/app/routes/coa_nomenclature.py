@@ -5,10 +5,10 @@ import re
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime, timezone
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.models.coa_nomenclature import COANomenclatureMapping
 from app.models.user import User
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, require_permission
 
 router = APIRouter(prefix="/coa-nomenclature", tags=["COA Nomenclature"])
 
@@ -34,7 +34,7 @@ class SynonymAdd(BaseModel):
 @router.post("", response_model=dict)
 async def create_coa_nomenclature(
     data: COANomenclatureCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("edit_nomenclature"))
 ):
     existing = await COANomenclatureMapping.find_one(
         COANomenclatureMapping.standardized_name == data.standardized_name
@@ -71,6 +71,7 @@ async def list_coa_nomenclature(
     search: Optional[str] = None,
     current_user: User = Depends(get_current_user),
 ):
+    limit = min(limit, 200)
     query = {}
     if search:
         escaped = re.escape(search)
@@ -122,7 +123,7 @@ async def get_coa_nomenclature_map(current_user: User = Depends(get_current_user
 
 
 class ResolveRequest(BaseModel):
-    raw_names: List[str]
+    raw_names: List[str] = Field(..., max_length=500)
 
 
 @router.post("/resolve", response_model=dict)
@@ -193,12 +194,14 @@ async def get_coa_nomenclature(mapping_id: str, current_user: User = Depends(get
 async def update_coa_nomenclature(
     mapping_id: str,
     update: COANomenclatureUpdate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("edit_nomenclature"))
 ):
     from bson import ObjectId
     mapping = await COANomenclatureMapping.get(ObjectId(mapping_id))
     if not mapping:
         raise HTTPException(status_code=404, detail="COA nomenclature mapping not found")
+
+    old_name = mapping.standardized_name
 
     if update.standardized_name and update.standardized_name != mapping.standardized_name:
         existing = await COANomenclatureMapping.find_one(
@@ -222,6 +225,41 @@ async def update_coa_nomenclature(
     mapping.updated_at = datetime.now(timezone.utc)
     await mapping.save()
 
+    # Sync rename to nutrient hierarchy if the standardized name changed
+    hierarchy_synced = 0
+    if update.standardized_name and update.standardized_name != old_name:
+        from app.models.nutrient_hierarchy import NutrientHierarchyNode
+
+        # Update node whose nutrient_name matches the old name
+        node = await NutrientHierarchyNode.find_one(
+            NutrientHierarchyNode.nutrient_name == old_name
+        )
+        if node:
+            node.nutrient_name = update.standardized_name
+            node.updated_at = datetime.now(timezone.utc)
+            await node.save()
+            hierarchy_synced += 1
+
+        # Update children whose parent_nutrient matches the old name
+        children = await NutrientHierarchyNode.find(
+            NutrientHierarchyNode.parent_nutrient == old_name
+        ).to_list()
+        for child in children:
+            child.parent_nutrient = update.standardized_name
+            child.updated_at = datetime.now(timezone.utc)
+            await child.save()
+            hierarchy_synced += 1
+
+        # Update any variant lists that contain the old name
+        all_nodes = await NutrientHierarchyNode.find(
+            {"variants": old_name}
+        ).to_list()
+        for vnode in all_nodes:
+            vnode.variants = [update.standardized_name if v == old_name else v for v in vnode.variants]
+            vnode.updated_at = datetime.now(timezone.utc)
+            await vnode.save()
+            hierarchy_synced += 1
+
     return {
         "id": str(mapping.id),
         "standardized_name": mapping.standardized_name,
@@ -229,6 +267,7 @@ async def update_coa_nomenclature(
         "target_unit": mapping.target_unit,
         "category": mapping.category,
         "updated_at": mapping.updated_at.isoformat(),
+        "hierarchy_synced": hierarchy_synced,
     }
 
 
@@ -236,7 +275,7 @@ async def update_coa_nomenclature(
 async def add_synonym(
     mapping_id: str,
     synonym_data: SynonymAdd,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("edit_nomenclature"))
 ):
     from bson import ObjectId
     mapping = await COANomenclatureMapping.get(ObjectId(mapping_id))
@@ -262,7 +301,7 @@ async def add_synonym(
 async def remove_synonym(
     mapping_id: str,
     raw_name: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("edit_nomenclature"))
 ):
     from bson import ObjectId
     mapping = await COANomenclatureMapping.get(ObjectId(mapping_id))
@@ -287,7 +326,7 @@ async def remove_synonym(
 @router.delete("/{mapping_id}", response_model=dict)
 async def delete_coa_nomenclature(
     mapping_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("edit_nomenclature"))
 ):
     from bson import ObjectId
     mapping = await COANomenclatureMapping.get(ObjectId(mapping_id))
@@ -300,7 +339,7 @@ async def delete_coa_nomenclature(
 
 @router.post("/seed", response_model=dict)
 async def seed_coa_nomenclature(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("edit_nomenclature"))
 ):
     """Seed COA nomenclature from the hardcoded NOMENCLATURE_MAP + TARGET_UNITS in coa.py"""
     from app.routes.coa import NOMENCLATURE_MAP, TARGET_UNITS, get_nutrient_category

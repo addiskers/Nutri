@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 from app.models.nomenclature import NomenclatureMapping
 from app.models.user import User
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class SynonymAdd(BaseModel):
 @router.post("", response_model=dict)
 async def create_nomenclature(
     nomenclature_data: NomenclatureCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("edit_nomenclature"))
 ):
     """Create a new nomenclature mapping"""
     try:
@@ -89,6 +89,7 @@ async def list_nomenclature(
 ):
     """List all nomenclature mappings"""
     try:
+        limit = min(limit, 200)
         mappings = await NomenclatureMapping.find_all().skip(skip).limit(limit).to_list()
         total = await NomenclatureMapping.find_all().count()
         
@@ -177,7 +178,7 @@ async def get_nomenclature(mapping_id: str, current_user: User = Depends(get_cur
 async def update_nomenclature(
     mapping_id: str,
     nomenclature_update: NomenclatureUpdate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("edit_nomenclature"))
 ):
     """Update a nomenclature mapping"""
     try:
@@ -228,7 +229,7 @@ async def update_nomenclature(
 async def add_synonym(
     mapping_id: str,
     synonym_data: SynonymAdd,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("edit_nomenclature"))
 ):
     """Add a synonym/raw name to an existing mapping"""
     try:
@@ -271,7 +272,7 @@ async def add_synonym(
 async def remove_synonym(
     mapping_id: str,
     raw_name: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("edit_nomenclature"))
 ):
     """Remove a synonym/raw name from a mapping"""
     try:
@@ -316,7 +317,7 @@ async def remove_synonym(
 @router.delete("/{mapping_id}", response_model=dict)
 async def delete_nomenclature(
     mapping_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("edit_nomenclature"))
 ):
     """Delete a nomenclature mapping"""
     try:
@@ -347,7 +348,7 @@ async def delete_nomenclature(
 # ============================================================
 @router.post("/seed", response_model=dict)
 async def seed_nomenclature(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("edit_nomenclature"))
 ):
     """Seed nomenclature collection from the hardcoded NOMENCLATURE_MAP in products.py.
     Skips standardized names that already exist in the DB."""

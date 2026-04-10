@@ -2,9 +2,9 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 
 import Layout from '../components/Layout/Layout'
 
-import { Plus, Trash2, Loader2, Search, AlertCircle, Beaker, Download, X, ChevronDown, Users, Edit3 } from 'lucide-react'
+import { Plus, Trash2, Loader2, Search, AlertCircle, Beaker, Download, X, ChevronDown, Users, Edit3, Calculator, AlertTriangle } from 'lucide-react'
 
-import { coaService, formulationService, apiRequest } from '../services/api'
+import { coaService, formulationService, apiRequest, nutrientHierarchyService } from '../services/api'
 import authService from '../services/api'
 import TransferFormulationModal from '../components/Modals/TransferFormulationModal'
 import IngredientMappingModal from '../components/Modals/IngredientMappingModal'
@@ -82,6 +82,10 @@ const Formulation = () => {
   // Ingredient mapping modal
   const [showMappingModal, setShowMappingModal] = useState(false)
   const [mappingModalData, setMappingModalData] = useState(null)
+
+  // Nutrient hierarchy for roll-up calculations
+  const [hierarchyTree, setHierarchyTree] = useState(null)
+  const [hierarchyFlat, setHierarchyFlat] = useState([])
 
   // Energy Calculation Breakdown
   const [showEnergyBreakdown, setShowEnergyBreakdown] = useState(false)
@@ -416,11 +420,25 @@ const Formulation = () => {
 
   
 
-  // Load COAs on mount
+  // Load COAs and nutrient hierarchy on mount
 
   useEffect(() => {
 
     loadCOAs()
+    nutrientHierarchyService.getTree()
+      .then(res => {
+        setHierarchyTree(res.tree || [])
+        const flat = []
+        const flatten = (nodes) => {
+          for (const n of nodes) {
+            flat.push(n)
+            if (n.children) flatten(n.children)
+          }
+        }
+        flatten(res.tree || [])
+        setHierarchyFlat(flat)
+      })
+      .catch(err => console.error('Failed to load nutrient hierarchy:', err))
 
   }, [])
 
@@ -692,6 +710,8 @@ const Formulation = () => {
     'PUFA', 'Polyunsaturated Fat',
     'Linoleic Acid', 'LA',
     'Alpha-Linolenic Acid', 'ALA',
+    'DHA', 'Docosahexaenoic Acid',
+    'EPA', 'Eicosapentaenoic Acid',
     'Trans Fat', 'Trans Fa',
     'Cholesterol',
     'Vitamin A',
@@ -859,8 +879,18 @@ const Formulation = () => {
     setShowAddEnergyRow(false)
   }
 
-  const removeCustomEnergyRow = (rowId) => {
+  const removeEnergyRow = (rowId) => {
     setEnergyRows(prev => prev.filter(r => r.id !== rowId))
+  }
+
+  const toggleEnergyRowType = (rowId) => {
+    setEnergyRows(prev => prev.map(r => {
+      if (r.id !== rowId) return r
+      if (r.type === 'direct') return { ...r, type: 'carb_subtract', label: `− ${r.label.replace(/^−\s*/, '')}` }
+      if (r.type === 'carb_subtract') return { ...r, type: 'direct', label: r.label.replace(/^−\s*/, '') }
+      if (r.type === 'carb_base') return r
+      return r
+    }))
   }
 
   // Get total percentage
@@ -873,14 +903,99 @@ const Formulation = () => {
 
   
 
+  // ── Hierarchy roll-up logic ───────────────────────────────────────────────
+
+  const applyHierarchyRollups = (rawTotals, tree) => {
+    if (!tree || tree.length === 0) return { totals: rawTotals, warnings: [], inferred: new Set() }
+
+    const totals = { ...rawTotals }
+    const warnings = []
+    const inferred = new Set()
+
+    // 1. Collapse protein variants: merge alternate names into canonical name
+    const processVariants = (nodes) => {
+      for (const node of nodes) {
+        if (node.rule === 'collapse_variants' && node.variants?.length > 0) {
+          const canonical = node.nutrient_name
+          for (const variant of node.variants) {
+            if (totals[variant] !== undefined && variant !== canonical) {
+              totals[canonical] = (totals[canonical] || 0) + totals[variant]
+              delete totals[variant]
+            }
+          }
+        }
+        if (node.children?.length > 0) processVariants(node.children)
+      }
+    }
+    processVariants(tree)
+
+    // 2. Bottom-up roll-up: process leaves first, then parents
+    const processNode = (node) => {
+      if (node.children?.length > 0) {
+        for (const child of node.children) processNode(child)
+      }
+
+      if (node.rule === 'gte_sum' && node.children?.length > 0) {
+        const additiveChildren = node.children.filter(c => c.is_additive !== false)
+        const childrenSum = additiveChildren.reduce((sum, child) => {
+          return sum + (totals[child.nutrient_name] || 0)
+        }, 0)
+
+        const hasAnyChild = additiveChildren.some(c => totals[c.nutrient_name] !== undefined && totals[c.nutrient_name] > 0)
+        const parentExists = totals[node.nutrient_name] !== undefined && totals[node.nutrient_name] > 0
+
+        if (!parentExists && hasAnyChild) {
+          totals[node.nutrient_name] = childrenSum
+          inferred.add(node.nutrient_name)
+        } else if (parentExists && childrenSum > 0 && totals[node.nutrient_name] < childrenSum) {
+          warnings.push({
+            nutrient: node.nutrient_name,
+            parentValue: totals[node.nutrient_name],
+            childrenSum,
+            message: `${node.nutrient_name} (${totals[node.nutrient_name].toFixed(2)}) is less than sum of sub-nutrients (${childrenSum.toFixed(2)})`,
+          })
+          totals[node.nutrient_name] = childrenSum
+          inferred.add(node.nutrient_name)
+        }
+      }
+    }
+
+    for (const root of tree) processNode(root)
+
+    return { totals, warnings, inferred }
+  }
+
   // Get all nutrient names and their totals
 
   const nutrientNames = getAllNutrientNames()
 
-  const nutrientTotals = {}
+  const rawNutrientTotals = {}
   nutrientNames.forEach(nutrient => {
-    nutrientTotals[nutrient] = calculateTotal(nutrient)
+    rawNutrientTotals[nutrient] = calculateTotal(nutrient)
   })
+
+  const hierarchyResult = applyHierarchyRollups(rawNutrientTotals, hierarchyTree)
+  const nutrientTotals = hierarchyResult.totals
+  const hierarchyWarnings = hierarchyResult.warnings
+  const hierarchyInferred = hierarchyResult.inferred
+
+  // Add any nutrients that were inferred but not in the original list
+  const allNutrientNames = [...nutrientNames]
+  for (const key of Object.keys(nutrientTotals)) {
+    if (!allNutrientNames.includes(key) && nutrientTotals[key] > 0) {
+      allNutrientNames.push(key)
+    }
+  }
+
+  // Build a depth map from hierarchy for display indentation
+  const hierarchyDepthMap = {}
+  const buildDepthMap = (nodes, depth) => {
+    for (const n of nodes) {
+      hierarchyDepthMap[n.nutrient_name] = depth
+      if (n.children?.length > 0) buildDepthMap(n.children, depth + 1)
+    }
+  }
+  if (hierarchyTree) buildDepthMap(hierarchyTree, 0)
 
   // Energy breakdown using the corrected formula
   const energyBreakdown = calculateEnergyFromBreakdown(nutrientTotals)
@@ -1040,7 +1155,7 @@ const Formulation = () => {
         nutrient_selections: nutrientSelections,
         custom_values: customValues,
         serve_size: serveSize,
-        created_by: localStorage.getItem('user_email') || 'admin'
+        created_by: (() => { try { return JSON.parse(localStorage.getItem('user'))?.email } catch { return null } })() || 'unknown'
       })
 
       if (result.success) {
@@ -1141,6 +1256,8 @@ const Formulation = () => {
     { name: 'PUFA', unit: 'g', indent: 1, aliases: ['Polyunsaturated Fat'] },
     { name: 'Linoleic Acid', unit: 'g', indent: 2, aliases: ['LA'] },
     { name: 'Alpha-Linolenic Acid (ALA)', unit: 'mg', indent: 2, aliases: ['Alpha-Linolenic Acid', 'ALA'] },
+    { name: 'DHA', unit: 'mg', indent: 2, aliases: ['Docosahexaenoic Acid'] },
+    { name: 'EPA', unit: 'mg', indent: 2, aliases: ['Eicosapentaenoic Acid'] },
     { name: 'Trans Fat', unit: 'g', indent: 1, aliases: ['Trans Fa'] },
     { name: 'Cholesterol', unit: 'mg', indent: 1 },
     { name: 'Vitamin A (palmitate)', unit: 'mcg (RE)', indent: 0, aliases: ['Vitamin A'], section: 'Vitamins' },
@@ -1267,12 +1384,26 @@ const Formulation = () => {
       const nutrientKey = findNutrientKey(entry)
       const per100g = nutrientKey ? (nutrientTotals[nutrientKey] || 0) : 0
       const perServe = per100g * sv / 100
+      const isInferredVal = nutrientKey && hierarchyInferred.has(nutrientKey)
+      const hasWarning = nutrientKey && hierarchyWarnings.some(w => w.nutrient === nutrientKey)
 
       const row = worksheet.getRow(currentRow)
       colIndex = 1
-      row.getCell(colIndex++).value = displayName
-      row.getCell(colIndex++).value = isNaN(per100g) ? 0 : parseFloat(per100g.toFixed(2))
-      row.getCell(colIndex++).value = isNaN(perServe) ? 0 : parseFloat(perServe.toFixed(2))
+      const nameCell = row.getCell(colIndex++)
+      nameCell.value = isInferredVal ? `${displayName} *` : displayName
+      if (hasWarning) {
+        nameCell.font = { italic: true, color: { argb: 'FFD97706' } }
+      }
+      const val100Cell = row.getCell(colIndex++)
+      val100Cell.value = isNaN(per100g) ? 0 : parseFloat(per100g.toFixed(2))
+      if (isInferredVal) {
+        val100Cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } }
+      }
+      const valServeCell = row.getCell(colIndex++)
+      valServeCell.value = isNaN(perServe) ? 0 : parseFloat(perServe.toFixed(2))
+      if (isInferredVal) {
+        valServeCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } }
+      }
 
       // For each RDA category, add: RDA value, %RDA per 100g, %RDA per serve
       selectedRDACategories.forEach(cat => {
@@ -1622,19 +1753,20 @@ const Formulation = () => {
 
                     </th>
 
-                    {nutrientNames.map(nutrient => (
-
-                      <th key={nutrient} className="px-3 py-3 text-right min-w-[100px] w-[100px]">
-
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider whitespace-nowrap">
-
-                          {nutrient}
-
-                        </span>
-
-                      </th>
-
-                    ))}
+                    {nutrientNames.map(nutrient => {
+                      const depth = hierarchyDepthMap[nutrient]
+                      const isParent = depth === 0
+                      const isChild = depth !== undefined && depth > 0
+                      return (
+                        <th key={nutrient} className="px-3 py-3 text-right min-w-[100px] w-[100px]">
+                          <span className={`text-xs font-ibm-plex uppercase tracking-wider whitespace-nowrap ${
+                            isParent ? 'font-semibold text-[#0f1729]' : isChild ? 'font-normal text-[#65758b] italic' : 'font-medium text-[#65758b]'
+                          }`}>
+                            {isChild ? `  ${nutrient}` : nutrient}
+                          </span>
+                        </th>
+                      )
+                    })}
 
                     <th className="px-3 py-3 text-center min-w-[80px] w-[80px] sticky right-0 bg-[#f1f5f9] z-10 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]">
 
@@ -1888,19 +2020,32 @@ const Formulation = () => {
 
                     </td>
 
-                    {nutrientNames.map(nutrient => (
-
-                      <td key={nutrient} className="px-3 py-3 text-right min-w-[100px] w-[100px]">
-
-                        <span className="text-sm font-ibm-plex font-bold text-[#0f1729] tabular-nums">
-
-                          {nutrientTotals[nutrient].toFixed(2)}
-
-                        </span>
-
-                      </td>
-
-                    ))}
+                    {nutrientNames.map(nutrient => {
+                      const val = nutrientTotals[nutrient] ?? 0
+                      const isInferred = hierarchyInferred.has(nutrient)
+                      const warning = hierarchyWarnings.find(w => w.nutrient === nutrient)
+                      return (
+                        <td key={nutrient} className="px-3 py-3 text-right min-w-[100px] w-[100px]">
+                          <div className="inline-flex items-center gap-1 justify-end">
+                            {warning && (
+                              <span title={warning.message}>
+                                <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                              </span>
+                            )}
+                            {isInferred && !warning && (
+                              <span title="Calculated from sub-nutrients">
+                                <Calculator className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                              </span>
+                            )}
+                            <span className={`text-sm font-ibm-plex font-bold tabular-nums ${
+                              warning ? 'text-amber-600' : isInferred ? 'text-blue-600' : 'text-[#0f1729]'
+                            }`}>
+                              {val.toFixed(2)}
+                            </span>
+                          </div>
+                        </td>
+                      )
+                    })}
 
                     <td className="px-3 py-3 sticky right-0 bg-[#f1f5f9]"></td>
 
@@ -2036,8 +2181,8 @@ const Formulation = () => {
             {showEnergyBreakdown && (
               <div className="border-t border-[#e1e7ef] p-4">
                 <p className="text-xs font-ibm-plex text-[#65758b] mb-4">
-                  Toggle nutrients on/off and edit multipliers to control how energy is calculated.
-                  Carb energy = (Carb × multiplier) − (Fiber × multiplier) − (Polyol × multiplier) − (Erythritol × multiplier)
+                  Toggle nutrients on/off, switch between + Add / − Subtract mode, edit multipliers, and delete any row.
+                  Use "Reset to defaults" to restore the standard configuration.
                 </p>
 
                 <div className="overflow-x-auto">
@@ -2049,6 +2194,9 @@ const Formulation = () => {
                         </th>
                         <th className="px-4 py-3 text-left">
                           <span className="text-xs font-medium text-[#65758b] uppercase tracking-wider">Component</span>
+                        </th>
+                        <th className="px-4 py-3 text-center w-20">
+                          <span className="text-xs font-medium text-[#65758b] uppercase tracking-wider">Mode</span>
                         </th>
                         <th className="px-4 py-3 text-right">
                           <span className="text-xs font-medium text-[#65758b] uppercase tracking-wider">Total (g/100g)</span>
@@ -2074,6 +2222,7 @@ const Formulation = () => {
                       {energyBreakdown.rowDetails.map((row) => {
                         const isSubtract = row.type === 'carb_subtract'
                         const isCustom = row.custom || !defaultRowIds.has(row.id)
+                        const isCarbBase = row.type === 'carb_base'
                         return (
                           <tr
                             key={row.id}
@@ -2096,13 +2245,31 @@ const Formulation = () => {
 
                             <td className={`px-4 py-3 ${isSubtract ? 'pl-8' : ''}`}>
                               <span className={`font-medium ${isSubtract ? 'text-[#d97706]' : 'text-[#0f1729]'}`}>
-                                {row.label}
+                                {isSubtract ? `− ${row.label.replace(/^−\s*/, '')}` : row.label}
                               </span>
-                              {row.type === 'carb_base' && (
+                              {isCarbBase && (
                                 <span className="ml-2 text-xs text-[#65758b]">(net after subtractions)</span>
                               )}
                               {isCustom && (
                                 <span className="ml-2 text-xs text-[#009da5] bg-[#e1f4f5] px-1.5 py-0.5 rounded">custom</span>
+                              )}
+                            </td>
+
+                            <td className="px-4 py-3 text-center">
+                              {isCarbBase ? (
+                                <span className="text-xs text-[#65758b] font-medium">BASE</span>
+                              ) : (
+                                <button
+                                  onClick={() => toggleEnergyRowType(row.id)}
+                                  className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full transition-colors ${
+                                    isSubtract
+                                      ? 'bg-[#fef3c7] text-[#d97706] hover:bg-[#fde68a]'
+                                      : 'bg-[#d1fae5] text-[#059669] hover:bg-[#a7f3d0]'
+                                  }`}
+                                  title={isSubtract ? 'Click to switch to Add (+)' : 'Click to switch to Subtract (−)'}
+                                >
+                                  {isSubtract ? '− SUB' : '+ ADD'}
+                                </button>
                               )}
                             </td>
 
@@ -2145,15 +2312,13 @@ const Formulation = () => {
                             </td>
 
                             <td className="px-4 py-3 text-center">
-                              {isCustom && (
-                                <button
-                                  onClick={() => removeCustomEnergyRow(row.id)}
-                                  className="text-[#ef4343] hover:text-red-700 transition-colors"
-                                  title="Remove row"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
+                              <button
+                                onClick={() => removeEnergyRow(row.id)}
+                                className="text-[#ef4343] hover:text-red-700 transition-colors"
+                                title="Remove row"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                             </td>
                           </tr>
                         )
@@ -2165,32 +2330,32 @@ const Formulation = () => {
                           <td className="px-4 py-3 text-center">
                             <Plus className="w-4 h-4 text-[#059669] mx-auto" />
                           </td>
-                          <td className="px-4 py-3" colSpan={2}>
-                            <div className="flex items-center gap-2">
-                              <select
-                                value={newEnergyNutrient}
-                                onChange={(e) => setNewEnergyNutrient(e.target.value)}
-                                className="flex-1 px-2 py-1.5 text-sm font-ibm-plex text-[#0f1729] bg-white border border-[#e1e7ef] rounded focus:outline-none focus:ring-1 focus:ring-[#009da5]"
-                              >
-                                <option value="">Select nutrient...</option>
-                                {nutrientNames
-                                  .filter(n => !energyRows.some(r => r.matchNames.includes(n)))
-                                  .map(n => (
-                                    <option key={n} value={n}>{n}</option>
-                                  ))
-                                }
-                              </select>
-                            </div>
+                          <td className="px-4 py-3">
+                            <select
+                              value={newEnergyNutrient}
+                              onChange={(e) => setNewEnergyNutrient(e.target.value)}
+                              className="w-full px-2 py-1.5 text-sm font-ibm-plex text-[#0f1729] bg-white border border-[#e1e7ef] rounded focus:outline-none focus:ring-1 focus:ring-[#009da5]"
+                            >
+                              <option value="">Select nutrient column...</option>
+                              {nutrientNames
+                                .filter(n => !energyRows.some(r => r.matchNames.includes(n)))
+                                .map(n => (
+                                  <option key={n} value={n}>{n}</option>
+                                ))
+                              }
+                            </select>
                           </td>
                           <td className="px-4 py-3 text-center">
                             <select
                               value={newEnergyType}
                               onChange={(e) => setNewEnergyType(e.target.value)}
-                              className="px-2 py-1.5 text-xs font-ibm-plex text-[#0f1729] bg-white border border-[#e1e7ef] rounded focus:outline-none focus:ring-1 focus:ring-[#009da5]"
+                              className="px-2 py-1.5 text-xs font-ibm-plex font-medium text-[#0f1729] bg-white border border-[#e1e7ef] rounded focus:outline-none focus:ring-1 focus:ring-[#009da5]"
                             >
                               <option value="direct">+ Add</option>
                               <option value="carb_subtract">− Subtract</option>
                             </select>
+                          </td>
+                          <td className="px-4 py-3" colSpan={2}>
                           </td>
                           <td className="px-4 py-3 text-center">
                             <input
@@ -2223,13 +2388,12 @@ const Formulation = () => {
                               </button>
                             </div>
                           </td>
-                          <td></td>
                         </tr>
                       )}
 
                       {/* Total Row */}
                       <tr className="bg-[#009da5] text-white">
-                        <td colSpan={7} className="px-4 py-3 text-right">
+                        <td colSpan={8} className="px-4 py-3 text-right">
                           <span className="font-bold">Total Energy</span>
                         </td>
                         <td className="px-4 py-3 text-right">
@@ -2265,18 +2429,19 @@ const Formulation = () => {
         {ingredients.length > 0 && (
           <div className="bg-white border border-[#e1e7ef] rounded-lg shadow-sm p-4">
             <h3 className="text-sm font-ibm-plex font-semibold text-[#0f1729] mb-3">
-              Energy Conversion Factors
+              Energy Conversion Factors (current config)
             </h3>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs font-ibm-plex text-[#65758b]">
-              <div>• Protein: {energyRows.find(r => r.id === 'protein')?.multiplier ?? 4} kcal/g</div>
-              <div>• Carbohydrates: {energyRows.find(r => r.id === 'carb')?.multiplier ?? 4} kcal/g (gross)</div>
-              <div>• Dietary Fiber: −{energyRows.find(r => r.id === 'fiber')?.multiplier ?? 2} kcal/g (subtracted from carb)</div>
-              <div>• Polyols: −{energyRows.find(r => r.id === 'polyol')?.multiplier ?? 2} kcal/g (subtracted from carb)</div>
-              <div>• Erythritol: 0 kcal/g (−{energyRows.find(r => r.id === 'erythritol')?.multiplier ?? 4} subtracted)</div>
-              <div>• Total Fat: {energyRows.find(r => r.id === 'fat')?.multiplier ?? 9} kcal/g</div>
+              {energyRows.filter(r => r.enabled).map(r => (
+                <div key={r.id}>
+                  • {r.label.replace(/^−\s*/, '')}: {r.type === 'carb_subtract' ? `−${r.multiplier}` : r.multiplier} kcal/g
+                  {r.type === 'carb_subtract' && ' (subtracted)'}
+                  {r.type === 'carb_base' && ' (base, net)'}
+                </div>
+              ))}
             </div>
             <p className="text-xs font-ibm-plex text-[#65758b] mt-2 italic">
-              Carb Energy = (Total Carb × {energyRows.find(r => r.id === 'carb')?.multiplier ?? 4}) − (Fiber × {energyRows.find(r => r.id === 'fiber')?.multiplier ?? 2}) − (Polyol × {energyRows.find(r => r.id === 'polyol')?.multiplier ?? 2}) − (Erythritol × {energyRows.find(r => r.id === 'erythritol')?.multiplier ?? 4})
+              Energy = Σ(direct components × multiplier) + max(0, carb_base × multiplier − Σ(subtractions × multiplier))
             </p>
           </div>
         )}

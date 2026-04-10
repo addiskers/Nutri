@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 from app.models.category import Category
 from app.models.user import User
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, require_permission
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class CategoryUpdate(BaseModel):
 @router.post("", response_model=dict)
 async def create_category(
     category_data: CategoryCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("add_products"))
 ):
     """Create a new category"""
     try:
@@ -82,6 +82,7 @@ async def list_categories(
 ):
     """List all categories"""
     try:
+        limit = min(limit, 200)
         categories = await Category.find_all().skip(skip).limit(limit).to_list()
         total = await Category.find_all().count()
         
@@ -141,7 +142,7 @@ async def get_category(category_id: str, current_user: User = Depends(get_curren
 async def update_category(
     category_id: str,
     category_update: CategoryUpdate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("edit_products"))
 ):
     """Update a category"""
     try:
@@ -192,7 +193,7 @@ async def update_category(
 @router.delete("/{category_id}", response_model=dict)
 async def delete_category(
     category_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_permission("delete_products"))
 ):
     """Delete a category"""
     try:

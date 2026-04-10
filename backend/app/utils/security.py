@@ -3,6 +3,7 @@ from typing import Optional, Dict
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from config.settings import settings
+import hashlib
 import secrets
 
 
@@ -31,7 +32,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         "type": "access"
     })
     
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm="HS256")
     return encoded_jwt
 
 
@@ -44,14 +45,14 @@ def create_refresh_token(data: dict) -> str:
         "iat": datetime.now(timezone.utc),
         "type": "refresh"
     })
-    
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm="HS256")
     return encoded_jwt
 
 
 def decode_token(token: str) -> Optional[Dict]:
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
         return payload
     except JWTError:
         return None
@@ -63,6 +64,14 @@ def generate_password_reset_token() -> str:
 
 def generate_otp() -> str:
     return ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+
+
+def hash_otp(otp: str) -> str:
+    return hashlib.sha256(otp.encode()).hexdigest()
+
+
+def verify_otp(plain_otp: str, hashed_otp: str) -> bool:
+    return hashlib.sha256(plain_otp.encode()).hexdigest() == hashed_otp
 
 
 def validate_password_strength(password: str) -> tuple[bool, str]:

@@ -69,6 +69,8 @@ class User(Document):
     name: str = Field(..., min_length=2, max_length=100)
     email: EmailStr = Field(..., unique=True, index=True)
     hashed_password: Optional[str] = None
+    login_otp: Optional[str] = None
+    login_otp_expires: Optional[datetime] = None
     reset_token: Optional[str] = None
     reset_token_expires: Optional[datetime] = None
     department: Optional[str] = None

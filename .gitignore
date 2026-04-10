@@ -8,7 +8,6 @@ DEPLOYMENT.md
 # Environment files
 .env
 .env.*
-!.env.production
 
 # Python
 __pycache__/
