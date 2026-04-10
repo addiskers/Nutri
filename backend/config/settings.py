@@ -1,8 +1,10 @@
-import os
+import logging
 import sys
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -26,6 +28,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
     GEMINI_API_KEY: Optional[str] = None
+    ENVIRONMENT: str = "development"
     
     @field_validator('SECRET_KEY', mode='before')
     @classmethod
@@ -34,6 +37,14 @@ class Settings(BaseSettings):
             print("\n[FATAL] SECRET_KEY environment variable is missing or too short (min 32 chars).")
             print("  Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\"")
             sys.exit(1)
+        return v
+
+    @field_validator('ALGORITHM', mode='before')
+    @classmethod
+    def validate_algorithm(cls, v):
+        allowed = {"HS256", "HS384", "HS512"}
+        if v not in allowed:
+            raise ValueError(f"ALGORITHM must be one of {allowed}")
         return v
 
     @field_validator('DEBUG', mode='before')

@@ -206,6 +206,15 @@ async def transfer_formulation(
         if not is_super_admin and formulation.created_by != current_user.email:
             raise HTTPException(status_code=403, detail="Access denied")
         
+        valid_users = await User.find({"email": {"$in": target_users}}).to_list()
+        valid_emails = {u.email for u in valid_users}
+        invalid_emails = [e for e in target_users if e not in valid_emails]
+        if invalid_emails:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Users not found: {', '.join(invalid_emails)}"
+            )
+        
         transferred_count = 0
         
         for target_user in target_users:

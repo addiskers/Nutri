@@ -616,20 +616,14 @@ async def extract_coa_from_images(
     - User can review and edit before saving
     """
     def safe_print(msg):
-        try:
-            print(msg)
-        except UnicodeEncodeError:
-            try:
-                print(msg.encode('ascii', 'replace').decode('ascii'))
-            except:
-                print("[LOG] (message contains special characters)")
+        logger.debug("%s", msg)
     
     safe_print("\n" + "="*60)
     safe_print("[COA EXTRACTION] ===== NEW COA EXTRACTION REQUEST =====")
     safe_print("="*60)
     
     try:
-        safe_print(f"[COA EXTRACTION] User: {current_user.email}")
+        safe_print(f"[COA EXTRACTION] User: {str(current_user.id)}")
         safe_print(f"[COA EXTRACTION] Number of images received: {len(images)}")
         
         # Check API key
@@ -922,7 +916,6 @@ async def list_coas(
                     "has_documents": bool(c.document_images and len(c.document_images) > 0),
                     "documents_count": len(c.document_images) if c.document_images else 0,
                     "created_at": c.created_at.isoformat(),
-                    "nutritional_data": c.nutritional_data,
                 }
                 for c in coas
             ],

@@ -1,3 +1,4 @@
+import logging
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,9 +8,19 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from config.settings import settings
 
+logger = logging.getLogger(__name__)
+
+
+def _get_real_ip(request: Request) -> str:
+    """Extract client IP respecting X-Forwarded-For behind a trusted proxy."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return get_remote_address(request)
+
 
 limiter = Limiter(
-    key_func=get_remote_address,
+    key_func=_get_real_ip,
     default_limits=[f"{settings.RATE_LIMIT_PER_MINUTE}/minute"],
 )
 
@@ -22,12 +33,11 @@ def configure_cors(app):
             "http://127.0.0.1:5173",
             "http://127.0.0.1:3000",
         ]
-        print(f"[WARNING] CORS debug origins: {allowed_origins}")
+        logger.warning("CORS debug origins: %s", allowed_origins)
     else:
-        allowed_origins = [
-            settings.FRONTEND_URL,
-        ]
-        print(f"[OK] CORS restricted to: {allowed_origins}")
+        frontend = settings.FRONTEND_URL.rstrip("/")
+        allowed_origins = [frontend]
+        logger.info("CORS restricted to: %s", allowed_origins)
     
     app.add_middleware(
         CORSMiddleware,
@@ -38,7 +48,7 @@ def configure_cors(app):
         expose_headers=["Content-Disposition"]
     )
     
-    print("[OK] CORS configured")
+    logger.info("CORS configured")
 
 
 def configure_rate_limiting(app):
@@ -52,4 +62,4 @@ def configure_rate_limiting(app):
             content={"detail": "Rate limit exceeded. Please try again later."}
         )
     
-    print("[OK] Rate limiting configured")
+    logger.info("Rate limiting configured")

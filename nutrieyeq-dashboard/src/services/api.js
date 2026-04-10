@@ -96,27 +96,39 @@ async function apiUpload(endpoint, formData) {
   return response
 }
 
+let _refreshPromise = null
+
 async function refreshAccessToken() {
-  const refreshToken = localStorage.getItem('refresh_token')
-  if (!refreshToken) return false
-  
-  try {
-    const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken })
-    })
-    
-    if (response.ok) {
-      const data = await response.json()
-      storeAuthData(data)
-      return true
+  if (_refreshPromise) return _refreshPromise
+
+  _refreshPromise = (async () => {
+    const refreshToken = localStorage.getItem('refresh_token')
+    if (!refreshToken) return false
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        storeAuthData(data)
+        return true
+      }
+    } catch {
+      // refresh failed
     }
-  } catch {
-    // refresh failed silently
+
+    return false
+  })()
+
+  try {
+    return await _refreshPromise
+  } finally {
+    _refreshPromise = null
   }
-  
-  return false
 }
 
 export const productService = {

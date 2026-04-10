@@ -2,8 +2,13 @@ import logging
 import aiosmtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from jinja2 import Template
+from jinja2 import Environment, BaseLoader, select_autoescape
 from config.settings import settings
+
+_jinja_env = Environment(
+    loader=BaseLoader(),
+    autoescape=select_autoescape(default_for_string=True, default=True),
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +48,7 @@ async def send_email(to_email: str, subject: str, html_content: str) -> bool:
 async def send_password_reset_email(to_email: str, reset_token: str, user_name: str) -> bool:
     otp_code = reset_token  # Now this is a 5-digit OTP
     
-    html_template = Template("""
+    html_template = _jinja_env.from_string("""
     <!DOCTYPE html>
     <html>
     <head>
@@ -93,7 +98,7 @@ async def send_password_reset_email(to_email: str, reset_token: str, user_name: 
                 </p>
             </div>
             <div class="footer">
-                <p>© 2026 Zydus Wellness - NutriEyeQ Dashboard</p>
+                <p>&copy; 2026 Zydus Wellness - NutriEyeQ Dashboard</p>
                 <p>This is an automated email. Please do not reply.</p>
             </div>
         </div>
@@ -115,7 +120,7 @@ async def send_password_reset_email(to_email: str, reset_token: str, user_name: 
 async def send_welcome_email(to_email: str, user_name: str, temp_password: str) -> bool:
     login_link = f"{settings.FRONTEND_URL}/login"
     
-    html_template = Template("""
+    html_template = _jinja_env.from_string("""
     <!DOCTYPE html>
     <html>
     <head>
@@ -133,7 +138,7 @@ async def send_welcome_email(to_email: str, user_name: str, temp_password: str) 
     <body>
         <div class="container">
             <div class="header">
-                <h1>🎉 Welcome to NutriEyeQ!</h1>
+                <h1>Welcome to NutriEyeQ!</h1>
             </div>
             <div class="content">
                 <h2>Hello {{ user_name }},</h2>
@@ -141,11 +146,11 @@ async def send_welcome_email(to_email: str, user_name: str, temp_password: str) 
                 
                 <div class="credentials">
                     <p><strong>Your Login Credentials:</strong></p>
-                    <p>📧 <strong>Email:</strong> {{ email }}</p>
-                    <p>🔑 <strong>Temporary Password:</strong> <code style="background: white; padding: 4px 8px; border-radius: 4px;">{{ temp_password }}</code></p>
+                    <p><strong>Email:</strong> {{ email }}</p>
+                    <p><strong>Temporary Password:</strong> <code style="background: white; padding: 4px 8px; border-radius: 4px;">{{ temp_password }}</code></p>
                 </div>
                 
-                <p>⚠️ <strong>Important:</strong> Please change your password after your first login for security.</p>
+                <p><strong>Important:</strong> Please change your password after your first login for security.</p>
                 
                 <div style="text-align: center;">
                     <a href="{{ login_link }}" class="button">Login to Dashboard</a>
@@ -157,7 +162,7 @@ async def send_welcome_email(to_email: str, user_name: str, temp_password: str) 
                 </p>
             </div>
             <div class="footer">
-                <p>© 2026 Zydus Wellness - NutriEyeQ Dashboard</p>
+                <p>&copy; 2026 Zydus Wellness - NutriEyeQ Dashboard</p>
                 <p>This is an automated email. Please do not reply.</p>
             </div>
         </div>
@@ -181,7 +186,7 @@ async def send_user_approval_email(admin_email: str, admin_name: str, new_user_n
                                    new_user_email: str, new_user_id: str, department: str) -> bool:
     approval_link = f"{settings.FRONTEND_URL}/users?approve={new_user_id}"
     
-    html_template = Template("""
+    html_template = _jinja_env.from_string("""
     <!DOCTYPE html>
     <html>
     <head>
@@ -215,7 +220,7 @@ async def send_user_approval_email(admin_email: str, admin_name: str, new_user_n
                 <p>Please review and approve this user in the NutriEyeQ Dashboard.</p>
                 
                 <div style="text-align: center;">
-                    <a href="{{ approval_link }}" class="button">Review & Approve User</a>
+                    <a href="{{ approval_link }}" class="button">Review &amp; Approve User</a>
                 </div>
                 
                 <p style="color: #65758b; font-size: 14px; margin-top: 20px;">
@@ -225,7 +230,7 @@ async def send_user_approval_email(admin_email: str, admin_name: str, new_user_n
                 </p>
             </div>
             <div class="footer">
-                <p>© 2026 Zydus Wellness - NutriEyeQ Dashboard</p>
+                <p>&copy; 2026 Zydus Wellness - NutriEyeQ Dashboard</p>
                 <p>This is an automated email. Please do not reply.</p>
             </div>
         </div>
@@ -247,7 +252,7 @@ async def send_user_approval_email(admin_email: str, admin_name: str, new_user_n
 
 
 async def send_login_otp_email(to_email: str, otp_code: str, user_name: str) -> bool:
-    html_template = Template("""
+    html_template = _jinja_env.from_string("""
     <!DOCTYPE html>
     <html>
     <head>

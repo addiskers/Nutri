@@ -1359,7 +1359,7 @@ async def extract_product_from_images(
         product_data = json.loads(raw_json)
         safe_print("[STRUCTURE] JSON parsed successfully")
         safe_print("\n================ BEFORE POST-PROCESSING ================")
-        safe_print(json.dumps(product_data, indent=2, ensure_ascii=False))
+        safe_print(f"[STRUCTURE] Keys: {list(product_data.keys())}")
 
         # ══════════════════════════════════════════════════════════════════════
         # POST-PROCESSING
@@ -1415,7 +1415,7 @@ async def extract_product_from_images(
                 veg_nonveg = "Vegetarian"
 
         safe_print("\n================ AFTER POST-PROCESSING ================")
-        safe_print(json.dumps(product_data, indent=2, ensure_ascii=False))
+        safe_print(f"[POST] Keys: {list(product_data.keys())}")
         ocr_cost  = calculate_cost("ocr",       ocr_tokens["input"],       ocr_tokens["output"])
         str_cost  = calculate_cost("structure",  structure_tokens["input"],  structure_tokens["output"])
         cost_info = {

@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any, Union
-from datetime import datetime
+from datetime import datetime, timezone
 from beanie import Document
 from pydantic import Field, field_validator
 

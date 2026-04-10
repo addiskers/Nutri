@@ -124,6 +124,38 @@ async def get_pending_users(
     return [UserResponse.from_user(u) for u in pending_users]
 
 
+@router.get("/stats/summary")
+async def get_user_stats(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get user statistics summary
+    
+    Requires: view_users permission
+    """
+    _check_permission(current_user, "view_users")
+    
+    total_users = await User.count()
+    active_users = await User.find(User.is_active == True).count()
+    pending_approval = await User.find(User.is_approved == False).count()
+    
+    super_admins = await User.find(User.role == UserRole.SUPER_ADMIN).count()
+    admins = await User.find(User.role == UserRole.ADMIN).count()
+    researchers = await User.find(User.role == UserRole.RESEARCHER).count()
+    
+    return {
+        "total_users": total_users,
+        "active_users": active_users,
+        "inactive_users": total_users - active_users,
+        "pending_approval": pending_approval,
+        "by_role": {
+            "super_admin": super_admins,
+            "admin": admins,
+            "researcher": researchers
+        }
+    }
+
+
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
     user_id: str,
@@ -400,35 +432,4 @@ async def delete_user(
     )
 
 
-@router.get("/stats/summary")
-async def get_user_stats(
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Get user statistics summary
-    
-    Requires: view_users permission
-    """
-    _check_permission(current_user, "view_users")
-    
-    total_users = await User.count()
-    active_users = await User.find(User.is_active == True).count()
-    pending_approval = await User.find(User.is_approved == False).count()
-    
-    # Count by role
-    super_admins = await User.find(User.role == UserRole.SUPER_ADMIN).count()
-    admins = await User.find(User.role == UserRole.ADMIN).count()
-    researchers = await User.find(User.role == UserRole.RESEARCHER).count()
-    
-    return {
-        "total_users": total_users,
-        "active_users": active_users,
-        "inactive_users": total_users - active_users,
-        "pending_approval": pending_approval,
-        "by_role": {
-            "super_admin": super_admins,
-            "admin": admins,
-            "researcher": researchers
-        }
-    }
 

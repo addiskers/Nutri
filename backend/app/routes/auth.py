@@ -13,7 +13,7 @@ from app.schemas.auth import (
 from app.utils.security import (
     create_access_token, create_refresh_token, decode_token,
     hash_password, verify_password, generate_otp, hash_otp, verify_otp,
-    validate_password_strength
+    validate_password_strength, deny_token, is_token_denied
 )
 from app.utils.email import send_login_otp_email, send_password_reset_email, send_user_approval_email
 from app.dependencies.auth import get_current_user
@@ -43,11 +43,9 @@ async def register(request: Request, user_data: UserRegister):
             success=True
         )
     
-    # Check if this is the first user in the system
     user_count = await User.count()
     is_first_user = (user_count == 0)
     
-    # First user becomes Super Admin automatically
     user_role = UserRole.SUPER_ADMIN if is_first_user else UserRole.RESEARCHER
     is_approved = True if is_first_user else False
     
@@ -65,7 +63,34 @@ async def register(request: Request, user_data: UserRegister):
     )
     
     new_user.update_permissions_by_role()
-    await new_user.insert()
+
+    try:
+        await new_user.insert()
+    except Exception:
+        recheck = await User.find_one(User.email == user_data.email.lower())
+        if recheck:
+            return MessageResponse(
+                message="Registration successful! Your account is pending admin approval.",
+                success=True
+            )
+        raise
+
+    if is_first_user:
+        recheck_count = await User.count()
+        if recheck_count > 1 and new_user.role == UserRole.SUPER_ADMIN:
+            first_super = await User.find_one(
+                User.role == UserRole.SUPER_ADMIN,
+                {"_id": {"$ne": new_user.id}},
+            )
+            if first_super:
+                new_user.role = UserRole.RESEARCHER
+                new_user.is_approved = False
+                new_user.update_permissions_by_role()
+                await new_user.save()
+                return MessageResponse(
+                    message="Registration successful! Your account is pending admin approval.",
+                    success=True
+                )
     
     if is_first_user:
         logger.info("First user registered as Super Admin")
@@ -216,6 +241,17 @@ async def refresh_token(request: Request, body: RefreshTokenRequest):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token type",
         )
+
+    jti = payload.get("jti")
+    if jti and await is_token_denied(jti):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has been revoked",
+        )
+
+    if jti:
+        exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+        await deny_token(jti, exp)
 
     user_id = payload.get("user_id")
     if not user_id:
@@ -400,12 +436,19 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
 
 
 @router.post("/logout", response_model=MessageResponse)
-async def logout(current_user: User = Depends(get_current_user)):
-    """
-    Logout current user
-    
-    Note: JWT tokens are stateless, so this is mainly for client-side cleanup.
-    """
+async def logout(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """Logout and revoke the current access token server-side."""
+    from fastapi.security import HTTPBearer as _HB
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        payload = decode_token(auth_header.split(" ", 1)[1])
+        if payload and payload.get("jti"):
+            exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+            await deny_token(payload["jti"], exp)
+
     logger.info("User logged out")
     return MessageResponse(
         message="Logged out successfully",
