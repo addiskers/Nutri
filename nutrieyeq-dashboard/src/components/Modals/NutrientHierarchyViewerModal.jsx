@@ -165,6 +165,15 @@ const subtreeHasValue = (node, sums) => {
   return node.children.some((c) => subtreeHasValue(c, sums))
 }
 
+/** Display number for a mapped nutrient object (COA cell shape) */
+const previewNutrientNumber = (cell) => {
+  if (!cell || typeof cell !== 'object') return null
+  const v = cell.actual ?? cell.average ?? cell.min ?? cell.max
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
 // ── Draggable Row ──────────────────────────────────────────────────────────
 
 const DraggableRow = ({
@@ -350,7 +359,9 @@ const NutrientHierarchyViewerModal = ({
   const [expanded, setExpanded] = useState({})
   const [activeId, setActiveId] = useState(null)
   const [hideWithoutValues, setHideWithoutValues] = useState(false)
-  const [rootAddName, setRootAddName] = useState('')
+  const [rootNutrientPick, setRootNutrientPick] = useState('')
+  const [addChildParentUid, setAddChildParentUid] = useState(null)
+  const [childNutrientPick, setChildNutrientPick] = useState('')
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -410,7 +421,9 @@ const NutrientHierarchyViewerModal = ({
     expandAll(tree)
     setExpanded(allExpanded)
     setHideWithoutValues(false)
-    setRootAddName('')
+    setRootNutrientPick('')
+    setAddChildParentUid(null)
+    setChildNutrientPick('')
   }, [isOpen, globalTree, nutritionalData])
 
   // Build raw-name reverse map: mapped_name → original key in nutritionalData
@@ -495,6 +508,29 @@ const NutrientHierarchyViewerModal = ({
     return flatItems.filter((node) => subtreeHasValue(node, sums))
   }, [flatItems, hideWithoutValues, sums])
 
+  const parentNodeForChildAdd = addChildParentUid
+    ? findNode(localTree, addChildParentUid)
+    : null
+
+  const childAddOptions = useMemo(() => {
+    if (!nutritionalData || !addChildParentUid) return []
+    const keys = Object.keys(nutritionalData).sort((a, b) =>
+      a.localeCompare(b)
+    )
+    const parent = findNode(localTree, addChildParentUid)
+    const taken = new Set((parent?.children || []).map((c) => c.nutrient_name))
+    return keys.filter((k) => !taken.has(k))
+  }, [nutritionalData, addChildParentUid, localTree])
+
+  const rootAddOptions = useMemo(() => {
+    if (!nutritionalData) return []
+    const keys = Object.keys(nutritionalData).sort((a, b) =>
+      a.localeCompare(b)
+    )
+    const rootNames = new Set(localTree.map((n) => n.nutrient_name))
+    return keys.filter((k) => !rootNames.has(k))
+  }, [nutritionalData, localTree])
+
   const handleDeleteNode = useCallback((uid) => {
     if (
       !window.confirm(
@@ -502,6 +538,10 @@ const NutrientHierarchyViewerModal = ({
       )
     ) {
       return
+    }
+    if (addChildParentUid === uid) {
+      setAddChildParentUid(null)
+      setChildNutrientPick('')
     }
     setLocalTree((prev) => {
       const tree = cloneTree(prev)
@@ -513,18 +553,29 @@ const NutrientHierarchyViewerModal = ({
       delete next[uid]
       return next
     })
+  }, [addChildParentUid])
+
+  const openAddChildPicker = useCallback((parentUid) => {
+    setAddChildParentUid(parentUid)
+    setChildNutrientPick('')
   }, [])
 
-  const handleAddChild = useCallback((parentUid) => {
-    const name = window.prompt('Name for the new sub-nutrient:')
-    if (!name?.trim()) return
+  const cancelAddChildPicker = useCallback(() => {
+    setAddChildParentUid(null)
+    setChildNutrientPick('')
+  }, [])
+
+  const confirmAddChild = useCallback(() => {
+    if (!addChildParentUid || !childNutrientPick) return
+    const parentUid = addChildParentUid
+    const nutrientName = childNutrientPick
     setLocalTree((prev) => {
       const tree = cloneTree(prev)
       const parent = findNode(tree, parentUid)
       if (!parent) return prev
       if (!parent.children) parent.children = []
       const newNode = {
-        nutrient_name: name.trim(),
+        nutrient_name: nutrientName,
         rule: null,
         is_additive: true,
         variants: [],
@@ -536,15 +587,17 @@ const NutrientHierarchyViewerModal = ({
       return tree
     })
     setExpanded((prev) => ({ ...prev, [parentUid]: true }))
-  }, [])
+    setAddChildParentUid(null)
+    setChildNutrientPick('')
+  }, [addChildParentUid, childNutrientPick])
 
   const handleAddRoot = useCallback(() => {
-    const name = rootAddName.trim()
-    if (!name) return
+    if (!rootNutrientPick) return
+    const nutrientName = rootNutrientPick
     setLocalTree((prev) => {
       const tree = cloneTree(prev)
       tree.push({
-        nutrient_name: name,
+        nutrient_name: nutrientName,
         rule: null,
         is_additive: true,
         variants: [],
@@ -554,8 +607,8 @@ const NutrientHierarchyViewerModal = ({
       })
       return tree
     })
-    setRootAddName('')
-  }, [rootAddName])
+    setRootNutrientPick('')
+  }, [rootNutrientPick])
 
   const handleToggle = useCallback((uid) => {
     setExpanded((prev) => ({ ...prev, [uid]: !prev[uid] }))
@@ -653,6 +706,65 @@ const NutrientHierarchyViewerModal = ({
           </span>
         </div>
 
+        {addChildParentUid && (
+          <div className="px-4 py-3 border-b border-[#e1e7ef] bg-[#e1f4f5] flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-ibm-plex text-[#0f1729] mb-1">
+                Add sub-nutrient under{' '}
+                <span className="font-semibold">
+                  {parentNodeForChildAdd?.nutrient_name ?? '…'}
+                </span>
+                — choose from mapped nutrients on this ingredient (values come
+                from the COA data shown in this modal):
+              </p>
+              {childAddOptions.length === 0 ? (
+                <p className="text-xs font-ibm-plex text-amber-700">
+                  {Object.keys(nutritionalData || {}).length === 0
+                    ? 'No mapped nutrients on this ingredient.'
+                    : 'Every mapped nutrient is already a direct child here, or none are left to add.'}
+                </p>
+              ) : (
+                <select
+                  value={childNutrientPick}
+                  onChange={(e) => setChildNutrientPick(e.target.value)}
+                  className="h-9 w-full max-w-md px-3 text-sm font-ibm-plex border border-[#e1e7ef] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#009da5]"
+                >
+                  <option value="">Select mapped nutrient…</option>
+                  {childAddOptions.map((name) => {
+                    const pv = previewNutrientNumber(nutritionalData[name])
+                    const label =
+                      pv != null
+                        ? `${name} (${pv.toFixed(2)} g)`
+                        : `${name} (no value)`
+                    return (
+                      <option key={name} value={name}>
+                        {label}
+                      </option>
+                    )
+                  })}
+                </select>
+              )}
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                type="button"
+                onClick={confirmAddChild}
+                disabled={!childNutrientPick || childAddOptions.length === 0}
+                className="h-9 px-3 rounded-lg text-xs font-ibm-plex font-medium bg-[#009da5] text-white hover:bg-[#008891] disabled:opacity-40 disabled:pointer-events-none"
+              >
+                Add
+              </button>
+              <button
+                type="button"
+                onClick={cancelAddChildPicker}
+                className="h-9 px-3 rounded-lg text-xs font-ibm-plex font-medium border border-[#e1e7ef] text-[#65758b] hover:bg-white"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Column header */}
         <div className="px-3 py-2 bg-[#f1f5f9] border-b border-[#e1e7ef] flex items-center gap-2 flex-shrink-0">
           <div className="w-5" />
@@ -704,7 +816,7 @@ const NutrientHierarchyViewerModal = ({
                     onToggle={handleToggle}
                     sumInfo={sums[node._uid]}
                     rawNameMap={rawNameMap}
-                    onAddChild={handleAddChild}
+                    onAddChild={openAddChildPicker}
                     onDelete={handleDeleteNode}
                   />
                 ))
@@ -723,31 +835,50 @@ const NutrientHierarchyViewerModal = ({
         <div className="px-6 py-4 border-t border-[#e1e7ef] flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between flex-shrink-0">
           <div className="flex flex-col gap-2 min-w-0 flex-1">
             <p className="text-xs font-ibm-plex text-[#65758b]">
-              Drag to reorder. Add/remove with row buttons (or add a top-level
-              name below). Changes stay in this modal only; use{' '}
+              Drag to reorder. Use + to pick a mapped nutrient under a parent, or
+              add a mapped root row below. Changes stay in this modal only; use{' '}
               <span className="font-medium text-[#0f1729]">Nutrient Hierarchy Map</span>{' '}
               in the app to edit the saved hierarchy.
             </p>
             <div className="flex flex-wrap items-center gap-2">
-              <input
-                type="text"
-                value={rootAddName}
-                onChange={(e) => setRootAddName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleAddRoot()
-                }}
-                placeholder="New top-level nutrient name…"
-                className="h-9 min-w-[12rem] flex-1 max-w-xs px-3 text-sm font-ibm-plex border border-[#e1e7ef] rounded-lg bg-[#f9fafb] focus:outline-none focus:ring-2 focus:ring-[#009da5]"
-              />
-              <button
-                type="button"
-                onClick={handleAddRoot}
-                disabled={!rootAddName.trim()}
-                className="h-9 px-3 rounded-lg text-xs font-ibm-plex font-medium border border-[#e1e7ef] text-[#0f1729] hover:bg-[#f1f5f9] disabled:opacity-40 disabled:pointer-events-none inline-flex items-center gap-1"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Add root
-              </button>
+              {rootAddOptions.length === 0 ? (
+                <p className="text-xs font-ibm-plex text-[#65758b]">
+                  {Object.keys(nutritionalData || {}).length === 0
+                    ? 'No mapped nutrients — map a COA first.'
+                    : 'All mapped nutrients already appear at the top level of this view.'}
+                </p>
+              ) : (
+                <>
+                  <select
+                    value={rootNutrientPick}
+                    onChange={(e) => setRootNutrientPick(e.target.value)}
+                    className="h-9 min-w-[12rem] flex-1 max-w-md px-3 text-sm font-ibm-plex border border-[#e1e7ef] rounded-lg bg-[#f9fafb] focus:outline-none focus:ring-2 focus:ring-[#009da5]"
+                  >
+                    <option value="">Select mapped nutrient for root…</option>
+                    {rootAddOptions.map((name) => {
+                      const pv = previewNutrientNumber(nutritionalData[name])
+                      const label =
+                        pv != null
+                          ? `${name} (${pv.toFixed(2)} g)`
+                          : `${name} (no value)`
+                      return (
+                        <option key={name} value={name}>
+                          {label}
+                        </option>
+                      )
+                    })}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleAddRoot}
+                    disabled={!rootNutrientPick}
+                    className="h-9 px-3 rounded-lg text-xs font-ibm-plex font-medium border border-[#e1e7ef] text-[#0f1729] hover:bg-[#f1f5f9] disabled:opacity-40 disabled:pointer-events-none inline-flex items-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add root
+                  </button>
+                </>
+              )}
             </div>
           </div>
           <button
