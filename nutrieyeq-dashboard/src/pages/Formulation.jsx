@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 
 import Layout from '../components/Layout/Layout'
 
@@ -12,7 +12,76 @@ import NutrientHierarchyViewerModal from '../components/Modals/NutrientHierarchy
 import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
 
+/** Column order + header depth from hierarchy tree (DFS). Extras = alphabetical only. */
+function computeNutrientColumnLayout(ingredients, tree) {
+  const usedKeys = new Set()
+  for (const ing of ingredients || []) {
+    for (const nutrient of Object.keys(ing.nutritional_data || {})) {
+      const cellData = ing.nutritional_data[nutrient]
+      if (cellData !== undefined && cellData !== null) usedKeys.add(nutrient)
+    }
+  }
+  const usedKeysArr = Array.from(usedKeys)
+  const depthMap = {}
 
+  const keyMatchesNode = (dataKey, node) => {
+    if (!node?.nutrient_name || dataKey == null) return false
+    if (dataKey === node.nutrient_name) return true
+    if (String(dataKey).toLowerCase() === String(node.nutrient_name).toLowerCase()) return true
+    return (node.variants || []).some(
+      (v) => v === dataKey || String(v).toLowerCase() === String(dataKey).toLowerCase()
+    )
+  }
+
+  const nodeMatchesUsed = (node) => usedKeysArr.some((k) => keyMatchesNode(k, node))
+
+  const subtreeContainsUsed = (node) => {
+    if (nodeMatchesUsed(node)) return true
+    for (const c of node.children || []) {
+      if (subtreeContainsUsed(c)) return true
+    }
+    return false
+  }
+
+  const shouldEmitColumn = (node) => {
+    if (!subtreeContainsUsed(node)) return false
+    if (nodeMatchesUsed(node)) return true
+    return (node.children || []).some((c) => subtreeContainsUsed(c))
+  }
+
+  const emitKeyForNode = (node) => {
+    for (const k of usedKeysArr) {
+      if (keyMatchesNode(k, node)) return k
+    }
+    return node.nutrient_name
+  }
+
+  const ordered = []
+  const seen = new Set()
+  const walk = (nodes, depth) => {
+    if (!nodes) return
+    for (const node of nodes) {
+      if (!subtreeContainsUsed(node)) continue
+      if (!shouldEmitColumn(node)) continue
+      const emissionKey = nodeMatchesUsed(node) ? emitKeyForNode(node) : node.nutrient_name
+      if (seen.has(emissionKey)) continue
+      seen.add(emissionKey)
+      ordered.push(emissionKey)
+      if (!(emissionKey in depthMap)) depthMap[emissionKey] = depth
+      if (node.children?.length) walk(node.children, depth + 1)
+    }
+  }
+
+  if (tree && tree.length > 0) walk(tree, 0)
+
+  const extras = usedKeysArr.filter((k) => !seen.has(k)).sort((a, b) => a.localeCompare(b))
+  for (const k of extras) {
+    if (!(k in depthMap)) depthMap[k] = 0
+  }
+
+  const hierarchyColumnKeys = new Set(ordered)
+  return { columnOrder: [...ordered, ...extras], depthMap, hierarchyColumnKeys }
+}
 
 const Formulation = () => {
 
@@ -36,7 +105,7 @@ const Formulation = () => {
 
   
 
-  // Per-cell value type selection: { 'ingredientId-nutrientName': 'actual'|'min'|'max'|'average'|'custom' }
+  // Per-cell value type selection: { 'ingredientId-nutrientName': 'actual'|'min'|'max'|'average'|'auto_cal'|'custom' }
   const [nutrientSelections, setNutrientSelections] = useState({})
   // Custom values entered by user: { 'ingredientId-nutrientName': number }
   const [customValues, setCustomValues] = useState({})
@@ -91,6 +160,9 @@ const Formulation = () => {
   // Nutrient hierarchy viewer modal (per ingredient)
   const [showHierarchyViewer, setShowHierarchyViewer] = useState(false)
   const [hierarchyViewerIngredient, setHierarchyViewerIngredient] = useState(null)
+  // Layout + expand/scroll restored after closing hierarchy modal (session)
+  const [hierarchyTableLayout, setHierarchyTableLayout] = useState(null)
+  const [hierarchyViewerUiByIngredientId, setHierarchyViewerUiByIngredientId] = useState({})
 
   // Energy Calculation Breakdown
   const [showEnergyBreakdown, setShowEnergyBreakdown] = useState(false)
@@ -489,6 +561,8 @@ const Formulation = () => {
       if (!raw) return
       const draft = JSON.parse(raw)
       isRestoringDraft.current = true
+      setHierarchyTableLayout(null)
+      setHierarchyViewerUiByIngredientId({})
       setIngredients(draft.ingredients || [])
       setNextId((draft.ingredients?.length || 0) + 1)
       setNutrientSelections(draft.nutrientSelections || {})
@@ -540,6 +614,15 @@ const Formulation = () => {
       saveDraftToStorage()
     }
   }, [ingredients, nutrientSelections, customValues, serveSize, saveDraftToStorage])
+
+  // Session-only hierarchy layout must not carry across formulations: clear when the table is empty
+  // or when switching context (handled in load/save handlers below).
+  useEffect(() => {
+    if (ingredients.length === 0) {
+      setHierarchyTableLayout(null)
+      setHierarchyViewerUiByIngredientId({})
+    }
+  }, [ingredients.length])
 
   // beforeunload — save draft + warn user
   useEffect(() => {
@@ -662,6 +745,9 @@ const Formulation = () => {
   const getNutrientValue = (ingredientId, nutrientName, nutritionalData) => {
     const selectionKey = `${ingredientId}-${nutrientName}`
     const selectedType = nutrientSelections[selectionKey] || 'actual'
+    if (selectedType === 'auto_cal') {
+      return 0
+    }
     if (selectedType === 'custom') {
       return customValues[selectionKey] ?? 0
     }
@@ -696,111 +782,6 @@ const Formulation = () => {
       [`${ingredientId}-${nutrientName}`]: parseFloat(value) || 0
     }))
   }
-
-  
-
-  // Priority order for nutrient columns (matches regulatory/export order)
-  const NUTRIENT_PRIORITY_ORDER = [
-    'Energy',
-    'Protein',
-    'Carbohydrate', 'Total Carbohydrates',
-    'Total Sugars', 'Total sugars',
-    'Added Sugars', 'Added sugars',
-    'Dietary Fiber', 'Dietary Fibre',
-    'Soluble Fiber', 'Soluble Fibre',
-    'Insoluble Fiber', 'Insoluble Fibre',
-    'Total Fat', 'Total fat',
-    'Saturated Fat', 'Safa', 'SFA',
-    'MUFA', 'Monounsaturated Fat',
-    'PUFA', 'Polyunsaturated Fat',
-    'Linoleic Acid', 'LA',
-    'Alpha-Linolenic Acid', 'ALA',
-    'DHA', 'Docosahexaenoic Acid',
-    'EPA', 'Eicosapentaenoic Acid',
-    'Trans Fat', 'Trans Fa',
-    'Cholesterol',
-    'Vitamin A',
-    'Vitamin D2',
-    'Vitamin E',
-    'Vitamin K',
-    'Vitamin C',
-    'Vitamin B1', 'Thiamine',
-    'Vitamin B2', 'Riboflavin',
-    'Vitamin B3', 'Niacin',
-    'Vitamin B5', 'Calcium Pantothenate', 'Pantothenic Acid',
-    'Vitamin B6', 'Pyridoxine',
-    'Vitamin B7', 'Biotin',
-    'Vitamin B9', 'Folic Acid', 'Folate',
-    'Vitamin B12', 'Cobalamin',
-    'Calcium',
-    'Potassium',
-    'Magnesium',
-    'Zinc',
-    'Chromium',
-    'Molybdenum',
-    'Iron',
-    'Sodium',
-    'Phosphorus',
-    'Manganese',
-    'Iodine',
-    'Selenium',
-    'Choline',
-    'Copper',
-    'Chloride',
-  ]
-
-  // Get all unique nutrient names from all selected ingredients, sorted by priority
-  const getAllNutrientNames = () => {
-    const nutrientSet = new Set()
-    ingredients.forEach(ing => {
-      Object.keys(ing.nutritional_data).forEach(nutrient => {
-        // Only include if at least one ingredient has real data for this nutrient
-        const cellData = ing.nutritional_data[nutrient]
-        if (cellData !== undefined && cellData !== null) {
-          nutrientSet.add(nutrient)
-        }
-      })
-    })
-    const allNutrients = Array.from(nutrientSet)
-
-    // Sort by priority order
-    const getPriorityIndex = (name) => {
-      const lower = name.toLowerCase().trim()
-      for (let i = 0; i < NUTRIENT_PRIORITY_ORDER.length; i++) {
-        const key = NUTRIENT_PRIORITY_ORDER[i].toLowerCase()
-        if (lower === key || lower.startsWith(key + ' ') || lower.startsWith(key + '(') || lower.startsWith(key + ',')) {
-          return i
-        }
-      }
-      return -1
-    }
-
-    const prioritized = []
-    const remaining = []
-    allNutrients.forEach(n => {
-      const idx = getPriorityIndex(n)
-      if (idx !== -1) {
-        prioritized.push({ name: n, idx })
-      } else {
-        remaining.push(n)
-      }
-    })
-    prioritized.sort((a, b) => a.idx - b.idx)
-    remaining.sort((a, b) => a.localeCompare(b))
-    return [...prioritized.map(p => p.name), ...remaining]
-  }
-
-  
-
-  // Calculate total for a nutrient (weighted by percentage)
-  const calculateTotal = (nutrientName) => {
-    return ingredients.reduce((sum, ing) => {
-      const value = getNutrientValue(ing.id, nutrientName, ing.nutritional_data)
-      return sum + (value * ing.percentage / 100)
-    }, 0)
-  }
-
-  
 
   // Helper: find a nutrient total by checking match names against nutrientTotals
   const findNutrientTotal = (matchNames, totals) => {
@@ -917,15 +898,26 @@ const Formulation = () => {
     const warnings = []
     const inferred = new Set()
 
+    const resolveTotalsKey = (name) => {
+      if (name == null) return name
+      if (Object.prototype.hasOwnProperty.call(totals, name)) return name
+      const nl = String(name).toLowerCase()
+      for (const k of Object.keys(totals)) {
+        if (String(k).toLowerCase() === nl) return k
+      }
+      return name
+    }
+
     // 1. Collapse protein variants: merge alternate names into canonical name
     const processVariants = (nodes) => {
       for (const node of nodes) {
         if (node.rule === 'collapse_variants' && node.variants?.length > 0) {
-          const canonical = node.nutrient_name
+          const canonKey = resolveTotalsKey(node.nutrient_name)
           for (const variant of node.variants) {
-            if (totals[variant] !== undefined && variant !== canonical) {
-              totals[canonical] = (totals[canonical] || 0) + totals[variant]
-              delete totals[variant]
+            const varKey = resolveTotalsKey(variant)
+            if (totals[varKey] !== undefined && varKey !== canonKey) {
+              totals[canonKey] = (totals[canonKey] || 0) + totals[varKey]
+              delete totals[varKey]
             }
           }
         }
@@ -943,11 +935,16 @@ const Formulation = () => {
       if (node.rule === 'gte_sum' && node.children?.length > 0) {
         const additiveChildren = node.children.filter(c => c.is_additive !== false)
         const childrenSum = additiveChildren.reduce((sum, child) => {
-          return sum + (totals[child.nutrient_name] || 0)
+          const ck = resolveTotalsKey(child.nutrient_name)
+          return sum + (totals[ck] || 0)
         }, 0)
 
-        const hasAnyChild = additiveChildren.some(c => totals[c.nutrient_name] !== undefined && totals[c.nutrient_name] > 0)
-        const parentVal = totals[node.nutrient_name]
+        const hasAnyChild = additiveChildren.some(c => {
+          const ck = resolveTotalsKey(c.nutrient_name)
+          return totals[ck] !== undefined && totals[ck] > 0
+        })
+        const pk = resolveTotalsKey(node.nutrient_name)
+        const parentVal = totals[pk]
         const parentExists = parentVal !== undefined && parentVal > 0
 
         // Do not infer or overwrite parent totals from children — each column is only
@@ -968,16 +965,82 @@ const Formulation = () => {
     return { totals, warnings, inferred }
   }
 
-  // Get all nutrient names and their totals
+  const layoutTree = hierarchyTableLayout ?? hierarchyTree
+  const { columnOrder: nutrientNames, depthMap: hierarchyDepthMap, hierarchyColumnKeys } = useMemo(
+    () => computeNutrientColumnLayout(ingredients, layoutTree),
+    [ingredients, layoutTree]
+  )
 
-  const nutrientNames = getAllNutrientNames()
+  const findNodeByNutrientName = (nodes, searchName) => {
+    if (!searchName || !nodes?.length) return null
+    const sl = String(searchName).toLowerCase()
+    for (const n of nodes) {
+      if (String(n.nutrient_name).toLowerCase() === sl) return n
+      if (n.variants?.some((v) => String(v).toLowerCase() === sl)) return n
+      const found = findNodeByNutrientName(n.children, searchName)
+      if (found) return found
+    }
+    return null
+  }
+
+  const resolveNutrientKeyForIngredient = (ing, treeNodeName) => {
+    const keys = Object.keys(ing.nutritional_data || {})
+    if (!treeNodeName) return treeNodeName
+    if (keys.includes(treeNodeName)) return treeNodeName
+    const tl = String(treeNodeName).toLowerCase()
+    for (const k of keys) {
+      if (String(k).toLowerCase() === tl) return k
+    }
+    return treeNodeName
+  }
+
+  const getShownNutrientValue = (ingredientId, nutrientName, nutritionalData, visited = new Set()) => {
+    const cycleKey = `${ingredientId}|${nutrientName}`
+    if (visited.has(cycleKey)) return 0
+    const selKey = `${ingredientId}-${nutrientName}`
+    const sel = nutrientSelections[selKey] || 'actual'
+    if (sel !== 'auto_cal') {
+      return getNutrientValue(ingredientId, nutrientName, nutritionalData)
+    }
+    visited.add(cycleKey)
+    const tree = layoutTree
+    if (!tree?.length) {
+      visited.delete(cycleKey)
+      return getNutrientValue(ingredientId, nutrientName, nutritionalData)
+    }
+    const node = findNodeByNutrientName(tree, nutrientName)
+    if (!node?.children?.length) {
+      visited.delete(cycleKey)
+      return getNutrientValue(ingredientId, nutrientName, nutritionalData)
+    }
+    const ing = ingredients.find((i) => i.id === ingredientId)
+    if (!ing) {
+      visited.delete(cycleKey)
+      return 0
+    }
+    let sum = 0
+    for (const ch of node.children) {
+      if (ch.is_additive === false) continue
+      const childKey = resolveNutrientKeyForIngredient(ing, ch.nutrient_name)
+      sum += getShownNutrientValue(ingredientId, childKey, ing.nutritional_data, visited)
+    }
+    visited.delete(cycleKey)
+    return sum
+  }
+
+  const calculateTotal = (nutrientName) => {
+    return ingredients.reduce((sum, ing) => {
+      const value = getShownNutrientValue(ing.id, nutrientName, ing.nutritional_data)
+      return sum + (value * ing.percentage / 100)
+    }, 0)
+  }
 
   const rawNutrientTotals = {}
   nutrientNames.forEach(nutrient => {
     rawNutrientTotals[nutrient] = calculateTotal(nutrient)
   })
 
-  const hierarchyResult = applyHierarchyRollups(rawNutrientTotals, hierarchyTree)
+  const hierarchyResult = applyHierarchyRollups(rawNutrientTotals, layoutTree)
   const nutrientTotals = hierarchyResult.totals
   const hierarchyWarnings = hierarchyResult.warnings
   const hierarchyInferred = hierarchyResult.inferred
@@ -989,16 +1052,6 @@ const Formulation = () => {
       allNutrientNames.push(key)
     }
   }
-
-  // Build a depth map from hierarchy for display indentation
-  const hierarchyDepthMap = {}
-  const buildDepthMap = (nodes, depth) => {
-    for (const n of nodes) {
-      hierarchyDepthMap[n.nutrient_name] = depth
-      if (n.children?.length > 0) buildDepthMap(n.children, depth + 1)
-    }
-  }
-  if (hierarchyTree) buildDepthMap(hierarchyTree, 0)
 
   // Energy breakdown using the corrected formula
   const energyBreakdown = calculateEnergyFromBreakdown(nutrientTotals)
@@ -1163,6 +1216,8 @@ const Formulation = () => {
       if (result.success) {
         isRestoringDraft.current = true
         clearDraft()
+        setHierarchyTableLayout(null)
+        setHierarchyViewerUiByIngredientId({})
         setIngredients([])
         setNextId(1)
         setNutrientSelections({})
@@ -1204,6 +1259,8 @@ const Formulation = () => {
         nutritional_data: ing.nutritional_data || {}
       }))
 
+      setHierarchyTableLayout(null)
+      setHierarchyViewerUiByIngredientId({})
       setIngredients(loadedIngredients)
       setNextId(loadedIngredients.length + 1)
       setNutrientSelections(formulation.nutrient_selections || {})
@@ -1757,16 +1814,49 @@ const Formulation = () => {
                     </th>
 
                     {nutrientNames.map(nutrient => {
-                      const depth = hierarchyDepthMap[nutrient]
-                      const isParent = depth === 0
-                      const isChild = depth !== undefined && depth > 0
+                      const depthRaw = hierarchyDepthMap[nutrient]
+                      const isInHierarchy = hierarchyColumnKeys.has(nutrient)
+                      const depth = isInHierarchy ? depthRaw : 0
+                      const level = depth + 1
+                      const levelTitle = isInHierarchy
+                        ? `Hierarchy depth ${depth} (level ${level}: ${level === 1 ? 'root in tree' : level === 2 ? 'child of root' : level === 3 ? 'grandchild' : 'deeper branch'})`
+                        : undefined
+                      const nameClasses =
+                        !isInHierarchy
+                          ? 'text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider'
+                          : depth === 0
+                            ? 'text-xs font-ibm-plex font-semibold text-[#0f1729] uppercase tracking-wider'
+                            : depth === 1
+                              ? 'text-[11px] font-ibm-plex font-medium text-[#475569] uppercase tracking-wider italic'
+                              : depth === 2
+                                ? 'text-[10px] font-ibm-plex font-normal text-[#64748b] uppercase tracking-wider italic'
+                                : 'text-[10px] font-ibm-plex font-normal text-[#94a3b8] uppercase tracking-wider italic'
+                      const barColors = ['#009da5', '#0d9488', '#5b8aa8', '#8da4b8', '#b0c4d4', '#cbd5e1']
+                      const barColor = isInHierarchy && depth > 0
+                        ? barColors[Math.min(depth - 1, barColors.length - 1)]
+                        : undefined
                       return (
-                        <th key={nutrient} className="px-3 py-3 text-right min-w-[100px] w-[100px]">
-                          <span className={`text-xs font-ibm-plex uppercase tracking-wider whitespace-nowrap ${
-                            isParent ? 'font-semibold text-[#0f1729]' : isChild ? 'font-normal text-[#65758b] italic' : 'font-medium text-[#65758b]'
-                          }`}>
-                            {isChild ? `  ${nutrient}` : nutrient}
-                          </span>
+                        <th
+                          key={nutrient}
+                          title={levelTitle}
+                          className="px-3 py-3 text-right min-w-[100px] w-[100px] align-bottom"
+                        >
+                          <div
+                            className="inline-flex flex-col items-end gap-0.5 max-w-full"
+                            style={{
+                              borderLeft: barColor ? `3px solid ${barColor}` : undefined,
+                              paddingLeft: isInHierarchy ? `${6 + Math.min(depth, 6) * 8}px` : undefined,
+                            }}
+                          >
+                            {isInHierarchy && depth > 0 && (
+                              <span className="text-[9px] font-ibm-plex font-bold tabular-nums leading-none text-[#009da5] tracking-wide">
+                                L{level}
+                              </span>
+                            )}
+                            <span className={`block whitespace-nowrap text-right ${nameClasses}`}>
+                              {nutrient}
+                            </span>
+                          </div>
                         </th>
                       )
                     })}
@@ -1867,7 +1957,7 @@ const Formulation = () => {
                       </td>
 
                       {nutrientNames.map(nutrient => {
-                        const value = getNutrientValue(ingredient.id, nutrient, ingredient.nutritional_data)
+                        const value = getShownNutrientValue(ingredient.id, nutrient, ingredient.nutritional_data)
                         const weighted = (value * ingredient.percentage / 100)
                         const selectionKey = `${ingredient.id}-${nutrient}`
                         const currentType = nutrientSelections[selectionKey] || 'actual'
@@ -1875,6 +1965,16 @@ const Formulation = () => {
                         const hasCOA = !!ingredient.coa_id
                         const cellData = ingredient.nutritional_data[nutrient]
                         const hasData = cellData && typeof cellData === 'object'
+                        const treeNodeForNutrient = findNodeByNutrientName(layoutTree, nutrient)
+                        const autoCalOk = !!(layoutTree?.length && treeNodeForNutrient?.children?.length)
+                        const previewAutoSum = autoCalOk
+                          ? treeNodeForNutrient.children
+                              .filter((c) => c.is_additive !== false)
+                              .reduce((s, ch) => {
+                                const ck = resolveNutrientKeyForIngredient(ingredient, ch.nutrient_name)
+                                return s + getShownNutrientValue(ingredient.id, ck, ingredient.nutritional_data)
+                              }, 0)
+                          : null
                         return (
                           <td key={nutrient} className="px-3 py-2 text-right min-w-[100px] w-[100px]">
                             {hasCOA && hasData ? (
@@ -1922,6 +2022,35 @@ const Formulation = () => {
                                           </button>
                                         )
                                       })}
+                                      <div className="border-t border-[#e1e7ef] my-1 pt-1">
+                                        <button
+                                          type="button"
+                                          disabled={!autoCalOk}
+                                          title={
+                                            autoCalOk
+                                              ? 'Sum of direct sub-nutrients in the hierarchy (each sub-cell uses its own Actual / Min / Max / Average / Custom / Auto calc).'
+                                              : 'No sub-nutrients in the hierarchy for this nutrient.'
+                                          }
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            if (autoCalOk) updateNutrientSelection(ingredient.id, nutrient, 'auto_cal')
+                                          }}
+                                          className={`w-full text-left px-3 py-2 text-sm font-ibm-plex flex items-center justify-between transition-colors ${
+                                            currentType === 'auto_cal'
+                                              ? 'bg-[#009da5] text-white'
+                                              : autoCalOk
+                                                ? 'text-[#0f1729] hover:bg-[#e1f4f5]'
+                                                : 'text-[#b0b8c4] cursor-not-allowed'
+                                          }`}
+                                        >
+                                          <span>Auto calc</span>
+                                          {previewAutoSum != null && (
+                                            <span className={`text-xs tabular-nums ${currentType === 'auto_cal' ? 'text-white/80' : 'text-[#65758b]'}`}>
+                                              Σ {Number(previewAutoSum).toFixed(2)}
+                                            </span>
+                                          )}
+                                        </button>
+                                      </div>
                                       <div className="border-t border-[#e1e7ef] mt-1 pt-1">
                                         <div className={`px-3 py-2 text-sm font-ibm-plex ${currentType === 'custom' ? 'bg-[#b455a0]/10' : ''}`}>
                                           <span className={`text-xs font-medium ${currentType === 'custom' ? 'text-[#b455a0]' : 'text-[#65758b]'}`}>Custom</span>
@@ -1954,29 +2083,60 @@ const Formulation = () => {
                                   className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-[#f1f5f9] transition-colors group"
                                 >
                                   <ChevronDown className="w-3 h-3 text-[#c0c7d1] group-hover:text-[#b455a0] transition-colors flex-shrink-0" />
-                                  <span className="text-sm font-ibm-plex text-[#c0c7d1] tabular-nums">
-                                    {currentType === 'custom' && customValues[selectionKey] != null ? (customValues[selectionKey] * ingredient.percentage / 100).toFixed(2) : '—'}
+                                  <span className="text-sm font-ibm-plex text-[#0f1729] tabular-nums">
+                                    {(getShownNutrientValue(ingredient.id, nutrient, ingredient.nutritional_data) * ingredient.percentage / 100).toFixed(2)}
                                   </span>
                                 </button>
                                 {isOpen && (
                                   <>
                                     <div className="fixed inset-0 z-20" onClick={() => setOpenDropdown(null)} />
                                     <div className="absolute right-0 top-full mt-1 z-30 bg-white rounded-lg shadow-lg border border-[#e1e7ef] py-1 min-w-[160px]">
-                                      <div className={`px-3 py-2 text-sm font-ibm-plex ${currentType === 'custom' ? 'bg-[#b455a0]/10' : ''}`}>
-                                        <span className={`text-xs font-medium ${currentType === 'custom' ? 'text-[#b455a0]' : 'text-[#65758b]'}`}>Custom</span>
-                                        <input
-                                          type="number"
-                                          step="any"
-                                          value={customValues[selectionKey] ?? ''}
-                                          placeholder="Enter value..."
-                                          onClick={(e) => e.stopPropagation()}
-                                          onChange={(e) => {
-                                            updateCustomValue(ingredient.id, nutrient, e.target.value)
-                                            updateNutrientSelection(ingredient.id, nutrient, 'custom')
-                                            setOpenDropdown(selectionKey)
+                                      <div className="px-1 pb-1">
+                                        <button
+                                          type="button"
+                                          disabled={!autoCalOk}
+                                          title={
+                                            autoCalOk
+                                              ? 'Sum of direct sub-nutrients in the hierarchy (each sub-cell uses its own value mode).'
+                                              : 'No sub-nutrients in the hierarchy for this nutrient.'
+                                          }
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            if (autoCalOk) updateNutrientSelection(ingredient.id, nutrient, 'auto_cal')
                                           }}
-                                          className="w-full mt-1 px-2 py-1 text-sm font-ibm-plex text-[#0f1729] bg-[#f9fafb] border border-[#e1e7ef] rounded focus:outline-none focus:ring-1 focus:ring-[#b455a0]"
-                                        />
+                                          className={`w-full text-left px-3 py-2 text-sm font-ibm-plex flex items-center justify-between transition-colors ${
+                                            currentType === 'auto_cal'
+                                              ? 'bg-[#009da5] text-white'
+                                              : autoCalOk
+                                                ? 'text-[#0f1729] hover:bg-[#e1f4f5]'
+                                                : 'text-[#b0b8c4] cursor-not-allowed'
+                                          }`}
+                                        >
+                                          <span>Auto calc</span>
+                                          {previewAutoSum != null && (
+                                            <span className={`text-xs tabular-nums ${currentType === 'auto_cal' ? 'text-white/80' : 'text-[#65758b]'}`}>
+                                              Σ {Number(previewAutoSum).toFixed(2)}
+                                            </span>
+                                          )}
+                                        </button>
+                                      </div>
+                                      <div className="border-t border-[#e1e7ef] mt-1 pt-1">
+                                        <div className={`px-3 py-2 text-sm font-ibm-plex ${currentType === 'custom' ? 'bg-[#b455a0]/10' : ''}`}>
+                                          <span className={`text-xs font-medium ${currentType === 'custom' ? 'text-[#b455a0]' : 'text-[#65758b]'}`}>Custom</span>
+                                          <input
+                                            type="number"
+                                            step="any"
+                                            value={customValues[selectionKey] ?? ''}
+                                            placeholder="Enter value..."
+                                            onClick={(e) => e.stopPropagation()}
+                                            onChange={(e) => {
+                                              updateCustomValue(ingredient.id, nutrient, e.target.value)
+                                              updateNutrientSelection(ingredient.id, nutrient, 'custom')
+                                              setOpenDropdown(selectionKey)
+                                            }}
+                                            className="w-full mt-1 px-2 py-1 text-sm font-ibm-plex text-[#0f1729] bg-[#f9fafb] border border-[#e1e7ef] rounded focus:outline-none focus:ring-1 focus:ring-[#b455a0]"
+                                          />
+                                        </div>
                                       </div>
                                     </div>
                                   </>
@@ -2967,13 +3127,31 @@ const Formulation = () => {
         {/* Nutrient Hierarchy Viewer Modal */}
         <NutrientHierarchyViewerModal
           isOpen={showHierarchyViewer}
-          onClose={() => {
+          onClose={(payload) => {
+            const ingId = hierarchyViewerIngredient?.id
             setShowHierarchyViewer(false)
             setHierarchyViewerIngredient(null)
+            if (payload && Array.isArray(payload.tree)) {
+              setHierarchyTableLayout(payload.tree)
+            }
+            if (ingId != null && payload) {
+              setHierarchyViewerUiByIngredientId((prev) => ({
+                ...prev,
+                [ingId]: {
+                  scrollTop: payload.scrollTop ?? 0,
+                  expandedNutrientNames: payload.expandedNutrientNames ?? [],
+                },
+              }))
+            }
           }}
           ingredientName={hierarchyViewerIngredient?.coa_name || ''}
           nutritionalData={hierarchyViewerIngredient?.nutritional_data || {}}
-          hierarchyTree={hierarchyTree || []}
+          hierarchyTree={(hierarchyTableLayout ?? hierarchyTree) || []}
+          viewerSession={
+            hierarchyViewerIngredient?.id != null
+              ? hierarchyViewerUiByIngredientId[hierarchyViewerIngredient.id]
+              : undefined
+          }
         />
 
       </div>

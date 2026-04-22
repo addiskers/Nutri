@@ -1,4 +1,11 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+  useLayoutEffect,
+} from 'react'
 import {
   X,
   ChevronDown,
@@ -31,6 +38,30 @@ const cloneTree = (nodes) =>
     ...n,
     children: n.children ? cloneTree(n.children) : [],
   }))
+
+/** Persistable tree (no runtime ids) for formulation column layout + reopen */
+const stripTreeForPersist = (nodes) => {
+  if (!nodes?.length) return []
+  return nodes.map((n) => ({
+    nutrient_name: n.nutrient_name,
+    rule: n.rule ?? null,
+    is_additive: n.is_additive !== false,
+    variants: Array.isArray(n.variants) ? [...n.variants] : [],
+    children: n.children?.length ? stripTreeForPersist(n.children) : [],
+  }))
+}
+
+const collectExpandedNutrientNames = (nodes, expanded) => {
+  const names = []
+  const walk = (list) => {
+    for (const n of list || []) {
+      if (n.children?.length > 0 && expanded[n._uid]) names.push(n.nutrient_name)
+      if (n.children?.length) walk(n.children)
+    }
+  }
+  walk(nodes)
+  return names
+}
 
 /** Generate a unique id for each node in the local tree */
 let _uid = 0
@@ -206,12 +237,28 @@ const DraggableRow = ({
   const isInferred = sumInfo?.isInferred
   const rawName = rawNameMap[node.nutrient_name]
   const showRawName = rawName && rawName !== node.nutrient_name
+  const level = depth + 1
+  const depthBarColors = [
+    'border-l-[#009da5]',
+    'border-l-[#0d9488]',
+    'border-l-[#5b8aa8]',
+    'border-l-[#94a3b8]',
+    'border-l-[#cbd5e1]',
+    'border-l-[#e2e8f0]',
+  ]
+  const depthBarClass =
+    depth > 0 ? `border-l-[3px] ${depthBarColors[Math.min(depth - 1, depthBarColors.length - 1)]}` : ''
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-2 py-2.5 px-3 border-b border-[#e1e7ef] hover:bg-[#f9fafb] transition-colors ${
+      title={
+        depth === 0
+          ? 'Level 1 — top of hierarchy'
+          : `Level ${level} — ${depth === 1 ? 'one step under parent' : depth === 2 ? 'two steps under root' : `${depth} steps under root`}`
+      }
+      className={`flex items-center gap-2 py-2.5 px-3 border-b border-[#e1e7ef] hover:bg-[#f9fafb] transition-colors ${depthBarClass} ${
         isDragging ? 'bg-blue-50' : ''
       }`}
     >
@@ -243,11 +290,20 @@ const DraggableRow = ({
 
       {/* Name + badges */}
       <div className="flex-1 min-w-0 flex items-center gap-2">
+        {depth > 0 && (
+          <span className="flex-shrink-0 text-[10px] font-ibm-plex font-bold tabular-nums text-[#009da5] bg-[#e1f4f5] px-1.5 py-0.5 rounded">
+            L{level}
+          </span>
+        )}
         <span
-          className={`text-sm font-ibm-plex truncate ${
-            hasChildren || depth === 0
+          className={`text-sm font-ibm-plex truncate min-w-0 ${
+            depth === 0
               ? 'font-semibold text-[#0f1729]'
-              : 'font-medium text-[#0f1729]'
+              : depth === 1
+                ? 'font-semibold text-[#1e293b]'
+                : depth === 2
+                  ? 'font-medium text-[#475569]'
+                  : 'font-normal text-[#64748b] text-[13px]'
           }`}
         >
           {node.nutrient_name}
@@ -354,6 +410,7 @@ const NutrientHierarchyViewerModal = ({
   ingredientName,
   nutritionalData,
   hierarchyTree: globalTree,
+  viewerSession,
 }) => {
   const [localTree, setLocalTree] = useState([])
   const [expanded, setExpanded] = useState({})
@@ -362,6 +419,7 @@ const NutrientHierarchyViewerModal = ({
   const [rootNutrientPick, setRootNutrientPick] = useState('')
   const [addChildParentUid, setAddChildParentUid] = useState(null)
   const [childNutrientPick, setChildNutrientPick] = useState('')
+  const scrollAreaRef = useRef(null)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -408,23 +466,54 @@ const NutrientHierarchyViewerModal = ({
 
     setLocalTree(tree)
 
-    // Expand all by default
-    const allExpanded = {}
-    const expandAll = (nodes) => {
+    const expandAll = (nodes, acc) => {
       for (const n of nodes) {
         if (n.children?.length > 0) {
-          allExpanded[n._uid] = true
-          expandAll(n.children)
+          acc[n._uid] = true
+          expandAll(n.children, acc)
         }
       }
     }
-    expandAll(tree)
-    setExpanded(allExpanded)
+
+    if (viewerSession?.expandedNutrientNames?.length > 0) {
+      const open = new Set(viewerSession.expandedNutrientNames)
+      const nextExpanded = {}
+      const mark = (nodes) => {
+        for (const n of nodes) {
+          if (n.children?.length > 0) {
+            nextExpanded[n._uid] = open.has(n.nutrient_name)
+            mark(n.children)
+          }
+        }
+      }
+      mark(tree)
+      setExpanded(nextExpanded)
+    } else {
+      const allExpanded = {}
+      expandAll(tree, allExpanded)
+      setExpanded(allExpanded)
+    }
     setHideWithoutValues(false)
     setRootNutrientPick('')
     setAddChildParentUid(null)
     setChildNutrientPick('')
-  }, [isOpen, globalTree, nutritionalData])
+  }, [isOpen, globalTree, nutritionalData, viewerSession])
+
+  useLayoutEffect(() => {
+    if (!isOpen || !scrollAreaRef.current || !localTree.length) return
+    const st = viewerSession?.scrollTop
+    if (typeof st === 'number' && st > 0) {
+      scrollAreaRef.current.scrollTop = st
+    }
+  }, [isOpen, localTree, viewerSession?.scrollTop])
+
+  const handleClose = useCallback(() => {
+    onClose?.({
+      tree: stripTreeForPersist(localTree),
+      scrollTop: scrollAreaRef.current?.scrollTop ?? 0,
+      expandedNutrientNames: collectExpandedNutrientNames(localTree, expanded),
+    })
+  }, [localTree, expanded, onClose])
 
   // Build raw-name reverse map: mapped_name → original key in nutritionalData
   // Since the nutritionalData keys ARE the mapped names, we need to find cases
@@ -680,7 +769,8 @@ const NutrientHierarchyViewerModal = ({
             </div>
           </div>
           <button
-            onClick={onClose}
+            type="button"
+            onClick={handleClose}
             className="text-[#65758b] hover:text-[#0f1729] transition-colors flex-shrink-0"
           >
             <X className="w-5 h-5" />
@@ -788,7 +878,7 @@ const NutrientHierarchyViewerModal = ({
         </div>
 
         {/* Tree content */}
-        <div className="flex-1 overflow-y-auto min-h-0">
+        <div ref={scrollAreaRef} className="flex-1 overflow-y-auto min-h-0">
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
@@ -836,9 +926,10 @@ const NutrientHierarchyViewerModal = ({
           <div className="flex flex-col gap-2 min-w-0 flex-1">
             <p className="text-xs font-ibm-plex text-[#65758b]">
               Drag to reorder. Use + to pick a mapped nutrient under a parent, or
-              add a mapped root row below. Changes stay in this modal only; use{' '}
+              add a mapped root row below. Closing saves this layout and scroll
+              position for the formulation table (this browser session). Use{' '}
               <span className="font-medium text-[#0f1729]">Nutrient Hierarchy Map</span>{' '}
-              in the app to edit the saved hierarchy.
+              to change the server default tree.
             </p>
             <div className="flex flex-wrap items-center gap-2">
               {rootAddOptions.length === 0 ? (
@@ -882,7 +973,8 @@ const NutrientHierarchyViewerModal = ({
             </div>
           </div>
           <button
-            onClick={onClose}
+            type="button"
+            onClick={handleClose}
             className="px-5 py-2 rounded-lg text-sm font-ibm-plex font-medium bg-[#009da5] text-white hover:bg-[#008891] transition-colors self-end sm:self-auto flex-shrink-0"
           >
             Close
