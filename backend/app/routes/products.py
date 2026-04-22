@@ -1270,6 +1270,17 @@ async def extract_product_from_images(
         # ══════════════════════════════════════════════════════════════════════
         raw_text_blocks = []
 
+        ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/bmp", "image/webp", "image/tiff"}
+        IMAGE_MAGIC = {
+            b"\xff\xd8\xff": "image/jpeg",
+            b"\x89PNG":      "image/png",
+            b"GIF8":         "image/gif",
+            b"BM":           "image/bmp",
+            b"RIFF":         "image/webp",
+            b"II\x2a\x00":  "image/tiff",
+            b"MM\x00\x2a":  "image/tiff",
+        }
+
         for idx, img_file in enumerate(images):
             filename = img_file.filename
             safe_print(f"[OCR] Processing image {idx + 1}/{len(images)}: {filename}")
@@ -1284,6 +1295,17 @@ async def extract_product_from_images(
                     content_bytes = await img_file.read()
                     if len(content_bytes) > 10 * 1024 * 1024:
                         raise HTTPException(status_code=400, detail=f"File '{img_file.filename}' exceeds 10MB limit")
+                    
+                    # Validate MIME type from Content-Type header
+                    declared_type = (img_file.content_type or "").lower()
+                    if declared_type and declared_type not in ALLOWED_MIME_TYPES:
+                        raise HTTPException(status_code=400, detail=f"File '{filename}': unsupported type '{declared_type}'")
+                    
+                    # Validate magic bytes
+                    magic_ok = any(content_bytes[:len(sig)].startswith(sig) for sig in IMAGE_MAGIC)
+                    if not magic_ok:
+                        raise HTTPException(status_code=400, detail=f"File '{filename}': invalid image data")
+                    
                     pil_img = Image.open(BytesIO(content_bytes))
                     if pil_img.mode != "RGB":
                         pil_img = pil_img.convert("RGB")

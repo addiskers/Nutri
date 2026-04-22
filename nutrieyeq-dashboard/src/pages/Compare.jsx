@@ -96,7 +96,7 @@ const Compare = () => {
         if (name) {
           if (unit) {
             const suffix = ` (${unit})`
-            if (name.endsWith(suffix)) name = name.slice(0, -suffix.length)
+            if (name.toLowerCase().endsWith(suffix.toLowerCase())) name = name.slice(0, -suffix.length)
           } else {
             const match = name.match(/^(.+?)\s*\(([^)]+)\)$/)
             if (match) { name = match[1].trim(); unit = match[2].trim() }
@@ -366,16 +366,18 @@ const Compare = () => {
           if (dataUrlMatch) {
             ext = dataUrlMatch[1] === 'jpg' ? 'jpeg' : dataUrlMatch[1]
             base64Data = dataUrlMatch[2]
-          } else {
-            // Fetch the image URL and convert to base64
+          } else if (/^https?:\/\//i.test(imgUrl) && (imgUrl.startsWith(window.location.origin) || imgUrl.startsWith('https://'))) {
             const resp = await fetch(imgUrl)
             const blob = await resp.blob()
+            if (!blob.type.startsWith('image/')) continue
             const arrayBuf = await blob.arrayBuffer()
             const bytes = new Uint8Array(arrayBuf)
             let binary = ''
             bytes.forEach(b => binary += String.fromCharCode(b))
             base64Data = btoa(binary)
             ext = blob.type.includes('png') ? 'png' : 'jpeg'
+          } else {
+            continue
           }
           const imageId = wb.addImage({ base64: base64Data, extension: ext })
           ws1.addImage(imageId, {

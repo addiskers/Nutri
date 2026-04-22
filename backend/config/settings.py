@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     GEMINI_API_KEY: Optional[str] = None
     ENVIRONMENT: str = "development"
+    BEHIND_PROXY: bool = False
     
     @field_validator('SECRET_KEY', mode='before')
     @classmethod

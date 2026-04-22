@@ -93,14 +93,14 @@ const PermissionsPanel = ({ isOpen, onClose, user, currentUserRole, onUpdate }) 
       if (response.ok) {
         setSuccessMessage(selectedRole !== user.role ? 'Role and permissions updated successfully!' : 'Permissions updated successfully!')
         
-        // Immediately refresh current user's data if they modified their own permissions
-        const currentUser = JSON.parse(localStorage.getItem('user') || '{}')
+        let currentUser = {}
+        try { currentUser = JSON.parse(sessionStorage.getItem('user') || '{}') } catch { /* corrupted */ }
         if (currentUser.id === user.id) {
           try {
             const meResponse = await apiRequest('/auth/me')
             if (meResponse.ok) {
               const updatedUser = await meResponse.json()
-              localStorage.setItem('user', JSON.stringify(updatedUser))
+              sessionStorage.setItem('user', JSON.stringify(updatedUser))
               // Trigger a custom event to notify Layout component
               window.dispatchEvent(new CustomEvent('permissionsChanged'))
             }

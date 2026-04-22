@@ -27,7 +27,7 @@ const SettingsPage = () => {
   const fetchUserProfile = async () => {
     try {
       setLoading(true)
-      if (!localStorage.getItem('access_token')) {
+      if (!sessionStorage.getItem('access_token')) {
         navigate('/login')
         return
       }
@@ -264,6 +264,7 @@ const SettingsPage = () => {
                   <label className="block text-sm font-medium text-[#0f1729] mb-2">Current Password</label>
                   <input
                     type="password"
+                    autoComplete="current-password"
                     value={passwordData.currentPassword}
                     onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
                     required
@@ -275,6 +276,7 @@ const SettingsPage = () => {
                   <label className="block text-sm font-medium text-[#0f1729] mb-2">New Password</label>
                   <input
                     type="password"
+                    autoComplete="new-password"
                     value={passwordData.newPassword}
                     onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
                     required
@@ -286,6 +288,7 @@ const SettingsPage = () => {
                   <label className="block text-sm font-medium text-[#0f1729] mb-2">Confirm New Password</label>
                   <input
                     type="password"
+                    autoComplete="new-password"
                     value={passwordData.confirmPassword}
                     onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
                     required

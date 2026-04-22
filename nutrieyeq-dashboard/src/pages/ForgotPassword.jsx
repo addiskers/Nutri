@@ -175,6 +175,7 @@ const ForgotPassword = () => {
                 </div>
                 <input
                   type="email"
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required

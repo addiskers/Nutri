@@ -166,6 +166,7 @@ const ResetPassword = () => {
                 <input
                   type="email"
                   name="email"
+                  autoComplete="email"
                   value={formData.email}
                   onChange={handleChange}
                   required
@@ -177,14 +178,16 @@ const ResetPassword = () => {
               {/* OTP Input */}
               <div className="relative">
                 <input
-                  type="text"
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
                   name="otp"
                   value={formData.otp}
                   onChange={handleChange}
                   required
                   maxLength={6}
                   className="w-full h-12 bg-[#f9fafb] border-0 rounded-xl px-4 text-sm font-poppins text-[#0f1729] placeholder-[#9ca3af] focus:ring-2 focus:ring-[#b455a0] focus:bg-white transition-all text-center text-xl tracking-widest"
-                  placeholder="123456"
+                  placeholder="••••••"
                 />
               </div>
 
@@ -196,6 +199,7 @@ const ResetPassword = () => {
                 <input
                   type={showPassword ? 'text' : 'password'}
                   name="newPassword"
+                  autoComplete="new-password"
                   value={formData.newPassword}
                   onChange={handleChange}
                   required
@@ -219,6 +223,7 @@ const ResetPassword = () => {
                 <input
                   type={showConfirmPassword ? 'text' : 'password'}
                   name="confirmPassword"
+                  autoComplete="new-password"
                   value={formData.confirmPassword}
                   onChange={handleChange}
                   required

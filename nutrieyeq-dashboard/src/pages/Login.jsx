@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, Link, Navigate } from 'react-router-dom'
 import { Upload, Brain, BarChart3 } from 'lucide-react'
 import { authService } from '../services/api'
 
@@ -17,6 +17,10 @@ const Login = () => {
     email: '',
     password: ''
   })
+
+  if (authService.isAuthenticated() && authService.getCurrentUser()?.is_approved) {
+    return <Navigate to="/dashboard" replace />
+  }
 
   const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 
@@ -259,6 +263,7 @@ const Login = () => {
                     <input
                       type="email"
                       name="email"
+                      autoComplete="email"
                       value={formData.email}
                       onChange={handleChange}
                       required
@@ -273,6 +278,7 @@ const Login = () => {
                       <input
                         type={showPassword ? 'text' : 'password'}
                         name="password"
+                        autoComplete="current-password"
                         value={formData.password}
                         onChange={handleChange}
                         required
@@ -335,7 +341,9 @@ const Login = () => {
                       <input
                         key={index}
                         ref={otpRefs[index]}
-                        type="text"
+                        type="password"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
                         maxLength={1}
                         value={digit}
                         onChange={(e) => handleOtpChange(index, e.target.value)}

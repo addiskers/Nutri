@@ -1,3 +1,5 @@
+import asyncio
+import random
 from fastapi import APIRouter, HTTPException, status, Depends, Request
 from datetime import datetime, timedelta, timezone
 
@@ -38,6 +40,7 @@ async def register(request: Request, user_data: UserRegister):
 
     existing_user = await User.find_one(User.email == user_data.email.lower())
     if existing_user:
+        await asyncio.sleep(random.uniform(0.2, 0.6))
         return MessageResponse(
             message="Registration successful! Your account is pending admin approval.",
             success=True
@@ -160,6 +163,8 @@ async def login(request: Request, credentials: UserLogin):
     otp = generate_otp()
     user.login_otp = hash_otp(otp)
     user.login_otp_expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+    user.otp_attempts = 0
+    user.otp_locked_until = None
     await user.save()
 
     try:
@@ -177,6 +182,10 @@ async def login(request: Request, credentials: UserLogin):
     )
 
 
+MAX_OTP_ATTEMPTS = 5
+OTP_LOCKOUT_MINUTES = 15
+
+
 @router.post("/verify-otp", response_model=TokenResponse)
 @limiter.limit("5/minute")
 async def verify_login_otp(request: Request, otp_data: VerifyLoginOTP):
@@ -187,7 +196,21 @@ async def verify_login_otp(request: Request, otp_data: VerifyLoginOTP):
             detail="Invalid OTP"
         )
     
+    # Check OTP lockout
+    if user.otp_locked_until and _as_utc(user.otp_locked_until) > datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed attempts. Please try again later."
+        )
+    
     if not user.login_otp or not verify_otp(otp_data.otp, user.login_otp):
+        user.otp_attempts = (user.otp_attempts or 0) + 1
+        if user.otp_attempts >= MAX_OTP_ATTEMPTS:
+            user.otp_locked_until = datetime.now(timezone.utc) + timedelta(minutes=OTP_LOCKOUT_MINUTES)
+            user.login_otp = None
+            user.login_otp_expires = None
+            logger.warning("OTP locked for user after %d failed attempts", user.otp_attempts)
+        await user.save()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid OTP"
@@ -199,8 +222,11 @@ async def verify_login_otp(request: Request, otp_data: VerifyLoginOTP):
             detail="OTP expired. Please request a new one."
         )
     
+    # Success — reset OTP state
     user.login_otp = None
     user.login_otp_expires = None
+    user.otp_attempts = 0
+    user.otp_locked_until = None
     user.last_login = datetime.now(timezone.utc)
     await user.save()
     
@@ -356,7 +382,21 @@ async def reset_password(request: Request, reset_data: ResetPassword):
             detail="Invalid OTP"
         )
     
+    # Check OTP lockout
+    if user.otp_locked_until and _as_utc(user.otp_locked_until) > datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed attempts. Please try again later."
+        )
+    
     if not user.reset_token or not verify_otp(reset_data.otp, user.reset_token):
+        user.otp_attempts = (user.otp_attempts or 0) + 1
+        if user.otp_attempts >= MAX_OTP_ATTEMPTS:
+            user.otp_locked_until = datetime.now(timezone.utc) + timedelta(minutes=OTP_LOCKOUT_MINUTES)
+            user.reset_token = None
+            user.reset_token_expires = None
+            logger.warning("Reset OTP locked for user after %d failed attempts", user.otp_attempts)
+        await user.save()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid OTP"
@@ -379,6 +419,8 @@ async def reset_password(request: Request, reset_data: ResetPassword):
     user.hashed_password = hash_password(reset_data.new_password)
     user.reset_token = None
     user.reset_token_expires = None
+    user.otp_attempts = 0
+    user.otp_locked_until = None
     user.updated_at = datetime.now(timezone.utc)
     await user.save()
     

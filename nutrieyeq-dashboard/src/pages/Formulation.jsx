@@ -2,12 +2,13 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 
 import Layout from '../components/Layout/Layout'
 
-import { Plus, Trash2, Loader2, Search, AlertCircle, Beaker, Download, X, ChevronDown, Users, Edit3, Calculator, AlertTriangle } from 'lucide-react'
+import { Plus, Trash2, Loader2, Search, AlertCircle, Beaker, Download, X, ChevronDown, Users, Edit3, Calculator, AlertTriangle, GitBranch } from 'lucide-react'
 
 import { coaService, formulationService, apiRequest, nutrientHierarchyService } from '../services/api'
 import authService from '../services/api'
 import TransferFormulationModal from '../components/Modals/TransferFormulationModal'
 import IngredientMappingModal from '../components/Modals/IngredientMappingModal'
+import NutrientHierarchyViewerModal from '../components/Modals/NutrientHierarchyViewerModal'
 import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
 
@@ -87,6 +88,10 @@ const Formulation = () => {
   const [hierarchyTree, setHierarchyTree] = useState(null)
   const [hierarchyFlat, setHierarchyFlat] = useState([])
 
+  // Nutrient hierarchy viewer modal (per ingredient)
+  const [showHierarchyViewer, setShowHierarchyViewer] = useState(false)
+  const [hierarchyViewerIngredient, setHierarchyViewerIngredient] = useState(null)
+
   // Energy Calculation Breakdown
   const [showEnergyBreakdown, setShowEnergyBreakdown] = useState(false)
 
@@ -95,7 +100,6 @@ const Formulation = () => {
     { id: 'carb', label: 'Carbohydrates', matchNames: ['Total Carbohydrates', 'Carbohydrates', 'Carbohydrate', 'A. Carbohydrates'], multiplier: 4, enabled: true, type: 'carb_base' },
     { id: 'fiber', label: '− Dietary Fiber', matchNames: ['Dietary Fiber', 'Dietary Fibre', 'Fiber', 'Fibre'], multiplier: 2, enabled: true, type: 'carb_subtract' },
     { id: 'polyol', label: '− Polyols (Sugar Alcohols)', matchNames: ['Polyol', 'Sorbitol', 'Mannitol', 'Xylitol', 'Maltitol', 'Isomalt', 'Lactitol', 'Glycerin', 'Glycerine', 'Hydrogenated Glucose Syrup', 'Hydrogenated Starch Hydrolysate', 'Sugar Alcohol', 'Sorbitol Syrup', 'Maltitol Syrup'], multiplier: 2, enabled: true, type: 'carb_subtract' },
-    { id: 'erythritol', label: '− Erythritol', matchNames: ['Erythritol'], multiplier: 4, enabled: true, type: 'carb_subtract' },
     { id: 'fat', label: 'Total Fat', matchNames: ['Total Fat', 'Total fat', 'Fats', 'Fat'], multiplier: 9, enabled: true, type: 'direct' },
   ]
 
@@ -106,8 +110,9 @@ const Formulation = () => {
   const [newEnergyMultiplier, setNewEnergyMultiplier] = useState(4)
   const defaultRowIds = new Set(DEFAULT_ENERGY_ROWS.map(r => r.id))
 
-  // Auto-save draft
-  const DRAFT_KEY = 'formulation_draft'
+  // Auto-save draft (scoped to user to prevent cross-user leakage on shared devices)
+  const currentUserId = (() => { try { return JSON.parse(sessionStorage.getItem('user'))?.id } catch { return 'anon' } })()
+  const DRAFT_KEY = `formulation_draft_${currentUserId}`
   const AUTOSAVE_INTERVAL = 30000 
   const [showDraftBanner, setShowDraftBanner] = useState(false)
   const draftChecked = useRef(false)
@@ -942,20 +947,18 @@ const Formulation = () => {
         }, 0)
 
         const hasAnyChild = additiveChildren.some(c => totals[c.nutrient_name] !== undefined && totals[c.nutrient_name] > 0)
-        const parentExists = totals[node.nutrient_name] !== undefined && totals[node.nutrient_name] > 0
+        const parentVal = totals[node.nutrient_name]
+        const parentExists = parentVal !== undefined && parentVal > 0
 
-        if (!parentExists && hasAnyChild) {
-          totals[node.nutrient_name] = childrenSum
-          inferred.add(node.nutrient_name)
-        } else if (parentExists && childrenSum > 0 && totals[node.nutrient_name] < childrenSum) {
+        // Do not infer or overwrite parent totals from children — each column is only
+        // the weighted sum of mapped COA values (and custom overrides). Warn if inconsistent.
+        if (parentExists && childrenSum > 0 && parentVal < childrenSum) {
           warnings.push({
             nutrient: node.nutrient_name,
-            parentValue: totals[node.nutrient_name],
+            parentValue: parentVal,
             childrenSum,
-            message: `${node.nutrient_name} (${totals[node.nutrient_name].toFixed(2)}) is less than sum of sub-nutrients (${childrenSum.toFixed(2)})`,
+            message: `${node.nutrient_name} (${parentVal.toFixed(2)}) is less than sum of sub-nutrients (${childrenSum.toFixed(2)})`,
           })
-          totals[node.nutrient_name] = childrenSum
-          inferred.add(node.nutrient_name)
         }
       }
     }
@@ -1155,7 +1158,6 @@ const Formulation = () => {
         nutrient_selections: nutrientSelections,
         custom_values: customValues,
         serve_size: serveSize,
-        created_by: (() => { try { return JSON.parse(localStorage.getItem('user'))?.email } catch { return null } })() || 'unknown'
       })
 
       if (result.success) {
@@ -1517,12 +1519,12 @@ const Formulation = () => {
 
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-2 sm:gap-3">
 
             <button
               onClick={() => setShowSaveModal(true)}
               disabled={ingredients.length === 0}
-              className={`flex items-center justify-center gap-2 h-10 px-4 py-2 rounded-md font-ibm-plex font-medium text-sm transition-colors whitespace-nowrap ${
+              className={`flex items-center justify-center gap-2 h-10 px-3 sm:px-4 py-2 rounded-md font-ibm-plex font-medium text-xs sm:text-sm transition-colors whitespace-nowrap ${
                 ingredients.length === 0
                   ? 'bg-[#f5f5f5] text-[#9e9e9e] cursor-not-allowed'
                   : 'bg-[#e91e63] text-white hover:bg-[#c2185b]'
@@ -1535,21 +1537,22 @@ const Formulation = () => {
             <button
               onClick={() => setShowRDAModal(true)}
               disabled={ingredients.length === 0}
-              className={`flex items-center justify-center gap-2 h-10 px-4 py-2 rounded-md font-ibm-plex font-medium text-sm transition-colors whitespace-nowrap ${
+              className={`flex items-center justify-center gap-2 h-10 px-3 sm:px-4 py-2 rounded-md font-ibm-plex font-medium text-xs sm:text-sm transition-colors whitespace-nowrap ${
                 ingredients.length === 0
                   ? 'bg-[#e1e7ef] text-[#65758b] cursor-not-allowed'
                   : 'bg-[#009da5] border border-[#5bc4bf] text-white hover:bg-[#008891]'
               }`}
             >
               <Download className="w-4 h-4" />
-              Export to Excel
+              <span className="hidden sm:inline">Export to Excel</span>
+              <span className="sm:hidden">Export</span>
             </button>
 
             <button
 
               onClick={addIngredient}
 
-              className="bg-[#009da5] border border-[#5bc4bf] flex items-center justify-center gap-2 h-10 px-4 py-2 rounded-md text-white font-ibm-plex font-medium text-sm hover:bg-[#008891] transition-colors whitespace-nowrap"
+              className="bg-[#009da5] border border-[#5bc4bf] flex items-center justify-center gap-2 h-10 px-3 sm:px-4 py-2 rounded-md text-white font-ibm-plex font-medium text-xs sm:text-sm hover:bg-[#008891] transition-colors whitespace-nowrap"
 
             >
 
@@ -1817,13 +1820,25 @@ const Formulation = () => {
 
                           </select>
                           {ingredient.coa_id && Object.keys(ingredient.nutritional_data || {}).length > 0 && (
-                            <button
-                              onClick={() => selectCOA(ingredient.id, ingredient.coa_id)}
-                              className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded border border-[#e1e7ef] bg-[#f9fafb] hover:bg-[#e1e7ef] transition-colors"
-                              title="Change nutrient mapping"
-                            >
-                              <Edit3 className="w-3.5 h-3.5 text-[#009da5]" />
-                            </button>
+                            <>
+                              <button
+                                onClick={() => selectCOA(ingredient.id, ingredient.coa_id)}
+                                className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded border border-[#e1e7ef] bg-[#f9fafb] hover:bg-[#e1e7ef] transition-colors"
+                                title="Change nutrient mapping"
+                              >
+                                <Edit3 className="w-3.5 h-3.5 text-[#009da5]" />
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setHierarchyViewerIngredient(ingredient)
+                                  setShowHierarchyViewer(true)
+                                }}
+                                className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded border border-blue-200 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                title="View nutrient hierarchy"
+                              >
+                                <GitBranch className="w-3.5 h-3.5 text-blue-600" />
+                              </button>
+                            </>
                           )}
                         </div>
 
@@ -2450,7 +2465,7 @@ const Formulation = () => {
 
         {/* Saved Formulations Tab Content */}
         {activeTab === 'saved' && (
-          <div className="bg-white rounded-lg border border-[#e1e7ef] overflow-hidden">
+          <div className="bg-white rounded-lg border border-[#e1e7ef] flex-1 min-h-0 flex flex-col overflow-hidden">
             {/* Search and Filter Bar */}
             <div className="p-4 border-b border-[#e1e7ef] space-y-3">
               <div className="flex flex-col md:flex-row gap-3">
@@ -2460,6 +2475,7 @@ const Formulation = () => {
                   <input
                     type="text"
                     placeholder="Search formulations by name or creator..."
+                    title="Search formulations by name or creator"
                     value={formulationSearch}
                     onChange={(e) => setFormulationSearch(e.target.value)}
                     className="w-full pl-10 pr-4 py-2 border border-[#e1e7ef] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#009da5] text-sm font-ibm-plex"
@@ -2485,7 +2501,7 @@ const Formulation = () => {
 
               {/* Bulk Actions (Super Admin only) */}
               {isSuperAdmin && getFilteredFormulations().length > 0 && (
-                <div className="flex items-center gap-3 pt-2">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3 pt-2">
                   <button
                     onClick={handleSelectAllFormulations}
                     className="text-xs text-[#009da5] hover:underline font-medium"
@@ -2516,6 +2532,7 @@ const Formulation = () => {
             </div>
 
             {/* Table */}
+            <div className="flex-1 min-h-0 overflow-y-auto">
             {isLoadingSaved ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-8 h-8 animate-spin text-[#009da5]" />
@@ -2527,83 +2544,137 @@ const Formulation = () => {
                 </p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-[#f9fafb] border-b border-[#e1e7ef]">
-                    <tr>
-                      {isSuperAdmin && (
-                        <th className="px-4 py-3 w-12">
-                          <input
-                            type="checkbox"
-                            checked={selectedFormulations.length === getFilteredFormulations().length && getFilteredFormulations().length > 0}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                handleSelectAllFormulations()
-                              } else {
-                                handleDeselectAllFormulations()
-                              }
-                            }}
-                            className="w-4 h-4 text-[#009da5] border-gray-300 rounded focus:ring-[#009da5]"
-                          />
-                        </th>
-                      )}
-                      <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Name</th>
-                      <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Ingredients</th>
-                      <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Serve Size</th>
-                      {isSuperAdmin && (
-                        <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Created By</th>
-                      )}
-                      <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Created</th>
-                      <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729]">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {getFilteredFormulations().map((formulation, idx) => {
-                      const isSelected = selectedFormulations.find(f => f.id === formulation.id)
-                      return (
-                        <tr key={formulation.id} className={`${idx !== getFilteredFormulations().length - 1 ? 'border-b border-[#e1e7ef]' : ''} ${isSelected ? 'bg-blue-50' : ''}`}>
+              <>
+                {/* Mobile Card Layout */}
+                <div className="md:hidden divide-y divide-[#e1e7ef]">
+                  {getFilteredFormulations().map((formulation) => {
+                    const isSelected = selectedFormulations.find(f => f.id === formulation.id)
+                    return (
+                      <div key={formulation.id} className={`p-4 ${isSelected ? 'bg-blue-50' : ''}`}>
+                        <div className="flex items-start gap-3">
                           {isSuperAdmin && (
-                            <td className="px-4 py-3">
-                              <input
-                                type="checkbox"
-                                checked={!!isSelected}
-                                onChange={() => handleFormulationSelect(formulation)}
-                                className="w-4 h-4 text-[#009da5] border-gray-300 rounded focus:ring-[#009da5]"
-                              />
-                            </td>
+                            <input
+                              type="checkbox"
+                              checked={!!isSelected}
+                              onChange={() => handleFormulationSelect(formulation)}
+                              className="w-4 h-4 mt-1 text-[#009da5] border-gray-300 rounded focus:ring-[#009da5] flex-shrink-0"
+                            />
                           )}
-                          <td className="px-4 py-3 text-sm font-ibm-plex font-medium text-[#0f1729]">{formulation.name}</td>
-                          <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">{formulation.ingredients_count} ingredients</td>
-                          <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">{formulation.serve_size}g</td>
-                          {isSuperAdmin && (
-                            <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">{formulation.created_by || 'N/A'}</td>
-                          )}
-                          <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">
-                            {formulation.created_at ? new Date(formulation.created_at).toLocaleDateString() : '-'}
-                          </td>
-                          <td className="px-4 py-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <h3 className="text-sm font-ibm-plex font-semibold text-[#0f1729] truncate">{formulation.name}</h3>
+                              <span className="text-xs font-ibm-plex text-[#65758b] flex-shrink-0">
+                                {formulation.created_at ? new Date(formulation.created_at).toLocaleDateString() : '-'}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-ibm-plex text-[#65758b] mb-3">
+                              <span>{formulation.ingredients_count} ingredients</span>
+                              <span>{formulation.serve_size}g</span>
+                              {isSuperAdmin && (
+                                <span className="truncate max-w-[200px]">{formulation.created_by || 'N/A'}</span>
+                              )}
+                            </div>
                             <div className="flex gap-2">
                               <button
                                 onClick={() => handleOpenFormulation(formulation.id)}
-                                className="px-3 py-1 bg-[#009da5] text-white rounded text-sm font-ibm-plex font-medium hover:bg-[#008891] transition-colors"
+                                className="px-3 py-1.5 bg-[#009da5] text-white rounded text-xs font-ibm-plex font-medium hover:bg-[#008891] transition-colors"
                               >
                                 Open
                               </button>
                               <button
                                 onClick={() => handleDeleteFormulation(formulation.id, formulation.name)}
-                                className="px-3 py-1 bg-red-500 text-white rounded text-sm font-ibm-plex font-medium hover:bg-red-600 transition-colors"
+                                className="px-3 py-1.5 bg-red-500 text-white rounded text-xs font-ibm-plex font-medium hover:bg-red-600 transition-colors"
                               >
                                 Delete
                               </button>
                             </div>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Desktop Table Layout */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full min-w-[700px]">
+                    <thead className="bg-[#f9fafb] border-b border-[#e1e7ef] sticky top-0 z-10">
+                      <tr>
+                        {isSuperAdmin && (
+                          <th className="px-4 py-3 w-12 bg-[#f9fafb]">
+                            <input
+                              type="checkbox"
+                              checked={selectedFormulations.length === getFilteredFormulations().length && getFilteredFormulations().length > 0}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  handleSelectAllFormulations()
+                                } else {
+                                  handleDeselectAllFormulations()
+                                }
+                              }}
+                              className="w-4 h-4 text-[#009da5] border-gray-300 rounded focus:ring-[#009da5]"
+                            />
+                          </th>
+                        )}
+                        <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729] bg-[#f9fafb]">Name</th>
+                        <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729] bg-[#f9fafb]">Ingredients</th>
+                        <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729] bg-[#f9fafb]">Serve Size</th>
+                        {isSuperAdmin && (
+                          <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729] bg-[#f9fafb]">Created By</th>
+                        )}
+                        <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729] bg-[#f9fafb]">Created</th>
+                        <th className="px-4 py-3 text-left text-sm font-ibm-plex font-semibold text-[#0f1729] bg-[#f9fafb]">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {getFilteredFormulations().map((formulation, idx) => {
+                        const isSelected = selectedFormulations.find(f => f.id === formulation.id)
+                        return (
+                          <tr key={formulation.id} className={`${idx !== getFilteredFormulations().length - 1 ? 'border-b border-[#e1e7ef]' : ''} ${isSelected ? 'bg-blue-50' : ''}`}>
+                            {isSuperAdmin && (
+                              <td className="px-4 py-3">
+                                <input
+                                  type="checkbox"
+                                  checked={!!isSelected}
+                                  onChange={() => handleFormulationSelect(formulation)}
+                                  className="w-4 h-4 text-[#009da5] border-gray-300 rounded focus:ring-[#009da5]"
+                                />
+                              </td>
+                            )}
+                            <td className="px-4 py-3 text-sm font-ibm-plex font-medium text-[#0f1729]">{formulation.name}</td>
+                            <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">{formulation.ingredients_count} ingredients</td>
+                            <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">{formulation.serve_size}g</td>
+                            {isSuperAdmin && (
+                              <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b] max-w-[200px] truncate">{formulation.created_by || 'N/A'}</td>
+                            )}
+                            <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b] whitespace-nowrap">
+                              {formulation.created_at ? new Date(formulation.created_at).toLocaleDateString() : '-'}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => handleOpenFormulation(formulation.id)}
+                                  className="px-3 py-1 bg-[#009da5] text-white rounded text-sm font-ibm-plex font-medium hover:bg-[#008891] transition-colors"
+                                >
+                                  Open
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteFormulation(formulation.id, formulation.name)}
+                                  className="px-3 py-1 bg-red-500 text-white rounded text-sm font-ibm-plex font-medium hover:bg-red-600 transition-colors"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
+            </div>
           </div>
         )}
 
@@ -2891,6 +2962,18 @@ const Formulation = () => {
           coaName={mappingModalData?.coaName || ''}
           nutrients={mappingModalData?.nutrients || []}
           onConfirm={handleMappingConfirm}
+        />
+
+        {/* Nutrient Hierarchy Viewer Modal */}
+        <NutrientHierarchyViewerModal
+          isOpen={showHierarchyViewer}
+          onClose={() => {
+            setShowHierarchyViewer(false)
+            setHierarchyViewerIngredient(null)
+          }}
+          ingredientName={hierarchyViewerIngredient?.coa_name || ''}
+          nutritionalData={hierarchyViewerIngredient?.nutritional_data || {}}
+          hierarchyTree={hierarchyTree || []}
         />
 
       </div>

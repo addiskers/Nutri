@@ -610,6 +610,8 @@ const COA = () => {
                   title={`COA Document Page ${previewIndex + 1}`}
                   className="w-full h-full border-0"
                   style={{ minHeight: '600px' }}
+                  sandbox="allow-same-origin"
+                  referrerPolicy="no-referrer"
                 />
               ) : (
                 <div className="p-4 flex items-center justify-center" style={{ minHeight: '400px' }}>

@@ -1,37 +1,58 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
-const getToken = () => localStorage.getItem('access_token')
+const getToken = () => sessionStorage.getItem('access_token')
 
 export function clearAuthData() {
-  localStorage.removeItem('access_token')
-  localStorage.removeItem('refresh_token')
-  localStorage.removeItem('user')
+  sessionStorage.removeItem('access_token')
+  sessionStorage.removeItem('refresh_token')
+  sessionStorage.removeItem('user')
 }
 
 function storeAuthData(data) {
-  localStorage.setItem('access_token', data.access_token)
-  localStorage.setItem('refresh_token', data.refresh_token)
-  if (data.user) localStorage.setItem('user', JSON.stringify(data.user))
+  sessionStorage.setItem('access_token', data.access_token)
+  sessionStorage.setItem('refresh_token', data.refresh_token)
+  if (data.user) sessionStorage.setItem('user', JSON.stringify(data.user))
 }
 
 function safeParseUser() {
   try {
-    const raw = localStorage.getItem('user')
+    const raw = sessionStorage.getItem('user')
     return raw ? JSON.parse(raw) : null
   } catch {
-    localStorage.removeItem('user')
+    sessionStorage.removeItem('user')
     return null
   }
 }
 
+function sanitizeError(detail, fallback = 'Request failed') {
+  if (!detail) return fallback
+  if (typeof detail === 'string') {
+    if (/traceback|stack|exception|internal server/i.test(detail)) return fallback
+    return detail
+  }
+  if (Array.isArray(detail)) {
+    return detail.map(d => d?.msg || d?.message || fallback).join('; ')
+  }
+  return fallback
+}
+
+const DEFAULT_TIMEOUT_MS = 30000
+
+function withTimeout(options, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  if (options.signal) return options
+  const controller = new AbortController()
+  setTimeout(() => controller.abort(), timeoutMs)
+  return { ...options, signal: controller.signal }
+}
+
 async function unauthenticatedRequest(endpoint, options = {}) {
-  return fetch(`${API_BASE_URL}${endpoint}`, {
+  return fetch(`${API_BASE_URL}${endpoint}`, withTimeout({
     ...options,
     headers: {
       'Content-Type': 'application/json',
       ...options.headers,
     },
-  })
+  }))
 }
 
 export async function apiRequest(endpoint, options = {}) {
@@ -47,13 +68,13 @@ export async function apiRequest(endpoint, options = {}) {
   }
   
   try {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, config)
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, withTimeout(config))
     
     if (response.status === 401 && token) {
       const refreshed = await refreshAccessToken()
       if (refreshed) {
         config.headers['Authorization'] = `Bearer ${getToken()}`
-        return fetch(`${API_BASE_URL}${endpoint}`, config)
+        return fetch(`${API_BASE_URL}${endpoint}`, withTimeout(config))
       } else {
         clearAuthData()
         window.location.href = '/login'
@@ -70,22 +91,22 @@ export async function apiRequest(endpoint, options = {}) {
 async function apiUpload(endpoint, formData) {
   const token = getToken()
   
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, withTimeout({
     method: 'POST',
     headers: {
       ...(token && { 'Authorization': `Bearer ${token}` })
     },
     body: formData
-  })
+  }, 120000))
 
   if (response.status === 401 && token) {
     const refreshed = await refreshAccessToken()
     if (refreshed) {
-      return fetch(`${API_BASE_URL}${endpoint}`, {
+      return fetch(`${API_BASE_URL}${endpoint}`, withTimeout({
         method: 'POST',
         headers: { 'Authorization': `Bearer ${getToken()}` },
         body: formData
-      })
+      }, 120000))
     } else {
       clearAuthData()
       window.location.href = '/login'
@@ -102,7 +123,7 @@ async function refreshAccessToken() {
   if (_refreshPromise) return _refreshPromise
 
   _refreshPromise = (async () => {
-    const refreshToken = localStorage.getItem('refresh_token')
+    const refreshToken = sessionStorage.getItem('refresh_token')
     if (!refreshToken) return false
 
     try {
@@ -156,7 +177,7 @@ export const productService = {
       } else {
         return {
           success: false,
-          error: result.detail || 'Extraction failed'
+          error: sanitizeError(result.detail, 'Extraction failed'),
         }
       }
     } catch (error) {
@@ -184,7 +205,7 @@ export const productService = {
       } else {
         return {
           success: false,
-          error: result.detail || 'Failed to create product'
+          error: sanitizeError(result.detail, 'Failed to create product')
         }
       }
     } catch (error) {
@@ -271,7 +292,7 @@ export const productService = {
       }
       return {
         success: false,
-        error: result.detail || 'Failed to update product'
+        error: sanitizeError(result.detail, 'Failed to update product')
       }
     } catch (error) {
       return {
@@ -297,7 +318,7 @@ export const productService = {
       }
       return {
         success: false,
-        error: result.detail || 'Failed to delete product'
+        error: sanitizeError(result.detail, 'Failed to delete product')
       }
     } catch (error) {
       return {
@@ -325,7 +346,7 @@ export const authService = {
       if (response.ok) {
         return { success: true, message: result.message }
       } else {
-        return { success: false, error: result.detail || 'Registration failed' }
+        return { success: false, error: sanitizeError(result.detail, 'Registration failed') }
       }
     } catch (error) {
       return { success: false, error: 'Network error. Please try again.' }
@@ -350,7 +371,7 @@ export const authService = {
         }
         return { success: true, message: result.message }
       } else {
-        return { success: false, error: result.detail || 'Login failed' }
+        return { success: false, error: sanitizeError(result.detail, 'Login failed') }
       }
     } catch (error) {
       return { success: false, error: 'Network error. Please try again.' }
@@ -373,7 +394,7 @@ export const authService = {
         storeAuthData(result)
         return { success: true, user: result.user }
       } else {
-        return { success: false, error: result.detail || 'OTP verification failed' }
+        return { success: false, error: sanitizeError(result.detail, 'OTP verification failed') }
       }
     } catch (error) {
       return { success: false, error: 'Network error. Please try again.' }
@@ -395,7 +416,7 @@ export const authService = {
       if (response.ok) {
         return { success: true, message: result.message }
       } else {
-        return { success: false, error: result.detail || 'Request failed' }
+        return { success: false, error: sanitizeError(result.detail, 'Request failed') }
       }
     } catch (error) {
       return { success: false, error: 'Network error. Please try again.' }
@@ -417,7 +438,7 @@ export const authService = {
       if (response.ok) {
         return { success: true, message: result.message }
       } else {
-        return { success: false, error: result.detail || 'Password reset failed' }
+        return { success: false, error: sanitizeError(result.detail, 'Password reset failed') }
       }
     } catch (error) {
       return { success: false, error: 'Network error. Please try again.' }
@@ -439,7 +460,7 @@ export const authService = {
       if (response.ok) {
         return { success: true, message: result.message }
       } else {
-        return { success: false, error: result.detail || 'Password change failed' }
+        return { success: false, error: sanitizeError(result.detail, 'Password change failed') }
       }
     } catch (error) {
       return { success: false, error: 'Network error. Please try again.' }
@@ -455,7 +476,7 @@ export const authService = {
       
       if (response.ok) {
         const user = await response.json()
-        localStorage.setItem('user', JSON.stringify(user))
+        sessionStorage.setItem('user', JSON.stringify(user))
         return user
       }
     } catch {
@@ -472,7 +493,7 @@ export const authService = {
 
       if (response.ok) {
         const user = await response.json()
-        localStorage.setItem('user', JSON.stringify(user))
+        sessionStorage.setItem('user', JSON.stringify(user))
         window.location.reload()
         return user
       }
@@ -589,7 +610,7 @@ export const authService = {
       }
       return {
         success: false,
-        error: result.detail || 'Failed to delete product'
+        error: sanitizeError(result.detail, 'Failed to delete product')
       }
     } catch (error) {
       return {
@@ -641,7 +662,7 @@ export const nomenclatureService = {
       } else {
         return {
           success: false,
-          error: result.detail || 'Failed to create nomenclature mapping'
+          error: sanitizeError(result.detail, 'Failed to create nomenclature mapping')
         }
       }
     } catch (error) {
@@ -669,7 +690,7 @@ export const nomenclatureService = {
       }
       return {
         success: false,
-        error: result.detail || 'Failed to update nomenclature mapping'
+        error: sanitizeError(result.detail, 'Failed to update nomenclature mapping')
       }
     } catch (error) {
       return {
@@ -695,7 +716,7 @@ export const nomenclatureService = {
       }
       return {
         success: false,
-        error: result.detail || 'Failed to delete nomenclature mapping'
+        error: sanitizeError(result.detail, 'Failed to delete nomenclature mapping')
       }
     } catch (error) {
       return {
@@ -723,7 +744,7 @@ export const nomenclatureService = {
       }
       return {
         success: false,
-        error: result.detail || 'Failed to add synonyms'
+        error: sanitizeError(result.detail, 'Failed to add synonyms')
       }
     } catch (error) {
       return {
@@ -749,7 +770,7 @@ export const nomenclatureService = {
       }
       return {
         success: false,
-        error: result.detail || 'Failed to remove synonym'
+        error: sanitizeError(result.detail, 'Failed to remove synonym')
       }
     } catch (error) {
       return {
@@ -787,7 +808,7 @@ export const nomenclatureService = {
       if (response.ok) {
         return { success: true, ...result }
       }
-      return { success: false, error: result.detail || 'Failed to seed nomenclature' }
+      return { success: false, error: sanitizeError(result.detail, 'Failed to seed nomenclature') }
     } catch (error) {
       return { success: false, error: error.message || 'Network error' }
     }
@@ -833,7 +854,7 @@ export const coaNomenclatureService = {
       })
       const result = await response.json()
       if (response.ok) return { success: true, ...result }
-      return { success: false, error: result.detail || 'Failed to create COA nomenclature' }
+      return { success: false, error: sanitizeError(result.detail, 'Failed to create COA nomenclature') }
     } catch (error) {
       return { success: false, error: error.message || 'Network error' }
     }
@@ -847,7 +868,7 @@ export const coaNomenclatureService = {
       })
       const result = await response.json()
       if (response.ok) return { success: true, ...result }
-      return { success: false, error: result.detail || 'Failed to update COA nomenclature' }
+      return { success: false, error: sanitizeError(result.detail, 'Failed to update COA nomenclature') }
     } catch (error) {
       return { success: false, error: error.message || 'Network error' }
     }
@@ -860,7 +881,7 @@ export const coaNomenclatureService = {
       })
       const result = await response.json()
       if (response.ok) return { success: true, ...result }
-      return { success: false, error: result.detail || 'Failed to delete COA nomenclature' }
+      return { success: false, error: sanitizeError(result.detail, 'Failed to delete COA nomenclature') }
     } catch (error) {
       return { success: false, error: error.message || 'Network error' }
     }
@@ -874,7 +895,7 @@ export const coaNomenclatureService = {
       })
       const result = await response.json()
       if (response.ok) return { success: true, ...result }
-      return { success: false, error: result.detail || 'Failed to add synonym' }
+      return { success: false, error: sanitizeError(result.detail, 'Failed to add synonym') }
     } catch (error) {
       return { success: false, error: error.message || 'Network error' }
     }
@@ -887,7 +908,7 @@ export const coaNomenclatureService = {
       })
       const result = await response.json()
       if (response.ok) return { success: true, ...result }
-      return { success: false, error: result.detail || 'Failed to remove synonym' }
+      return { success: false, error: sanitizeError(result.detail, 'Failed to remove synonym') }
     } catch (error) {
       return { success: false, error: error.message || 'Network error' }
     }
@@ -900,7 +921,7 @@ export const coaNomenclatureService = {
       })
       const result = await response.json()
       if (response.ok) return { success: true, ...result }
-      return { success: false, error: result.detail || 'Failed to seed COA nomenclature' }
+      return { success: false, error: sanitizeError(result.detail, 'Failed to seed COA nomenclature') }
     } catch (error) {
       return { success: false, error: error.message || 'Network error' }
     }
@@ -929,7 +950,7 @@ export const nutrientHierarchyService = {
       })
       const result = await response.json()
       if (response.ok) return { success: true, ...result }
-      return { success: false, error: result.detail || 'Failed to create hierarchy node' }
+      return { success: false, error: sanitizeError(result.detail, 'Failed to create hierarchy node') }
     } catch (error) {
       return { success: false, error: error.message || 'Network error' }
     }
@@ -943,7 +964,7 @@ export const nutrientHierarchyService = {
       })
       const result = await response.json()
       if (response.ok) return { success: true, ...result }
-      return { success: false, error: result.detail || 'Failed to update hierarchy node' }
+      return { success: false, error: sanitizeError(result.detail, 'Failed to update hierarchy node') }
     } catch (error) {
       return { success: false, error: error.message || 'Network error' }
     }
@@ -956,7 +977,7 @@ export const nutrientHierarchyService = {
       })
       const result = await response.json()
       if (response.ok) return { success: true, ...result }
-      return { success: false, error: result.detail || 'Failed to delete hierarchy node' }
+      return { success: false, error: sanitizeError(result.detail, 'Failed to delete hierarchy node') }
     } catch (error) {
       return { success: false, error: error.message || 'Network error' }
     }
@@ -969,7 +990,7 @@ export const nutrientHierarchyService = {
       })
       const result = await response.json()
       if (response.ok) return { success: true, ...result }
-      return { success: false, error: result.detail || 'Failed to seed hierarchy' }
+      return { success: false, error: sanitizeError(result.detail, 'Failed to seed hierarchy') }
     } catch (error) {
       return { success: false, error: error.message || 'Network error' }
     }
@@ -1047,7 +1068,7 @@ export const categoryService = {
       } else {
         return {
           success: false,
-          error: result.detail || 'Failed to create category'
+          error: sanitizeError(result.detail, 'Failed to create category')
         }
       }
     } catch (error) {
@@ -1075,7 +1096,7 @@ export const categoryService = {
       }
       return {
         success: false,
-        error: result.detail || 'Failed to update category'
+        error: sanitizeError(result.detail, 'Failed to update category')
       }
     } catch (error) {
       return {
@@ -1101,7 +1122,7 @@ export const categoryService = {
       }
       return {
         success: false,
-        error: result.detail || 'Failed to delete category'
+        error: sanitizeError(result.detail, 'Failed to delete category')
       }
     } catch (error) {
       return {
@@ -1141,7 +1162,7 @@ export const coaService = {
       } else {
         return {
           success: false,
-          error: result.detail || 'COA extraction failed'
+          error: sanitizeError(result.detail, 'COA extraction failed')
         }
       }
     } catch (error) {
@@ -1169,7 +1190,7 @@ export const coaService = {
       } else {
         return {
           success: false,
-          error: result.detail || 'Failed to create COA'
+          error: sanitizeError(result.detail, 'Failed to create COA')
         }
       }
     } catch (error) {
@@ -1239,7 +1260,7 @@ export const coaService = {
       }
       return {
         success: false,
-        error: result.detail || 'Failed to update COA'
+        error: sanitizeError(result.detail, 'Failed to update COA')
       }
     } catch (error) {
       return {
@@ -1265,7 +1286,7 @@ export const coaService = {
       }
       return {
         success: false,
-        error: result.detail || 'Failed to delete COA'
+        error: sanitizeError(result.detail, 'Failed to delete COA')
       }
     } catch (error) {
       return {
@@ -1291,7 +1312,7 @@ export const formulationService = {
       if (response.ok) {
         return { success: true, ...result }
       }
-      return { success: false, error: result.detail || 'Failed to save formulation' }
+      return { success: false, error: sanitizeError(result.detail, 'Failed to save formulation') }
     } catch (error) {
       return { success: false, error: error.message || 'Network error' }
     }
@@ -1345,7 +1366,7 @@ export const formulationService = {
       if (response.ok) {
         return { success: true, ...result }
       }
-      return { success: false, error: result.detail || 'Failed to delete formulation' }
+      return { success: false, error: sanitizeError(result.detail, 'Failed to delete formulation') }
     } catch (error) {
       return { success: false, error: error.message || 'Network error' }
     }

@@ -12,10 +12,11 @@ logger = logging.getLogger(__name__)
 
 
 def _get_real_ip(request: Request) -> str:
-    """Extract client IP respecting X-Forwarded-For behind a trusted proxy."""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Extract client IP respecting X-Forwarded-For only behind a trusted proxy."""
+    if settings.BEHIND_PROXY:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
     return get_remote_address(request)
 
 
