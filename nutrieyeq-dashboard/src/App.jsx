@@ -1,11 +1,11 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import ProtectedRoute from './components/ProtectedRoute'
+import PermissionGuard from './components/PermissionGuard'
 import FlashScreen from './pages/FlashScreen'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
-import AuthCallback from './pages/AuthCallback'
 import Dashboard from './pages/Dashboard'
 import Products from './pages/Products'
 import AddProduct from './pages/AddProduct'
@@ -16,7 +16,9 @@ import AddCOA from './pages/AddCOA'
 import COA from './pages/COA'
 import Formulation from './pages/Formulation'
 import NomenclatureMap from './pages/NomenclatureMap'
-import TagsPage from './pages/TagsPage'
+import COANomenclatureMap from './pages/COANomenclatureMap'
+import NutrientHierarchyMap from './pages/NutrientHierarchyMap'
+
 import SettingsPage from './pages/SettingsPage'
 
 function App() {
@@ -28,71 +30,100 @@ function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
-        <Route path="/auth/callback" element={<AuthCallback />} />
         
         <Route path="/dashboard" element={
           <ProtectedRoute>
-            <Dashboard />
+            <PermissionGuard permission="view_analytics" pageName="Dashboard" redirectToDashboard={false}>
+              <Dashboard />
+            </PermissionGuard>
           </ProtectedRoute>
         } />
         
         <Route path="/products" element={
           <ProtectedRoute>
-            <Products />
+            <PermissionGuard permission="view_products" pageName="Products">
+              <Products />
+            </PermissionGuard>
           </ProtectedRoute>
         } />
         
         <Route path="/add-product" element={
           <ProtectedRoute>
-            <AddProduct />
+            <PermissionGuard permission="add_products" pageName="Add Product">
+              <AddProduct />
+            </PermissionGuard>
           </ProtectedRoute>
         } />
         
         <Route path="/edit-product/:id" element={
           <ProtectedRoute>
-            <EditProduct />
+            <PermissionGuard permission="edit_products" pageName="Edit Product">
+              <EditProduct />
+            </PermissionGuard>
           </ProtectedRoute>
         } />
         
         <Route path="/compare" element={
           <ProtectedRoute>
-            <Compare />
+            <PermissionGuard permission="run_comparisons" pageName="Compare">
+              <Compare />
+            </PermissionGuard>
           </ProtectedRoute>
         } />
         
         <Route path="/users" element={
           <ProtectedRoute>
-            <Users />
+            <PermissionGuard permission="view_users" pageName="Users">
+              <Users />
+            </PermissionGuard>
           </ProtectedRoute>
         } />
         
         <Route path="/nomenclature" element={
           <ProtectedRoute>
-            <NomenclatureMap />
+            <PermissionGuard permission="view_nomenclature" pageName="Nomenclature Map">
+              <NomenclatureMap />
+            </PermissionGuard>
           </ProtectedRoute>
         } />
         
         <Route path="/add-coa" element={
           <ProtectedRoute>
-            <AddCOA />
+            <PermissionGuard permission="add_coa" pageName="Add COA">
+              <AddCOA />
+            </PermissionGuard>
           </ProtectedRoute>
         } />
         
         <Route path="/coa" element={
           <ProtectedRoute>
-            <COA />
+            <PermissionGuard permission="view_coa" pageName="COA">
+              <COA />
+            </PermissionGuard>
           </ProtectedRoute>
         } />
         
         <Route path="/formulation" element={
           <ProtectedRoute>
-            <Formulation />
+            <PermissionGuard permission="use_coa_in_formulation" pageName="Formulation">
+              <Formulation />
+            </PermissionGuard>
           </ProtectedRoute>
         } />
         
-        <Route path="/tags" element={
+        <Route path="/coa-nomenclature" element={
           <ProtectedRoute>
-            <TagsPage />
+            <PermissionGuard permission="edit_nomenclature" pageName="COA Nomenclature">
+              <COANomenclatureMap />
+            </PermissionGuard>
+          </ProtectedRoute>
+        } />
+        
+        <Route path="/nutrient-hierarchy" element={
+          <ProtectedRoute>
+            <PermissionGuard permission="edit_nomenclature" pageName="Nutrient Hierarchy">
+              <NutrientHierarchyMap />
+            </PermissionGuard>
           </ProtectedRoute>
         } />
         

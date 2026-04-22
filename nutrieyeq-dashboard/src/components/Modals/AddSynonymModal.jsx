@@ -57,7 +57,7 @@ const AddSynonymModal = ({ isOpen, onClose, onSave, groupName, existingStandardN
     setRawNames([{ id: 1, value: '', error: false }])
     setStandardError(false)
     onClose()
-    alert(`Successfully added ${validRawNames.length} synonym(s) to ${groupName}`)
+    alert(`Successfully added ${validRawNames.length} mapping(s) to ${groupName}`)
   }
 
   const handleCancel = () => {
@@ -83,7 +83,7 @@ const AddSynonymModal = ({ isOpen, onClose, onSave, groupName, existingStandardN
         <div className="p-6 border-b border-[#e1e7ef] bg-white sticky top-0 z-10">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-lg font-ibm-plex font-semibold text-[#0f1729] tracking-tight">
-              Add Nutrient
+              Add Mapping
             </h2>
             <button
               onClick={handleCancel}
@@ -93,7 +93,7 @@ const AddSynonymModal = ({ isOpen, onClose, onSave, groupName, existingStandardN
             </button>
           </div>
           <p className="text-sm font-ibm-plex text-[#65758b]">
-            Add a raw term and map it to a standardized nutrient name for this group.
+            Add a raw/source name and map it to this standardized nutrient.
           </p>
         </div>
 
@@ -179,7 +179,7 @@ const AddSynonymModal = ({ isOpen, onClose, onSave, groupName, existingStandardN
               title="Add another raw/source name field"
             >
               <Plus className="w-4 h-4" />
-              Add synonym
+              Add another
             </button>
             
             <button

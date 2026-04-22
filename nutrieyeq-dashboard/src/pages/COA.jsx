@@ -33,6 +33,7 @@ const COA = () => {
   
   // Edit form state
   const [ingredientName, setIngredientName] = useState('')
+  const [productDescription, setProductDescription] = useState('')
   const [productCode, setProductCode] = useState('')
   const [lotNumber, setLotNumber] = useState('')
   const [manufacturingDate, setManufacturingDate] = useState('')
@@ -182,6 +183,7 @@ const COA = () => {
       if (fullCOA) {
         setEditingCOA(fullCOA)
         setIngredientName(fullCOA.ingredient_name || '')
+        setProductDescription(fullCOA.product_description || '')
         setProductCode(fullCOA.product_code || '')
         setLotNumber(fullCOA.lot_number || '')
         setManufacturingDate(fullCOA.manufacturing_date || '')
@@ -287,6 +289,7 @@ const COA = () => {
       
       const coaData = {
         ingredient_name: ingredientName,
+        product_description: productDescription || null,
         product_code: productCode || null,
         lot_number: lotNumber || null,
         manufacturing_date: manufacturingDate || null,
@@ -607,6 +610,8 @@ const COA = () => {
                   title={`COA Document Page ${previewIndex + 1}`}
                   className="w-full h-full border-0"
                   style={{ minHeight: '600px' }}
+                  sandbox="allow-same-origin"
+                  referrerPolicy="no-referrer"
                 />
               ) : (
                 <div className="p-4 flex items-center justify-center" style={{ minHeight: '400px' }}>
@@ -710,6 +715,7 @@ const COA = () => {
                     <div className="grid grid-cols-2 gap-x-8 gap-y-3">
                       {[
                         { label: 'Ingredient Name', value: viewingCOA.ingredient_name },
+                        { label: 'Product Description', value: viewingCOA.product_description },
                         { label: 'Product Code', value: viewingCOA.product_code },
                         { label: 'Lot Number', value: viewingCOA.lot_number },
                         { label: 'Supplier Name', value: viewingCOA.supplier_name },
@@ -881,6 +887,18 @@ const COA = () => {
                       value={ingredientName}
                       onChange={(e) => setIngredientName(e.target.value)}
                       className="w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-ibm-plex font-medium text-[#0f1729] mb-2">
+                      Product Description
+                    </label>
+                    <input
+                      type="text"
+                      value={productDescription}
+                      onChange={(e) => setProductDescription(e.target.value)}
+                      className="w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] focus:outline-none focus:ring-2 focus:ring-primary"
+                      placeholder="Brief product description"
                     />
                   </div>
                   <div>

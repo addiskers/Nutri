@@ -1,22 +1,19 @@
+import logging
+import sys
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
 from typing import Optional
-import secrets
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
     MONGODB_URL: str = "mongodb://localhost:27017"
     DATABASE_NAME: str = "nutrieyeq"
-    SECRET_KEY: str = secrets.token_hex(32)
+    SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-    AZURE_CLIENT_ID: str = ""
-    AZURE_CLIENT_SECRET: str = ""
-    AZURE_TENANT_ID: str = "common"
-    AZURE_REDIRECT_URI: str = "http://localhost:5173/auth/callback"
-    AZURE_AUTHORITY: Optional[str] = None
-    ALLOWED_EMAIL_DOMAINS: str = ""
     SUPER_ADMIN_EMAILS: str = ""
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
@@ -31,7 +28,26 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
     GEMINI_API_KEY: Optional[str] = None
+    ENVIRONMENT: str = "development"
+    BEHIND_PROXY: bool = False
     
+    @field_validator('SECRET_KEY', mode='before')
+    @classmethod
+    def validate_secret_key(cls, v):
+        if not v or len(str(v)) < 32:
+            print("\n[FATAL] SECRET_KEY environment variable is missing or too short (min 32 chars).")
+            print("  Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\"")
+            sys.exit(1)
+        return v
+
+    @field_validator('ALGORITHM', mode='before')
+    @classmethod
+    def validate_algorithm(cls, v):
+        allowed = {"HS256", "HS384", "HS512"}
+        if v not in allowed:
+            raise ValueError(f"ALGORITHM must be one of {allowed}")
+        return v
+
     @field_validator('DEBUG', mode='before')
     @classmethod
     def parse_debug(cls, v):
@@ -43,16 +59,6 @@ class Settings(BaseSettings):
             elif v.lower() in ('false', '0', 'no', 'off', 'warn', 'info', 'error'):
                 return False
         return bool(v)
-    
-    def get_azure_authority(self) -> str:
-        if self.AZURE_AUTHORITY:
-            return self.AZURE_AUTHORITY
-        return f"https://login.microsoftonline.com/{self.AZURE_TENANT_ID}"
-    
-    def get_allowed_domains(self) -> list:
-        if not self.ALLOWED_EMAIL_DOMAINS:
-            return []
-        return [d.strip() for d in self.ALLOWED_EMAIL_DOMAINS.split(',') if d.strip()]
     
     def get_super_admin_emails(self) -> list:
         if not self.SUPER_ADMIN_EMAILS:

@@ -1,91 +1,120 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout/Layout'
 import ProductPreviewModal from '../components/Modals/ProductPreviewModal'
+import ProductDetailModal from '../components/Modals/ProductDetailModal'
 import DeleteConfirmModal from '../components/Modals/DeleteConfirmModal'
 import NoPermissionContent from '../components/NoPermissionContent'
-import { Search, Filter, Calendar, Eye, Edit2, Trash2, Plus, ChevronDown } from 'lucide-react'
-import { mockCategories } from '../utils/mockData'
-import authService from '../services/api'
+import { Search, Filter, Eye, Edit2, Trash2, Plus, ChevronDown, ChevronLeft, ChevronRight, Download, ImageIcon } from 'lucide-react'
+import authService, { productService, categoryService } from '../services/api'
+
+const PAGE_SIZE = 50
+
+const formatMrp = (mrp) => {
+  if (!mrp || mrp === '0' || mrp === '0.0' || mrp === 0 || mrp === 0.0) return ''
+  const str = String(mrp)
+  if (str.includes('₹') || str.includes('Rs')) {
+    const match = str.match(/[\d,]+\.?\d*/)
+    if (match) return `₹${match[0]}`
+    return str
+  }
+  const num = parseFloat(str)
+  if (!isNaN(num) && num > 0) return `₹${num % 1 === 0 ? num.toFixed(0) : num.toFixed(2)}`
+  return str
+}
 
 const Products = () => {
   const navigate = useNavigate()
   const hasPermission = authService.hasPermission('view_products')
+
+  const [products, setProducts] = useState([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState('All Categories')
+  const [selectedCategory, setSelectedCategory] = useState('')
   const [selectedBrand, setSelectedBrand] = useState('All Brands')
+  const [brands, setBrands] = useState([])
+  const [categories, setCategories] = useState([])
+
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false)
   const [showBrandDropdown, setShowBrandDropdown] = useState(false)
-  const [showDatePicker, setShowDatePicker] = useState(false)
-  const [dateRange, setDateRange] = useState({ start: '', end: '' })
-  const [allProducts, setAllProducts] = useState([])
-  const [filteredProducts, setFilteredProducts] = useState([])
+
   const [previewProduct, setPreviewProduct] = useState(null)
+  const [detailProduct, setDetailProduct] = useState(null)
   const [deleteProduct, setDeleteProduct] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
   const categoryDropdownRef = useRef(null)
   const brandDropdownRef = useRef(null)
-  const datePickerRef = useRef(null)
+  const searchDebounceRef = useRef(null)
 
-  // Fetch products from API
-  useEffect(() => {
-    fetchProducts()
-  }, [])
+  const totalPages = Math.ceil(total / PAGE_SIZE)
 
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async (currentPage, search, category, brand) => {
     try {
       setLoading(true)
       setError(null)
-      console.log('Fetching products from API...')
+      const params = {
+        status: 'published',
+        limit: PAGE_SIZE,
+        skip: (currentPage - 1) * PAGE_SIZE,
+      }
+      if (search)                       params.search   = search
+      if (category) params.category = category
+      if (brand    !== 'All Brands')     params.brand    = brand
 
-      const response = await authService.getProducts({ status: 'published', limit: 1000 })
-      console.log('API Response:', response)
-
-      if (response && response.products) {
-        // Map API response to UI format
-        const mappedProducts = response.products.map(product => {
-          // Debug logging for products with multiple images
-          if (product.images && product.images.length > 1) {
-            console.log(`[DEBUG] Product "${product.product_name}" has ${product.images.length} images`)
-          }
-          
-          return {
-            id: product.id || product._id,
-            productName: product.product_name,
-            brand: product.parent_brand || 'N/A',
-            category: product.category || 'Uncategorized',
-            mrp: product.mrp ? `₹${product.mrp}` : '₹0',
-            uploadDate: formatDate(product.created_at),
-            packSize: product.pack_size || product.net_weight || 'Not specified',
-            uploadedBy: 'Admin', // Default since we don't have user names in the response
-            manufacturingDate: product.manufacturing_date || 'N/A',
-            expiryDate: product.expiry_date || 'N/A',
-            rawData: product, // Keep raw data for preview modal
-            images: product.images || [], // Also store images at top level for quick access
-            createdAt: product.created_at // Keep for sorting
-          }
-        })
-
-        // Sort by latest created (newest first)
-        const sortedProducts = mappedProducts.sort((a, b) => {
-          return new Date(b.createdAt) - new Date(a.createdAt)
-        })
-
-        console.log('Mapped products:', sortedProducts.length)
-        setAllProducts(sortedProducts)
-        setFilteredProducts(sortedProducts)
+      const response = await authService.getProducts(params)
+      if (response?.products) {
+        setProducts(response.products.map(p => ({
+          id:                p.id || p._id,
+          productName:       p.product_name,
+          brand:             p.parent_brand || 'N/A',
+          category:          p.category || 'Uncategorized',
+          mrp:               formatMrp(p.mrp),
+          uploadDate:        formatDate(p.created_at),
+          packSize:          p.pack_size || p.net_weight || 'Not specified',
+          uploadedBy:        p.created_by_name || 'Admin',
+          manufacturingDate: p.manufacturing_date || 'N/A',
+          expiryDate:        p.expiry_date || 'N/A',
+          rawData:           p,
+          images:            p.images || [],
+        })))
+        setTotal(response.total || 0)
       } else {
-        console.warn('No products in response:', response)
         setError('No products found in the database.')
       }
     } catch (err) {
-      console.error('Error fetching products:', err)
       setError(`Failed to load products: ${err.message}`)
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+
+  // Load brands once on mount
+  useEffect(() => {
+    authService.getBrands().then(res => setBrands(res.brands || []))
+  }, [])
+
+  // Load categories once on mount
+  useEffect(() => {
+    categoryService.getCategories({ limit: 100 })
+      .then(res => {
+        const loadedCategories = (res.categories || [])
+          .map(category => (typeof category === 'string' ? category : category.name || category.category_name || category.title || ''))
+          .filter(Boolean)
+        setCategories(loadedCategories)
+      })
+      .catch(err => {
+        console.error('Failed to load categories:', err)
+      })
+  }, [])
+
+  // Fetch whenever page or filters change
+  useEffect(() => {
+    fetchProducts(page, searchQuery, selectedCategory, selectedBrand)
+  }, [page, selectedCategory, selectedBrand])
 
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A'
@@ -93,84 +122,77 @@ const Products = () => {
     const day = date.getDate()
     const month = date.toLocaleString('en-US', { month: 'long' })
     const year = date.getFullYear()
-
     const ordinal = (n) => {
       const s = ['th', 'st', 'nd', 'rd']
       const v = n % 100
       return n + (s[(v - 20) % 10] || s[v] || s[0])
     }
-
     return `${ordinal(day)} ${month} ${year}`
   }
 
   // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (categoryDropdownRef.current && !categoryDropdownRef.current.contains(event.target)) {
+      if (categoryDropdownRef.current && !categoryDropdownRef.current.contains(event.target))
         setShowCategoryDropdown(false)
-      }
-      if (brandDropdownRef.current && !brandDropdownRef.current.contains(event.target)) {
+      if (brandDropdownRef.current && !brandDropdownRef.current.contains(event.target))
         setShowBrandDropdown(false)
-      }
-      if (datePickerRef.current && !datePickerRef.current.contains(event.target)) {
-        setShowDatePicker(false)
-      }
     }
-
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Get unique brands from products
-  const uniqueBrands = ['All Brands', ...new Set(allProducts.map(p => p.brand).filter(b => b && b !== 'N/A').sort())]
-
-  // Filter products based on search, category, and brand
+  // Debounced search — waits 400ms before calling API
   const handleSearch = (query) => {
     setSearchQuery(query)
-    filterProducts(query, selectedCategory, selectedBrand)
+    clearTimeout(searchDebounceRef.current)
+    searchDebounceRef.current = setTimeout(() => {
+      setPage(1)
+      fetchProducts(1, query, selectedCategory, selectedBrand)
+    }, 400)
   }
 
   const handleCategorySelect = (category) => {
     setSelectedCategory(category)
     setShowCategoryDropdown(false)
-    filterProducts(searchQuery, category, selectedBrand)
+    setPage(1)
   }
 
   const handleBrandSelect = (brand) => {
     setSelectedBrand(brand)
     setShowBrandDropdown(false)
-    filterProducts(searchQuery, selectedCategory, brand)
+    setPage(1)
   }
 
-  const filterProducts = (search, category, brand) => {
-    let filtered = allProducts
-
-    // Filter by search
-    if (search) {
-      filtered = filtered.filter(product =>
-        product.productName.toLowerCase().includes(search.toLowerCase()) ||
-        product.brand.toLowerCase().includes(search.toLowerCase()) ||
-        product.category.toLowerCase().includes(search.toLowerCase())
-      )
+  const handlePreviewProduct = async (product) => {
+    try {
+      const fullProductData = await productService.getProduct(product.id)
+      setPreviewProduct({
+        ...product,
+        rawData: fullProductData,
+        images: fullProductData?.images || [],
+      })
+    } catch (error) {
+      console.error('Failed to fetch product details:', error)
+      setPreviewProduct(product)
     }
-
-    // Filter by category
-    if (category !== 'All Categories') {
-      filtered = filtered.filter(product => product.category === category)
-    }
-
-    // Filter by brand
-    if (brand !== 'All Brands') {
-      filtered = filtered.filter(product => product.brand === brand)
-    }
-
-    setFilteredProducts(filtered)
   }
 
-  // Update filtered products when allProducts changes
-  useEffect(() => {
-    filterProducts(searchQuery, selectedCategory, selectedBrand)
-  }, [allProducts])
+  const handleDetailProduct = async (product) => {
+    try {
+      const fullProductData = await productService.getProduct(product.id)
+      setDetailProduct({
+        ...product,
+        rawData: fullProductData,
+      })
+    } catch (error) {
+      console.error('Failed to fetch product details:', error)
+      setDetailProduct(product)
+    }
+  }
+
+  const uniqueBrands = ['All Brands', ...brands]
+  const filteredProducts = products
 
   return (
     <Layout>
@@ -215,32 +237,18 @@ const Products = () => {
             {/* Brand Filter */}
             <div className="relative w-full sm:w-auto" ref={brandDropdownRef}>
               <button
-                onClick={() => {
-                  setShowBrandDropdown(!showBrandDropdown)
-                  setShowCategoryDropdown(false)
-                  setShowDatePicker(false)
-                }}
+                onClick={() => { setShowBrandDropdown(!showBrandDropdown); setShowCategoryDropdown(false) }}
                 className="bg-[#f9fafb] border border-[#e1e7ef] h-10 px-4 rounded-md flex items-center gap-3 hover:bg-gray-100 transition-colors w-full sm:min-w-[160px]"
               >
                 <Filter className="w-4 h-4 text-[#65758b]" />
-                <span className="text-sm font-ibm-plex text-[#0f1729] flex-1 text-left truncate">
-                  {selectedBrand}
-                </span>
+                <span className="text-sm font-ibm-plex text-[#0f1729] flex-1 text-left truncate">{selectedBrand}</span>
                 <ChevronDown className={`w-4 h-4 text-[#65758b] transition-transform ${showBrandDropdown ? 'rotate-180' : ''}`} />
               </button>
-              
               {showBrandDropdown && (
                 <div className="absolute top-12 left-0 min-w-[160px] bg-white border border-[#e1e7ef] rounded-md shadow-lg z-50 max-h-60 overflow-y-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                   {uniqueBrands.map((brand) => (
-                    <button
-                      key={brand}
-                      onClick={() => handleBrandSelect(brand)}
-                      className={`w-full px-4 py-2.5 text-left text-sm font-ibm-plex hover:bg-gray-50 transition-colors ${
-                        selectedBrand === brand
-                          ? 'bg-primary/10 text-primary font-medium'
-                          : 'text-[#0f1729]'
-                      }`}
-                    >
+                    <button key={brand} onClick={() => handleBrandSelect(brand)}
+                      className={`w-full px-4 py-2.5 text-left text-sm font-ibm-plex hover:bg-gray-50 transition-colors ${selectedBrand === brand ? 'bg-primary/10 text-primary font-medium' : 'text-[#0f1729]'}`}>
                       {brand}
                     </button>
                   ))}
@@ -251,32 +259,18 @@ const Products = () => {
             {/* Category Filter */}
             <div className="relative w-full sm:w-auto" ref={categoryDropdownRef}>
               <button
-                onClick={() => {
-                  setShowCategoryDropdown(!showCategoryDropdown)
-                  setShowBrandDropdown(false)
-                  setShowDatePicker(false)
-                }}
+                onClick={() => { setShowCategoryDropdown(!showCategoryDropdown); setShowBrandDropdown(false) }}
                 className="bg-[#f9fafb] border border-[#e1e7ef] h-10 px-4 rounded-md flex items-center gap-3 hover:bg-gray-100 transition-colors w-full sm:min-w-[180px]"
               >
                 <Filter className="w-4 h-4 text-[#65758b]" />
-                <span className="text-sm font-ibm-plex text-[#0f1729] flex-1 text-left truncate">
-                  {selectedCategory}
-                </span>
+                <span className="text-sm font-ibm-plex text-[#0f1729] flex-1 text-left truncate">{selectedCategory}</span>
                 <ChevronDown className={`w-4 h-4 text-[#65758b] transition-transform ${showCategoryDropdown ? 'rotate-180' : ''}`} />
               </button>
-              
               {showCategoryDropdown && (
                 <div className="absolute top-12 left-0 min-w-[180px] bg-white border border-[#e1e7ef] rounded-md shadow-lg z-50 max-h-60 overflow-y-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                  {mockCategories.map((category) => (
-                    <button
-                      key={category}
-                      onClick={() => handleCategorySelect(category)}
-                      className={`w-full px-4 py-2.5 text-left text-sm font-ibm-plex hover:bg-gray-50 transition-colors ${
-                        selectedCategory === category
-                          ? 'bg-primary/10 text-primary font-medium'
-                          : 'text-[#0f1729]'
-                      }`}
-                    >
+                  {categories.map((category) => (
+                    <button key={category} onClick={() => handleCategorySelect(category)}
+                      className={`w-full px-4 py-2.5 text-left text-sm font-ibm-plex hover:bg-gray-50 transition-colors ${selectedCategory === category ? 'bg-primary/10 text-primary font-medium' : 'text-[#0f1729]'}`}>
                       {category}
                     </button>
                   ))}
@@ -284,81 +278,16 @@ const Products = () => {
               )}
             </div>
 
-            {/* Date Filter */}
-            <div className="relative w-full sm:w-auto" ref={datePickerRef}>
-              <button 
-                onClick={() => {
-                  setShowDatePicker(!showDatePicker)
-                  setShowCategoryDropdown(false)
-                }}
-                className="bg-[#f9fafb] border border-[#e1e7ef] h-10 px-4 rounded-md flex items-center justify-center gap-3 hover:bg-gray-100 transition-colors w-full sm:w-auto"
-              >
-                <span className="text-sm font-ibm-plex text-[#0f1729]">
-                  Date
-                </span>
-                <Calendar className="w-4 h-4 text-[#65758b]" />
-              </button>
-
-              {showDatePicker && (
-                <div className="absolute top-12 right-0 bg-white border border-[#e1e7ef] rounded-md shadow-lg z-50 p-4 min-w-[280px]">
-                  <p className="text-sm font-ibm-plex font-medium text-[#0f1729] mb-3">
-                    Select Date Range
-                  </p>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-xs font-ibm-plex text-[#65758b] mb-1 block">
-                        Start Date
-                      </label>
-                      <input
-                        type="date"
-                        value={dateRange.start}
-                        onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
-                        className="w-full px-3 py-2 border border-[#e1e7ef] rounded-md text-sm font-ibm-plex focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs font-ibm-plex text-[#65758b] mb-1 block">
-                        End Date
-                      </label>
-                      <input
-                        type="date"
-                        value={dateRange.end}
-                        onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
-                        className="w-full px-3 py-2 border border-[#e1e7ef] rounded-md text-sm font-ibm-plex focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                    </div>
-                    <div className="flex gap-2 pt-2">
-                      <button
-                        onClick={() => {
-                          setDateRange({ start: '', end: '' })
-                          setShowDatePicker(false)
-                        }}
-                        className="flex-1 px-3 py-2 border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#65758b] hover:bg-gray-50"
-                      >
-                        Clear
-                      </button>
-                      <button
-                        onClick={() => setShowDatePicker(false)}
-                        className="flex-1 px-3 py-2 bg-primary text-white rounded-md text-sm font-ibm-plex hover:bg-[#a04890]"
-                      >
-                        Apply
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
+            {/* Placeholder to keep layout — date filter removed in favour of server-side pagination */}
+            <div className="relative w-full sm:w-auto" ref={null}>
             </div>
           </div>
         </div>
 
         {/* Products Table - Scrollable */}
-        <div 
+        <div
           className="bg-white border border-[#e1e7ef] rounded-lg shadow-sm flex-1 overflow-hidden flex flex-col"
-          onClick={() => {
-            setShowCategoryDropdown(false)
-            setShowBrandDropdown(false)
-            setShowDatePicker(false)
-          }}
+          onClick={() => { setShowCategoryDropdown(false); setShowBrandDropdown(false) }}
         >
           <div className="overflow-x-auto flex-1">
             <div className="inline-block min-w-full align-middle h-full">
@@ -366,53 +295,38 @@ const Products = () => {
                 <table className="min-w-full divide-y divide-[#e1e7ef]">
                   <thead className="bg-[#f1f5f9] sticky top-0 z-20 shadow-sm">
                     <tr>
-                      <th className="px-4 py-4 text-left">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
-                          Product Name
+                      <th className="px-4 py-3 text-left">
+                        <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
+                          Product
                         </span>
                       </th>
-                      <th className="px-4 py-4 text-left">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
-                          Brand
-                        </span>
-                      </th>
-                      <th className="px-4 py-4 text-center">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
-                          Category
-                        </span>
-                      </th>
-                      <th className="px-4 py-4 text-center">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
+                      <th className="px-3 py-3 text-right w-20">
+                        <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
                           MRP
                         </span>
                       </th>
-                      <th className="px-4 py-4 text-center">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
-                          Upload Date
-                        </span>
-                      </th>
-                      <th className="px-4 py-4 text-center">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
+                      <th className="px-3 py-3 text-center hidden sm:table-cell">
+                        <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
                           Pack Size
                         </span>
                       </th>
-                      <th className="px-4 py-4 text-center">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider whitespace-nowrap">
+                      <th className="px-3 py-3 text-center hidden md:table-cell">
+                        <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
                           Mfg Date
                         </span>
                       </th>
-                      <th className="px-4 py-4 text-center">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider whitespace-nowrap">
-                          Expiry Date
+                      <th className="px-3 py-3 text-center hidden md:table-cell">
+                        <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
+                          Expiry
                         </span>
                       </th>
-                      <th className="px-4 py-4 text-center">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider whitespace-nowrap">
-                          Uploaded/Edited By
+                      <th className="px-3 py-3 text-center hidden lg:table-cell">
+                        <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
+                          Uploaded By
                         </span>
                       </th>
-                      <th className="px-4 py-4 text-right">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
+                      <th className="px-3 py-3 text-right w-32">
+                        <span className="text-[11px] font-ibm-plex font-semibold text-[#65758b] uppercase tracking-wider">
                           Actions
                         </span>
                       </th>
@@ -421,7 +335,7 @@ const Products = () => {
                   <tbody className="bg-white divide-y divide-[#e1e7ef]">
                     {loading ? (
                       <tr>
-                        <td colSpan="10" className="px-4 py-12 text-center">
+                        <td colSpan="7" className="px-4 py-12 text-center">
                           <div className="flex flex-col items-center justify-center gap-3">
                             <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
                             <p className="text-sm font-ibm-plex text-[#65758b]">Loading products...</p>
@@ -430,11 +344,11 @@ const Products = () => {
                       </tr>
                     ) : error ? (
                       <tr>
-                        <td colSpan="10" className="px-4 py-12 text-center">
+                        <td colSpan="7" className="px-4 py-12 text-center">
                           <div className="flex flex-col items-center justify-center gap-3">
                             <p className="text-sm font-ibm-plex text-red-600">{error}</p>
                             <button
-                              onClick={fetchProducts}
+                              onClick={() => fetchProducts(page, searchQuery, selectedCategory, selectedBrand)}
                               className="px-4 py-2 bg-primary text-white rounded-md text-sm font-ibm-plex hover:bg-[#a04890]"
                             >
                               Retry
@@ -444,7 +358,7 @@ const Products = () => {
                       </tr>
                     ) : filteredProducts.length === 0 ? (
                       <tr>
-                        <td colSpan="10" className="px-4 py-12 text-center">
+                        <td colSpan="7" className="px-4 py-12 text-center">
                           <p className="text-sm font-ibm-plex text-[#65758b]">
                             {searchQuery || selectedCategory !== 'All Categories'
                               ? 'No products found matching your filters.'
@@ -456,83 +370,70 @@ const Products = () => {
                       filteredProducts.map((product, index) => (
                         <tr
                           key={product.id}
-                          className={`hover:bg-gray-50 transition-colors ${
-                            index % 2 === 1 ? 'bg-[#f9fafb]' : ''
-                          }`}
+                          className="border-b border-[#f1f5f9] hover:bg-[#f8fafc] transition-colors"
                         >
-                        <td className="px-4 py-4 whitespace-nowrap">
-                          <p className="text-sm font-ibm-plex font-medium text-[#0f1729]">
+                        <td className="px-4 py-3">
+                          <p className="text-sm font-ibm-plex font-semibold text-[#0f1729] truncate max-w-[260px]" title={product.productName}>
                             {product.productName}
                           </p>
+                          <p className="text-xs font-ibm-plex text-[#65758b] mt-0.5">
+                            {product.brand}{product.category && product.category !== 'Uncategorized' ? ` \u00b7 ${product.category}` : ''}
+                          </p>
                         </td>
-                        <td className="px-4 py-4 whitespace-nowrap">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {product.brand}
+                        <td className="px-3 py-3 text-right">
+                          <span className="text-sm font-ibm-plex font-medium text-[#0f1729] whitespace-nowrap">
+                            {product.mrp || '\u2014'}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-center whitespace-nowrap">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {product.category}
+                        <td className="px-3 py-3 text-center hidden sm:table-cell">
+                          <span className="text-xs font-ibm-plex text-[#65758b] truncate block max-w-[120px] mx-auto" title={product.packSize}>
+                            {product.packSize !== 'Not specified' ? product.packSize : '\u2014'}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-center whitespace-nowrap">
-                          <span className="text-sm font-ibm-plex font-medium text-[#0f1729]">
-                            {product.mrp}
+                        <td className="px-3 py-3 text-center hidden md:table-cell">
+                          <span className="text-xs font-ibm-plex text-[#65758b] whitespace-nowrap">
+                            {product.manufacturingDate !== 'N/A' ? product.manufacturingDate : '\u2014'}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-center whitespace-nowrap">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {product.uploadDate}
+                        <td className="px-3 py-3 text-center hidden md:table-cell">
+                          <span className="text-xs font-ibm-plex text-[#65758b] whitespace-nowrap">
+                            {product.expiryDate !== 'N/A' ? product.expiryDate : '\u2014'}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-center whitespace-nowrap">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {product.packSize}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4 text-center whitespace-nowrap">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {product.manufacturingDate}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4 text-center whitespace-nowrap">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
-                            {product.expiryDate}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4 text-center whitespace-nowrap">
-                          <span className="text-sm font-ibm-plex text-[#65758b]">
+                        <td className="px-3 py-3 text-center hidden lg:table-cell">
+                          <span className="text-xs font-ibm-plex text-[#65758b] whitespace-nowrap">
                             {product.uploadedBy}
                           </span>
                         </td>
-                        <td className="px-4 py-4 whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-1">
+                        <td className="px-3 py-3">
+                          <div className="flex items-center justify-end gap-0.5">
                             <button
-                              onClick={() => {
-                                console.log('[DEBUG] Opening preview for product:', product.productName)
-                                console.log('[DEBUG] Product data:', product)
-                                console.log('[DEBUG] Images in rawData:', product.rawData?.images?.length || 0)
-                                console.log('[DEBUG] Images at top level:', product.images?.length || 0)
-                                setPreviewProduct(product)
-                              }}
-                              className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-200 transition-colors"
-                              title="View"
+                              onClick={() => handlePreviewProduct(product)}
+                              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[#e1e7ef] transition-colors"
+                              title="View Images"
                             >
-                              <Eye className="w-4 h-4 text-[#65758b]" />
+                              <ImageIcon className="w-3.5 h-3.5 text-[#65758b]" />
+                            </button>
+                            <button
+                              onClick={() => handleDetailProduct(product)}
+                              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[#e1e7ef] transition-colors"
+                              title="View Details"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-[#2463eb]" />
                             </button>
                             <button
                               onClick={() => navigate(`/edit-product/${product.id}`)}
-                              className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-200 transition-colors"
+                              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-[#e1e7ef] transition-colors"
                               title="Edit"
                             >
-                              <Edit2 className="w-4 h-4 text-[#65758b]" />
+                              <Edit2 className="w-3.5 h-3.5 text-[#65758b]" />
                             </button>
                             <button
                               onClick={() => setDeleteProduct(product)}
-                              className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-200 transition-colors"
+                              className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-red-50 transition-colors"
                               title="Delete"
                             >
-                              <Trash2 className="w-4 h-4 text-[#65758b]" />
+                              <Trash2 className="w-3.5 h-3.5 text-red-500" />
                             </button>
                           </div>
                         </td>
@@ -545,6 +446,41 @@ const Products = () => {
             </div>
           </div>
         </div>
+
+        {/* Pagination Bar */}
+        {!loading && total > 0 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-[#e1e7ef] bg-white rounded-b-lg">
+            <p className="text-sm font-ibm-plex text-[#65758b]">
+              Showing <span className="font-medium text-[#0f1729]">{(page - 1) * PAGE_SIZE + 1}</span>–<span className="font-medium text-[#0f1729]">{Math.min(page * PAGE_SIZE, total)}</span> of <span className="font-medium text-[#0f1729]">{total}</span> products
+            </p>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="w-8 h-8 flex items-center justify-center rounded-md border border-[#e1e7ef] hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="w-4 h-4 text-[#65758b]" />
+              </button>
+              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                const start = Math.max(1, Math.min(page - 2, totalPages - 4))
+                const p = start + i
+                return (
+                  <button key={p} onClick={() => setPage(p)}
+                    className={`w-8 h-8 text-sm font-ibm-plex rounded-md border transition-colors ${p === page ? 'bg-primary text-white border-primary' : 'border-[#e1e7ef] text-[#0f1729] hover:bg-gray-100'}`}>
+                    {p}
+                  </button>
+                )
+              })}
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="w-8 h-8 flex items-center justify-center rounded-md border border-[#e1e7ef] hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="w-4 h-4 text-[#65758b]" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
       )}
 
@@ -555,19 +491,22 @@ const Products = () => {
         onClose={() => setPreviewProduct(null)}
       />
 
+      <ProductDetailModal
+        product={detailProduct}
+        isOpen={!!detailProduct}
+        onClose={() => setDetailProduct(null)}
+      />
+
       <DeleteConfirmModal
         isOpen={!!deleteProduct}
         onClose={() => setDeleteProduct(null)}
         onConfirm={async () => {
-          console.log('Deleting product:', deleteProduct)
           try {
             const result = await authService.deleteProduct(deleteProduct.id)
             if (result.success) {
-              // Remove from both allProducts and filteredProducts
-              setAllProducts(allProducts.filter(p => p.id !== deleteProduct.id))
-              setFilteredProducts(filteredProducts.filter(p => p.id !== deleteProduct.id))
               alert(`Product "${deleteProduct?.productName}" deleted successfully!`)
               setDeleteProduct(null)
+              fetchProducts(page, searchQuery, selectedCategory, selectedBrand)
             } else {
               alert(`Failed to delete product: ${result.error}`)
             }

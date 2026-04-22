@@ -9,6 +9,7 @@ const AddCOA = () => {
   
   // Basic Information State
   const [ingredientName, setIngredientName] = useState('')
+  const [productDescription, setProductDescription] = useState('')
   const [productCode, setProductCode] = useState('')
   const [lotNumber, setLotNumber] = useState('')
   const [manufacturingDate, setManufacturingDate] = useState('')
@@ -40,8 +41,7 @@ const AddCOA = () => {
       ...nutrients,
       { 
         id: nextId, 
-        name: '', 
-        nutrient_name_raw: '',
+        name: '',
         actual: '', 
         min: '', 
         max: '', 
@@ -63,7 +63,7 @@ const AddCOA = () => {
 
   // Update nutrient field
   const updateNutrient = (id, field, value) => {
-    setNutrients(nutrients.map(nutrient =>
+    setNutrients(prev => prev.map(nutrient =>
       nutrient.id === id ? { ...nutrient, [field]: value } : nutrient
     ))
   }
@@ -118,11 +118,7 @@ const AddCOA = () => {
     setExtractionComplete(false)
     
     try {
-      console.log('[AddCOA] Starting extraction with', uploadedFiles.length, 'files')
-      
-      // Call extraction API
       const result = await coaService.extractFromImages(uploadedFiles)
-      console.log('[AddCOA] Extraction result:', result)
       
       if (result.success && result.data) {
         // Populate form with extracted data
@@ -133,7 +129,6 @@ const AddCOA = () => {
         setExtractionError(result.error || 'Extraction failed')
       }
     } catch (error) {
-      console.error('Extraction error:', error)
       setExtractionError(error.message || 'Failed to extract data from COA files')
     } finally {
       setIsExtracting(false)
@@ -142,12 +137,12 @@ const AddCOA = () => {
 
   // Populate form from extracted data
   const populateFormFromExtraction = (data) => {
-    console.log('[AddCOA] Populating form with extracted data:', data)
     
     // Populate ingredient info
     if (data.ingredient_info) {
       const info = data.ingredient_info
       setIngredientName(info.ingredient_name || '')
+      setProductDescription(info.product_description || '')
       setProductCode(info.product_code || '')
       setLotNumber(info.lot_number || '')
       setManufacturingDate(info.manufacturing_date || '')
@@ -163,8 +158,7 @@ const AddCOA = () => {
     if (data.nutritional_data && Array.isArray(data.nutritional_data)) {
       const nutrientRows = data.nutritional_data.map((item, index) => ({
         id: index + 1,
-        name: item.nutrient_name || '',
-        nutrient_name_raw: item.nutrient_name_raw || item.nutrient_name || '',
+        name: item.nutrient_name_raw || item.nutrient_name || '',
         actual: item.actual_value !== null && item.actual_value !== undefined ? String(item.actual_value) : '',
         min: item.min_value !== null && item.min_value !== undefined ? String(item.min_value) : '',
         max: item.max_value !== null && item.max_value !== undefined ? String(item.max_value) : '',
@@ -206,7 +200,7 @@ const AddCOA = () => {
         .filter(n => n.name.trim())
         .map(n => ({
           nutrient_name: n.name,
-          nutrient_name_raw: n.nutrient_name_raw || n.name,
+          nutrient_name_raw: n.name,
           actual_value: n.actual ? parseFloat(n.actual) : null,
           min_value: n.min ? parseFloat(n.min) : null,
           max_value: n.max ? parseFloat(n.max) : null,
@@ -219,6 +213,7 @@ const AddCOA = () => {
       
       const coaData = {
         ingredient_name: ingredientName,
+        product_description: productDescription || null,
         product_code: productCode || null,
         lot_number: lotNumber || null,
         manufacturing_date: manufacturingDate || null,
@@ -236,8 +231,6 @@ const AddCOA = () => {
         status: 'active'
       }
       
-      console.log('[AddCOA] Saving COA data:', coaData)
-      
       const result = await coaService.createCOA(coaData)
       
       if (result.success) {
@@ -251,7 +244,6 @@ const AddCOA = () => {
         alert(`Failed to save COA: ${result.error}`)
       }
     } catch (error) {
-      console.error('Save error:', error)
       alert('Failed to save COA data')
     } finally {
       setIsSaving(false)
@@ -261,6 +253,7 @@ const AddCOA = () => {
   // Clear form
   const clearForm = () => {
     setIngredientName('')
+    setProductDescription('')
     setProductCode('')
     setLotNumber('')
     setManufacturingDate('')
@@ -475,6 +468,18 @@ const AddCOA = () => {
             </div>
             <div>
               <label className="block text-sm font-ibm-plex font-medium text-[#0f1729] mb-3">
+                Product Description
+              </label>
+              <input
+                type="text"
+                value={productDescription}
+                onChange={(e) => setProductDescription(e.target.value)}
+                className="w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] focus:outline-none focus:ring-2 focus:ring-primary"
+                placeholder="Brief product description"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-ibm-plex font-medium text-[#0f1729] mb-3">
                 Product Code
               </label>
               <input
@@ -612,14 +617,9 @@ const AddCOA = () => {
                 <table className="w-full min-w-[1000px]">
                   <thead>
                     <tr className="bg-[#f1f5f9] border-b border-[#e1e7ef]">
-                      <th className="px-3 py-3 text-left min-w-[140px]">
+                      <th className="px-3 py-3 text-left min-w-[200px]">
                         <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
-                          Nutrient
-                        </span>
-                      </th>
-                      <th className="px-3 py-3 text-left min-w-[120px]">
-                        <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
-                          Raw Name
+                          Nutrient Name
                         </span>
                       </th>
                       <th className="px-3 py-3 text-right min-w-[90px]">
@@ -662,17 +662,8 @@ const AddCOA = () => {
                             type="text"
                             value={nutrient.name}
                             onChange={(e) => updateNutrient(nutrient.id, 'name', e.target.value)}
-                            className="w-full px-2 py-1 text-sm font-ibm-plex font-medium text-[#0f1729] bg-transparent border border-transparent hover:border-[#e1e7ef] focus:border-primary focus:outline-none rounded"
-                            placeholder="Nutrient name"
-                          />
-                        </td>
-                        <td className="px-3 py-3">
-                          <input
-                            type="text"
-                            value={nutrient.nutrient_name_raw}
-                            onChange={(e) => updateNutrient(nutrient.id, 'nutrient_name_raw', e.target.value)}
-                            className="w-full px-2 py-1 text-sm font-ibm-plex text-[#65758b] bg-transparent border border-transparent hover:border-[#e1e7ef] focus:border-primary focus:outline-none rounded"
-                            placeholder="Raw name"
+                            className="w-full px-2 py-1 text-sm font-ibm-plex text-[#0f1729] bg-transparent border border-transparent hover:border-[#e1e7ef] focus:border-primary focus:outline-none rounded"
+                            placeholder="e.g. Protein N 26, Total Fat, etc."
                           />
                         </td>
                         <td className="px-3 py-3">

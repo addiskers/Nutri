@@ -5,11 +5,11 @@ const ProtectedRoute = ({ children }) => {
   const isAuth = authService.isAuthenticated()
   const user = authService.getCurrentUser()
   
-  if (!isAuth) {
+  if (!isAuth || !user) {
     return <Navigate to="/login" replace />
   }
 
-  if (user && !user.is_approved) {
+  if (!user.is_approved) {
     return <Navigate to="/login" replace />
   }
   

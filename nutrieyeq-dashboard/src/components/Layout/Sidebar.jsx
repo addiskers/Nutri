@@ -9,30 +9,31 @@ import {
   FolderOpen, 
   Beaker,
   FolderKanban,
-  Tags,
   Users,
   Settings,
   ChevronLeft
 } from 'lucide-react'
+import authService from '../../services/api'
 
 const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
   const location = useLocation()
 
   const mainMenuItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
-    { icon: Package, label: 'Products', path: '/products' },
-    { icon: Plus, label: 'Add Product', path: '/add-product' },
-    { icon: BarChart3, label: 'Compare', path: '/compare' },
-    { icon: FileText, label: 'Add COA', path: '/add-coa' },
-    { icon: FolderOpen, label: 'COA', path: '/coa' },
-    { icon: Beaker, label: 'Formulation', path: '/formulation' },
+    { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', permission: null },
+    { icon: Package, label: 'Products', path: '/products', permission: 'view_products' },
+    { icon: Plus, label: 'Add Product', path: '/add-product', permission: 'add_products' },
+    { icon: BarChart3, label: 'Compare', path: '/compare', permission: 'run_comparisons' },
+    { icon: FileText, label: 'Add COA', path: '/add-coa', permission: 'add_coa' },
+    { icon: FolderOpen, label: 'COA', path: '/coa', permission: 'view_coa' },
+    { icon: Beaker, label: 'Formulation', path: '/formulation', permission: 'use_coa_in_formulation' },
   ]
 
   const managementMenuItems = [
-    { icon: FolderKanban, label: 'Nomenclature Map', path: '/nomenclature' },
-    { icon: Tags, label: 'Tags', path: '/tags' },
-    { icon: Users, label: 'Users', path: '/users' },
-    { icon: Settings, label: 'Settings', path: '/settings' },
+    { icon: FolderKanban, label: 'Nomenclature Map', path: '/nomenclature', permission: 'view_nomenclature' },
+    { icon: FolderKanban, label: 'COA Nomenclature', path: '/coa-nomenclature', permission: 'view_nomenclature' },
+    { icon: FolderKanban, label: 'Nutrient Hierarchy', path: '/nutrient-hierarchy', permission: 'view_nomenclature' },
+    { icon: Users, label: 'Users', path: '/users', permission: 'view_users' },
+    { icon: Settings, label: 'Settings', path: '/settings', permission: null },
   ]
 
   const isActive = (path) => location.pathname === path
@@ -58,6 +59,11 @@ const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
           )}
           <div className="space-y-1">
             {mainMenuItems.map((item) => {
+              // Check permission - if permission is null, show to everyone
+              if (item.permission && !authService.hasPermission(item.permission)) {
+                return null
+              }
+              
               const Icon = item.icon
               const active = isActive(item.path)
               return (
@@ -93,6 +99,11 @@ const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
           )}
           <div className="space-y-1">
             {managementMenuItems.map((item) => {
+              // Check permission - if permission is null, show to everyone
+              if (item.permission && !authService.hasPermission(item.permission)) {
+                return null
+              }
+              
               const Icon = item.icon
               const active = isActive(item.path)
               return (

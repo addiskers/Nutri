@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from beanie import Document
 from pydantic import Field
 
@@ -21,6 +21,7 @@ class NutrientData(Dict):
 
 class COA(Document):
     ingredient_name: str
+    product_description: Optional[str] = None
     product_code: Optional[str] = None
     lot_number: Optional[str] = None
     manufacturing_date: Optional[str] = None
@@ -40,12 +41,17 @@ class COA(Document):
     processing_status: str = "extracted"
     master_entry: Optional[Dict[str, Any]] = None
     created_by: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     status: str = "active"
-    
+
     class Settings:
         name = "coa"
+        indexes = [
+            "ingredient_name",
+            "status",
+            "created_by",
+        ]
         
     class Config:
         json_schema_extra = {

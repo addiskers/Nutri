@@ -27,8 +27,8 @@ const AddUserModal = ({ isOpen, onClose, onSave, currentUserRole }) => {
       return
     }
 
-    if (formData.password.length < 6) {
-      alert('Password must be at least 6 characters')
+    if (formData.password.length < 8) {
+      alert('Password must be at least 8 characters')
       return
     }
 

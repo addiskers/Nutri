@@ -1,7 +1,7 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.models.user import User, UserRole
-from app.utils.security import decode_token
+from app.utils.security import decode_token, is_token_denied
 from typing import Optional
 
 
@@ -25,6 +25,15 @@ async def get_current_user(
             detail="Invalid token type",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    jti = payload.get("jti")
+    if jti and await is_token_denied(jti):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     user_id = payload.get("user_id")
     if not user_id:
         raise HTTPException(
@@ -44,6 +53,11 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is deactivated",
+        )
+    if not user.is_approved:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is not approved",
         )
     
     return user

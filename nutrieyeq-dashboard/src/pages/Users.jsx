@@ -1,16 +1,12 @@
 import { useState, useRef, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout/Layout'
 import AddUserModal from '../components/Modals/AddUserModal'
 import PermissionsPanel from '../components/Modals/PermissionsPanel'
 import NoPermissionContent from '../components/NoPermissionContent'
 import { Search, ChevronDown, MoreVertical, UserPlus, Bell, User, CheckCircle, AlertCircle } from 'lucide-react'
-import authService from '../services/api'
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+import authService, { apiRequest } from '../services/api'
 
 const Users = () => {
-  const navigate = useNavigate()
   const hasPermission = authService.hasPermission('view_users')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedRole, setSelectedRole] = useState('All roles')
@@ -39,26 +35,7 @@ const Users = () => {
     try {
       setLoading(true)
       setError('')
-      const token = localStorage.getItem('access_token')
-      
-      if (!token) {
-        navigate('/login')
-        return
-      }
-
-      const response = await fetch(`${API_BASE_URL}/users?page=1&page_size=100`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        }
-      })
-
-      if (response.status === 401) {
-        localStorage.clear()
-        navigate('/login')
-        return
-      }
+      const response = await apiRequest('/users?page=1&page_size=100')
 
       if (!response.ok) {
         throw new Error('Failed to fetch users')
@@ -92,14 +69,7 @@ const Users = () => {
   // Fetch pending users
   const fetchPendingUsers = async () => {
     try {
-      const token = localStorage.getItem('access_token')
-      const response = await fetch(`${API_BASE_URL}/users/pending`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': '69420'
-        }
-      })
+      const response = await apiRequest('/users/pending')
 
       if (response.ok) {
         const data = await response.json()
@@ -185,13 +155,8 @@ const Users = () => {
   // Handle approve user
   const handleApproveUser = async (userId) => {
     try {
-      const token = localStorage.getItem('access_token')
-      const response = await fetch(`${API_BASE_URL}/users/${userId}/approve`, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+      const response = await apiRequest(`/users/${userId}/approve`, {
+        method: 'PATCH'
       })
 
       if (response.ok) {
@@ -217,13 +182,8 @@ const Users = () => {
     }
 
     try {
-      const token = localStorage.getItem('access_token')
-      const response = await fetch(`${API_BASE_URL}/users/${userId}/toggle`, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+      const response = await apiRequest(`/users/${userId}/toggle`, {
+        method: 'PATCH'
       })
 
       if (response.ok) {
@@ -250,13 +210,7 @@ const Users = () => {
     await fetchUsers()
     // Find and update the selected user with fresh data
     if (selectedUser) {
-      const token = localStorage.getItem('access_token')
-      const response = await fetch(`${API_BASE_URL}/users/${selectedUser.id}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      })
+      const response = await apiRequest(`/users/${selectedUser.id}`)
       if (response.ok) {
         const userData = await response.json()
         const updatedUser = {
@@ -285,13 +239,8 @@ const Users = () => {
     }
 
     try {
-      const token = localStorage.getItem('access_token')
-      const response = await fetch(`${API_BASE_URL}/users/${userId}/toggle`, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+      const response = await apiRequest(`/users/${userId}/toggle`, {
+        method: 'PATCH'
       })
 
       if (response.ok) {
@@ -317,13 +266,8 @@ const Users = () => {
 
     if (confirm('Are you sure you want to remove this user? This action cannot be undone.')) {
       try {
-        const token = localStorage.getItem('access_token')
-        const response = await fetch(`${API_BASE_URL}/users/${userId}`, {
-          method: 'DELETE',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
+        const response = await apiRequest(`/users/${userId}`, {
+          method: 'DELETE'
         })
 
         if (response.ok) {
@@ -353,13 +297,8 @@ const Users = () => {
 
   const handleCreateUser = async (newUser) => {
     try {
-      const token = localStorage.getItem('access_token')
-      const response = await fetch(`${API_BASE_URL}/users`, {
+      const response = await apiRequest('/users', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
         body: JSON.stringify(newUser)
       })
 

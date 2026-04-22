@@ -1,27 +1,33 @@
+import logging
+import os
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from app.database import Database
-from app.routes import auth, users, products, categories, nomenclature, coa, formulations
+from app.routes import auth, users, products, categories, nomenclature, coa, coa_nomenclature, formulations, nutrient_hierarchy
 from app.middleware.security import configure_cors, configure_rate_limiting
 from config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    print("=" * 60)
-    print("Starting NutriEyeQ Backend...")
+    if settings.DEBUG and os.getenv("ENVIRONMENT", "").lower() in ("production", "prod"):
+        logger.critical("DEBUG=True in a production environment — refusing to start")
+        raise RuntimeError("DEBUG must be False in production")
+
+    logger.info("Starting NutriEyeQ Backend...")
     await Database.connect_db()
-    print(f"[OK] Server ready at http://localhost:8000")
-    print(f"[OK] API Documentation: http://localhost:8000/docs")
-    print("=" * 60)
+    logger.info("Server ready")
+    if settings.DEBUG:
+        logger.info("API Documentation available at /docs")
     
     yield
     
-    print("\nShutting down...")
+    logger.info("Shutting down...")
     await Database.close_db()
-    print("Server stopped")
+    logger.info("Server stopped")
 
 
 app = FastAPI(
@@ -30,7 +36,8 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
     docs_url="/docs" if settings.DEBUG else None,
-    redoc_url="/redoc" if settings.DEBUG else None
+    redoc_url="/redoc" if settings.DEBUG else None,
+    openapi_url="/openapi.json" if settings.DEBUG else None,
 )
 
 
@@ -43,13 +50,13 @@ async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["X-Frame-Options"] = "DENY"
     if not settings.DEBUG:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    
+    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Cache-Control"] = "no-store"
     
     return response
 
@@ -57,14 +64,12 @@ async def add_security_headers(request: Request, call_next):
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     try:
-        print(f"\n[REQUEST] {request.method} {request.url.path}")
-        if request.method == "POST" and "extract" in request.url.path:
-            print(f"[REQUEST] Extract endpoint called!")
+        logger.debug("%s %s", request.method, request.url.path)
         response = await call_next(request)
-        print(f"[RESPONSE] Status: {response.status_code}")
+        logger.debug("Response: %d", response.status_code)
         return response
     except Exception as e:
-        print(f"[ERROR] Middleware error: {e}")
+        logger.error("Middleware error: %s", type(e).__name__)
         raise
 
 
@@ -74,51 +79,39 @@ app.include_router(products.router, prefix="/api")
 app.include_router(categories.router, prefix="/api")
 app.include_router(nomenclature.router, prefix="/api")
 app.include_router(coa.router, prefix="/api")
+app.include_router(coa_nomenclature.router, prefix="/api")
 app.include_router(formulations.router, prefix="/api")
+app.include_router(nutrient_hierarchy.router, prefix="/api")
 
 
 @app.get("/")
 async def root():
     return {
-        "app": settings.APP_NAME,
-        "version": "1.0.0",
-        "status": "running",
-        "docs": "/docs"
+        "status": "running"
     }
 
 
 @app.get("/api/health")
 async def health():
     return {
-        "status": "healthy",
-        "app": settings.APP_NAME,
-        "version": "1.0.0"
+        "status": "healthy"
     }
 
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    if settings.DEBUG:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "detail": str(exc),
-                "type": type(exc).__name__,
-                "path": str(request.url)
-            }
-        )
-    else:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": "Internal server error"}
-        )
+    logger.error("Unhandled exception on %s: %s", request.url.path, type(exc).__name__, exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal server error"}
+    )
 
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
+        host="127.0.0.1",
         port=8000,
         reload=True,
         log_level="info"

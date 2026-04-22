@@ -3,46 +3,45 @@ User Management Routes - CRUD operations for user management
 """
 from fastapi import APIRouter, HTTPException, status, Depends
 from typing import List, Optional
-from datetime import datetime
-from pydantic import BaseModel, EmailStr
+from datetime import datetime, timezone
+from pydantic import BaseModel, EmailStr, Field
 from app.models.user import User, UserRole, ROLE_PERMISSIONS
 from app.schemas.auth import UserResponse, MessageResponse
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user, require_permission as _require_permission_dep
 from app.utils.security import hash_password, validate_password_strength
+import logging
+import re
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["User Management"])
 
+MAX_PAGE_SIZE = 200
 
-# Request Schemas
+
 class UserCreateRequest(BaseModel):
-    """Schema for creating a new user"""
-    name: str
+    name: str = Field(..., min_length=2, max_length=100)
     email: EmailStr
-    password: str
-    department: Optional[str] = None
+    password: str = Field(..., min_length=8, max_length=128)
+    department: Optional[str] = Field(None, max_length=100)
     role: UserRole = UserRole.RESEARCHER
 
 
 class UserUpdateRequest(BaseModel):
-    """Schema for updating user details"""
-    name: Optional[str] = None
-    department: Optional[str] = None
+    name: Optional[str] = Field(None, max_length=100)
+    department: Optional[str] = Field(None, max_length=100)
     role: Optional[UserRole] = None
     permissions: Optional[List[str]] = None
 
 
 class UserListResponse(BaseModel):
-    """Schema for user list response"""
     users: List[UserResponse]
     total: int
     page: int
     page_size: int
 
 
-# Helper function to check permissions
-def require_permission(user: User, permission: str):
-    """Raise exception if user doesn't have permission"""
+def _check_permission(user: User, permission: str):
     if not user.has_permission(permission):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -72,37 +71,36 @@ async def list_users(
     
     Requires: view_users permission
     """
-    require_permission(current_user, "view_users")
-    
-    # Build query
+    _check_permission(current_user, "view_users")
+
+    page_size = min(page_size, MAX_PAGE_SIZE)
+
     query_filters = []
-    
+
     if role:
         query_filters.append(User.role == role)
     if is_active is not None:
         query_filters.append(User.is_active == is_active)
     if is_approved is not None:
         query_filters.append(User.is_approved == is_approved)
-    
-    # Get total count
+
+    if search:
+        safe_search = re.escape(search)
+        search_regex = {"$regex": safe_search, "$options": "i"}
+        query_filters.append(
+            {"$or": [{"name": search_regex}, {"email": search_regex}]}
+        )
+
     if query_filters:
         total = await User.find(*query_filters).count()
         users_query = User.find(*query_filters)
     else:
         total = await User.count()
         users_query = User.find()
-    
-    # Apply search if provided
-    if search:
-        # Note: For production, consider using text search indexes
-        all_users = await users_query.to_list()
-        users = [u for u in all_users if search.lower() in u.name.lower() or search.lower() in u.email.lower()]
-        total = len(users)
-    else:
-        # Apply pagination
-        skip = (page - 1) * page_size
-        users = await users_query.skip(skip).limit(page_size).to_list()
-    
+
+    skip = (page - 1) * page_size
+    users = await users_query.skip(skip).limit(page_size).to_list()
+
     return UserListResponse(
         users=[UserResponse.from_user(u) for u in users],
         total=total,
@@ -120,10 +118,42 @@ async def get_pending_users(
     
     Requires: view_users permission
     """
-    require_permission(current_user, "view_users")
+    _check_permission(current_user, "view_users")
     
     pending_users = await User.find(User.is_approved == False).to_list()
     return [UserResponse.from_user(u) for u in pending_users]
+
+
+@router.get("/stats/summary")
+async def get_user_stats(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get user statistics summary
+    
+    Requires: view_users permission
+    """
+    _check_permission(current_user, "view_users")
+    
+    total_users = await User.count()
+    active_users = await User.find(User.is_active == True).count()
+    pending_approval = await User.find(User.is_approved == False).count()
+    
+    super_admins = await User.find(User.role == UserRole.SUPER_ADMIN).count()
+    admins = await User.find(User.role == UserRole.ADMIN).count()
+    researchers = await User.find(User.role == UserRole.RESEARCHER).count()
+    
+    return {
+        "total_users": total_users,
+        "active_users": active_users,
+        "inactive_users": total_users - active_users,
+        "pending_approval": pending_approval,
+        "by_role": {
+            "super_admin": super_admins,
+            "admin": admins,
+            "researcher": researchers
+        }
+    }
 
 
 @router.get("/{user_id}", response_model=UserResponse)
@@ -136,7 +166,7 @@ async def get_user(
     
     Requires: view_users permission
     """
-    require_permission(current_user, "view_users")
+    _check_permission(current_user, "view_users")
     
     user = await User.get(user_id)
     if not user:
@@ -164,7 +194,7 @@ async def create_user(
     
     Requires: add_users permission
     """
-    require_permission(current_user, "add_users")
+    _check_permission(current_user, "add_users")
     
     # Only Super Admin can create Super Admin users
     if user_data.role == UserRole.SUPER_ADMIN and current_user.role != UserRole.SUPER_ADMIN:
@@ -201,8 +231,8 @@ async def create_user(
         is_active=True,
         is_verified=True,
         is_approved=True,  # Admin-created users are auto-approved
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc)
     )
     
     # Set permissions based on role
@@ -211,7 +241,7 @@ async def create_user(
     # Save to database
     await new_user.insert()
     
-    print(f"[INFO] New user created by {current_user.email}: {new_user.email} ({new_user.role})")
+    logger.info("New user created by admin (role=%s)", new_user.role)
     
     return UserResponse.from_user(new_user)
 
@@ -227,7 +257,7 @@ async def update_user(
     
     Requires: edit_users permission
     """
-    require_permission(current_user, "edit_users")
+    _check_permission(current_user, "edit_users")
     
     # Get user to update
     user = await User.get(user_id)
@@ -268,10 +298,10 @@ async def update_user(
             )
         user.permissions = user_data.permissions
     
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now(timezone.utc)
     await user.save()
     
-    print(f"[INFO] User updated by {current_user.email}: {user.email}")
+    logger.info("User updated by admin")
     
     return UserResponse.from_user(user)
 
@@ -284,13 +314,9 @@ async def approve_user(
     """
     Approve a pending user
     
-    Requires: Super Admin role
+    Requires: Super Admin or Admin role
     """
-    if current_user.role != UserRole.SUPER_ADMIN:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only Super Admins can approve users"
-        )
+    _check_permission(current_user, "edit_users")
     
     # Get user to approve
     user = await User.get(user_id)
@@ -308,10 +334,10 @@ async def approve_user(
     
     # Approve user
     user.is_approved = True
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now(timezone.utc)
     await user.save()
     
-    print(f"[INFO] User approved by {current_user.email}: {user.email}")
+    logger.info("User approved")
     
     # TODO: Send approval email to user
     
@@ -328,7 +354,7 @@ async def toggle_user_status(
     
     Requires: edit_users permission
     """
-    require_permission(current_user, "edit_users")
+    _check_permission(current_user, "edit_users")
     
     # Get user
     user = await User.get(user_id)
@@ -354,10 +380,10 @@ async def toggle_user_status(
     
     # Toggle status
     user.is_active = not user.is_active
-    user.updated_at = datetime.utcnow()
+    user.updated_at = datetime.now(timezone.utc)
     await user.save()
     
-    print(f"[INFO] User {'activated' if user.is_active else 'deactivated'} by {current_user.email}: {user.email}")
+    logger.info("User %s", "activated" if user.is_active else "deactivated")
     
     return UserResponse.from_user(user)
 
@@ -372,7 +398,7 @@ async def delete_user(
     
     Requires: delete_users permission + Super Admin role
     """
-    require_permission(current_user, "delete_users")
+    _check_permission(current_user, "delete_users")
     
     if current_user.role != UserRole.SUPER_ADMIN:
         raise HTTPException(
@@ -398,7 +424,7 @@ async def delete_user(
     # Delete user
     await user.delete()
     
-    print(f"[INFO] User deleted by {current_user.email}: {user.email}")
+    logger.info("User deleted")
     
     return MessageResponse(
         message=f"User {user.name} has been deleted successfully",
@@ -406,35 +432,4 @@ async def delete_user(
     )
 
 
-@router.get("/stats/summary")
-async def get_user_stats(
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Get user statistics summary
-    
-    Requires: view_users permission
-    """
-    require_permission(current_user, "view_users")
-    
-    total_users = await User.count()
-    active_users = await User.find(User.is_active == True).count()
-    pending_approval = await User.find(User.is_approved == False).count()
-    
-    # Count by role
-    super_admins = await User.find(User.role == UserRole.SUPER_ADMIN).count()
-    admins = await User.find(User.role == UserRole.ADMIN).count()
-    researchers = await User.find(User.role == UserRole.RESEARCHER).count()
-    
-    return {
-        "total_users": total_users,
-        "active_users": active_users,
-        "inactive_users": total_users - active_users,
-        "pending_approval": pending_approval,
-        "by_role": {
-            "super_admin": super_admins,
-            "admin": admins,
-            "researcher": researchers
-        }
-    }
 
