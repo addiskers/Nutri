@@ -64,8 +64,8 @@ const SettingsPage = () => {
       return
     }
 
-    if (passwordData.newPassword.length < 8) {
-      setPasswordError('Password must be at least 8 characters long')
+    if (passwordData.newPassword.length < 12) {
+      setPasswordError('Password must be at least 12 characters long')
       return
     }
 
@@ -281,7 +281,7 @@ const SettingsPage = () => {
                     onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
                     required
                     className="w-full px-4 py-2 border border-[#e1e7ef] rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                    placeholder="Enter new password (min 8 characters)"
+                    placeholder="Enter new password (min 12 characters)"
                   />
                 </div>
                 <div>

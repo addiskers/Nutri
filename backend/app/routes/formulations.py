@@ -15,6 +15,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/formulations", tags=["Formulations"])
 
+
+def _is_owner(formulation: SavedFormulation, user: User) -> bool:
+    """Check formulation ownership by user ID (preferred) or email (legacy)."""
+    owner = formulation.created_by
+    return owner == str(user.id) or owner == user.email
+
 MAX_PAGE_SIZE = 200
 MAX_TARGET_USERS = 50
 
@@ -51,7 +57,7 @@ async def save_formulation(
             nutrient_selections=nutrient_selections,
             custom_values=custom_values,
             serve_size=serve_size,
-            created_by=current_user.email,
+            created_by=str(current_user.id),
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
             status="active"
@@ -90,7 +96,14 @@ async def list_formulations(
         if is_super_admin and created_by:
             query_filters.append(SavedFormulation.created_by == created_by)
         elif not is_super_admin:
-            query_filters.append(SavedFormulation.created_by == current_user.email)
+            # Match by user ID (new) or email (legacy records)
+            user_id_str = str(current_user.id)
+            query_filters.append(
+                {"$or": [
+                    {"created_by": user_id_str},
+                    {"created_by": current_user.email},
+                ]}
+            )
         
         formulations = await SavedFormulation.find(*query_filters).sort("-created_at").skip(skip).limit(limit).to_list()
         total = await SavedFormulation.find(*query_filters).count()
@@ -130,9 +143,9 @@ async def get_formulation(
             raise HTTPException(status_code=404, detail="Formulation not found")
         
         is_super_admin = current_user.role == UserRole.SUPER_ADMIN
-        if not is_super_admin and formulation.created_by != current_user.email:
+        if not is_super_admin and not _is_owner(formulation, current_user):
             raise HTTPException(status_code=403, detail="Access denied")
-        
+
         return {
             "id": str(formulation.id),
             "name": formulation.name,
@@ -165,9 +178,9 @@ async def delete_formulation(
             raise HTTPException(status_code=404, detail="Formulation not found")
         
         is_super_admin = current_user.role == UserRole.SUPER_ADMIN
-        if not is_super_admin and formulation.created_by != current_user.email:
+        if not is_super_admin and not _is_owner(formulation, current_user):
             raise HTTPException(status_code=403, detail="Access denied")
-        
+
         await formulation.delete()
         
         return {
@@ -203,28 +216,30 @@ async def transfer_formulation(
             raise HTTPException(status_code=404, detail="Formulation not found")
         
         is_super_admin = current_user.role == UserRole.SUPER_ADMIN
-        if not is_super_admin and formulation.created_by != current_user.email:
+        if not is_super_admin and not _is_owner(formulation, current_user):
             raise HTTPException(status_code=403, detail="Access denied")
-        
+
         valid_users = await User.find({"email": {"$in": target_users}}).to_list()
         valid_emails = {u.email for u in valid_users}
-        invalid_emails = [e for e in target_users if e not in valid_emails]
-        if invalid_emails:
+        if len(valid_emails) != len(target_users):
             raise HTTPException(
                 status_code=400,
-                detail=f"Users not found: {', '.join(invalid_emails)}"
+                detail="One or more target users were not found"
             )
-        
+
+        # Map target emails to user IDs for ownership
+        email_to_id = {u.email: str(u.id) for u in valid_users}
+
         transferred_count = 0
-        
-        for target_user in target_users:
+
+        for target_email in target_users:
             new_formulation = SavedFormulation(
                 name=formulation.name,
                 ingredients=formulation.ingredients,
                 nutrient_selections=formulation.nutrient_selections or {},
                 custom_values=formulation.custom_values or {},
                 serve_size=formulation.serve_size,
-                created_by=target_user,
+                created_by=email_to_id.get(target_email, target_email),
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
                 status="active"

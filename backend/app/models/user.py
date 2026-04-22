@@ -75,6 +75,8 @@ class User(Document):
     reset_token_expires: Optional[datetime] = None
     otp_attempts: int = Field(default=0)
     otp_locked_until: Optional[datetime] = None
+    otp_lockout_count: int = Field(default=0)
+    token_version: int = Field(default=0)
     department: Optional[str] = None
     job_title: Optional[str] = None
     role: UserRole = Field(default=UserRole.RESEARCHER)

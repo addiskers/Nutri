@@ -12,7 +12,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
 from pydantic import BaseModel
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app.models.user import User
 from app.models.coa import COA
@@ -645,13 +645,15 @@ async def extract_coa_from_images(
         pil_images = []
         for idx, img in enumerate(images):
             try:
-                safe_print(f"[COA EXTRACTION] Loading file {idx + 1}/{len(images)}: {img.filename}")
+                import os as _os
+                safe_filename = _os.path.basename(img.filename or "unknown").replace("\n", "").replace("\r", "")
+                safe_print(f"[COA EXTRACTION] Loading file {idx + 1}/{len(images)}: {safe_filename}")
                 content = await img.read()
-                if len(content) > 10 * 1024 * 1024:
-                    raise HTTPException(status_code=400, detail=f"File '{img.filename}' exceeds 10MB limit")
-                
+                if len(content) > 50 * 1024 * 1024:
+                    raise HTTPException(status_code=400, detail=f"File '{safe_filename}' exceeds 50MB limit")
+
                 # Check if it's a PDF
-                if img.filename.lower().endswith('.pdf'):
+                if safe_filename.lower().endswith('.pdf'):
                     safe_print(f"[COA EXTRACTION] Converting PDF to images...")
                     pdf_document = fitz.open(stream=content, filetype="pdf")
                     total_pages = len(pdf_document)
@@ -672,6 +674,13 @@ async def extract_coa_from_images(
                         # Convert to PIL Image
                         img_data = pix.tobytes("png")
                         pil_img = Image.open(BytesIO(img_data))
+
+                        # Validate rendered page dimensions
+                        w, h = pil_img.size
+                        if w * h > 100_000_000:
+                            pdf_document.close()
+                            raise HTTPException(status_code=400, detail=f"PDF page {page_num + 1} renders too large ({w}x{h})")
+
                         pil_images.append(pil_img)
                         safe_print(f"[COA EXTRACTION] PDF page {page_num + 1}/{total_pages} converted: {pil_img.size} pixels")
                     
@@ -680,14 +689,27 @@ async def extract_coa_from_images(
                 else:
                     # Regular image file
                     pil_img = Image.open(BytesIO(content))
+
+                    # Validate image dimensions to prevent OOM
+                    MAX_DIMENSION = 10000
+                    MAX_PIXELS = 100_000_000
+                    w, h = pil_img.size
+                    if w > MAX_DIMENSION or h > MAX_DIMENSION:
+                        raise HTTPException(status_code=400, detail=f"File '{safe_filename}': dimensions {w}x{h} exceed {MAX_DIMENSION}px limit")
+                    if w * h > MAX_PIXELS:
+                        raise HTTPException(status_code=400, detail=f"File '{safe_filename}': total pixels ({w*h}) exceed limit")
+
+                    # Strip EXIF metadata
+                    pil_img = ImageOps.exif_transpose(pil_img)
+
                     pil_images.append(pil_img)
                     safe_print(f"[COA EXTRACTION] Image {idx + 1} loaded: {pil_img.size} pixels")
-                    
+
             except Exception as e:
-                logger.error(f"Failed to load file {img.filename}: {e}")
+                logger.error("Failed to load file %s: %s", safe_filename, type(e).__name__)
                 raise HTTPException(
-                    status_code=400, 
-                    detail=f"Invalid file: {img.filename}"
+                    status_code=400,
+                    detail=f"Invalid file: {safe_filename}"
                 )
         
         # Call Gemini API
@@ -890,6 +912,7 @@ async def list_coas(
         if status:
             query["status"] = status
         if search:
+            search = search[:200]  # Limit search length to prevent performance issues
             escaped = re.escape(search)
             query["$or"] = [
                 {"ingredient_name": {"$regex": escaped, "$options": "i"}},

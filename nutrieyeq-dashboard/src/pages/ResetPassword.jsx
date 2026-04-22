@@ -51,8 +51,8 @@ const ResetPassword = () => {
       return
     }
 
-    if (formData.newPassword.length < 8) {
-      setError('Password must be at least 8 characters long')
+    if (formData.newPassword.length < 12) {
+      setError('Password must be at least 12 characters long')
       return
     }
 
@@ -185,9 +185,9 @@ const ResetPassword = () => {
                   value={formData.otp}
                   onChange={handleChange}
                   required
-                  maxLength={6}
+                  maxLength={8}
                   className="w-full h-12 bg-[#f9fafb] border-0 rounded-xl px-4 text-sm font-poppins text-[#0f1729] placeholder-[#9ca3af] focus:ring-2 focus:ring-[#b455a0] focus:bg-white transition-all text-center text-xl tracking-widest"
-                  placeholder="••••••"
+                  placeholder="••••••••"
                 />
               </div>
 

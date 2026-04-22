@@ -14,7 +14,7 @@ from datetime import datetime, timezone, timedelta
 from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
 from pydantic import BaseModel
-from PIL import Image
+from PIL import Image, ImageOps
 from app.models.user import User
 from app.models.product import Product
 from app.dependencies.auth import get_current_user, require_permission
@@ -446,13 +446,13 @@ NUTRITION JSON RULE (STRICT)
 You MUST output the nutrition table ONLY as JSON.
 JSON Format:
 [
-{{
+{
 "nutrient_name": "<as printed>",
 "unit": "<unit printed for that nutrient>",
-"values": {{
+"values": {
     "<column header>": "<value>"
-    }}
-}}
+    }
+}
 ]
 
 Rules:
@@ -595,9 +595,9 @@ Common patterns:
 - "FSSAI License No."
 
 Store under:
-"fssai_information": {{
+"fssai_information": {
   "license_numbers": []
-}}
+}
 
 Rules:
 - Preserve the exact number.
@@ -631,89 +631,89 @@ CRITICAL:
 - DO NOT wrap JSON in markdown code fences.
 - DO NOT include explanations.
 - DO NOT include bullet points.
-- The response MUST start with {{ and end with }}.
+- The response MUST start with { and end with }.
 
 JSON STRUCTURE:
-{{
+{
   "product_type": "single",
-  "product_identity": {{
-    "brand": {{
+  "product_identity": {
+    "brand": {
       "parent_brand": "",
       "sub_brand": ""
-    }},
+    },
     "product_name": "",
     "variant": ""
-  }},
-  "pack_details": {{
+  },
+  "pack_details": {
     "net_quantity": "",
     "pack_size": "",
     "serving_size": "",
     "servings_per_pack": "",
     "packing_format": ""
-  }},
-  "pricing": {{
+  },
+  "pricing": {
     "mrp": "",
     "uspf": ""
-  }},
-  "nutrition": {{
+  },
+  "nutrition": {
     "nutrition_table": [
-        {{
+        {
         "nutrient_name": "",
         "unit": "",
-        "values": {{
+        "values": {
             "<column_header>": ""
-        }}
-        }}
+        }
+        }
     ],
     "nutrition_notes": []
-  }},
+  },
   "ingredients": "",
   "allergen_information": "",
   "claims": [],
-  "medical_information": {{
+  "medical_information": {
     "warnings": []
-  }},
-  "usage_instructions": {{
+  },
+  "usage_instructions": {
     "directions_to_use": [],
     "preparation_method": []
-  }},
+  },
   "storage_instructions": [],
   "manufacturer_information": [
-    {{
+    {
       "type": "",
       "name": "",
       "address": "",
       "license_number": ""
-    }}
+    }
   ],
-  "fssai_information": {{
+  "fssai_information": {
     "license_numbers": []
-  }},
-  "packaging_information": {{
+  },
+  "packaging_information": {
     "packaging_material_manufacturer": "",
     "packaging_codes": []
-  }},
-  "batch_information": {{
+  },
+  "batch_information": {
     "lot_number": "",
     "machine_code": "",
     "other_codes": []
-  }},
-  "dates": {{
+  },
+  "dates": {
     "manufacturing_date": "",
     "expiry_date": "",
     "shelf_life": ""
-  }},
+  },
   "barcodes": [],
   "certifications": [],
-  "customer_care": {{
+  "customer_care": {
     "phone": [],
     "email": "",
     "website": "",
     "address": ""
-  }},
+  },
   "regulatory_text": [],
   "other_important_text": []
-}}
+}
 
 ==================================================
 JSON RULES (CRITICAL)
@@ -824,6 +824,7 @@ def apply_notes_rda(nutrition_block, canonical_nomen=None):
 
         # Extract pairs like "Energy-5%", "Sodium-<10%", "Added Sugar*-0%"
         after_colon = note.split(":", 1)[1] if ":" in note else note
+        after_colon = after_colon[:2000]  # Limit input length to prevent ReDoS
         pairs = re.findall(r'([\w\s\*\(\)]+?)\s*[-–—]\s*([<>]?\d+(?:\.\d+)?%)', after_colon)
 
         safe_print(f"[NOTES_RDA] Extracted {len(pairs)} pairs: {pairs}")
@@ -947,7 +948,7 @@ def merge_external_rda(structured_json, raw_text, canonical_nomen=None):
     if existing_rda_columns:
         logger.debug("Nutrition table already has '%%' columns: %s", existing_rda_columns)
 
-    lines = raw_text.splitlines()
+    lines = raw_text[:50000].splitlines()  # Limit OCR text to prevent excessive processing
     merged_rda_blocks = []
     current_block = ""
     for line in lines:
@@ -963,6 +964,7 @@ def merge_external_rda(structured_json, raw_text, canonical_nomen=None):
     logger.debug("Found %d merged %%RDA blocks", len(merged_rda_blocks))
 
     for block_num, block in enumerate(merged_rda_blocks, start=1):
+        block = block[:5000]  # Limit block length to prevent ReDoS
         logger.debug("Processing block %d: %s", block_num, block)
 
         column_header = "% RDA"
@@ -1282,7 +1284,8 @@ async def extract_product_from_images(
         }
 
         for idx, img_file in enumerate(images):
-            filename = img_file.filename
+            import os
+            filename = os.path.basename(img_file.filename or "unknown").replace("\n", "").replace("\r", "")
             safe_print(f"[OCR] Processing image {idx + 1}/{len(images)}: {filename}")
             
             max_ocr_retries = 10
@@ -1307,6 +1310,19 @@ async def extract_product_from_images(
                         raise HTTPException(status_code=400, detail=f"File '{filename}': invalid image data")
                     
                     pil_img = Image.open(BytesIO(content_bytes))
+
+                    # Validate image dimensions to prevent OOM
+                    MAX_DIMENSION = 10000
+                    MAX_PIXELS = 100_000_000
+                    w, h = pil_img.size
+                    if w > MAX_DIMENSION or h > MAX_DIMENSION:
+                        raise HTTPException(status_code=400, detail=f"File '{filename}': dimensions {w}x{h} exceed {MAX_DIMENSION}px limit")
+                    if w * h > MAX_PIXELS:
+                        raise HTTPException(status_code=400, detail=f"File '{filename}': total pixels ({w*h}) exceed limit")
+
+                    # Strip EXIF metadata (prevents metadata leakage)
+                    pil_img = ImageOps.exif_transpose(pil_img)
+
                     if pil_img.mode != "RGB":
                         pil_img = pil_img.convert("RGB")
                     safe_print(f"[OCR] Image {idx + 1} size: {pil_img.size} (attempt {retry_attempt}/{max_ocr_retries}, timeout: {timeout_duration}s)")
@@ -1355,7 +1371,9 @@ async def extract_product_from_images(
         # ══════════════════════════════════════════════════════════════════════
         safe_print("[STRUCTURE] Calling structure model...")
 
-        structure_prompt = STRUCTURE_PROMPT_TEMPLATE.format(raw_text=combined_raw_text)
+        # Use replace() instead of .format() to prevent format-string injection
+        # from user-controlled OCR text containing {curly braces}
+        structure_prompt = STRUCTURE_PROMPT_TEMPLATE.replace("{raw_text}", combined_raw_text)
 
         struct_response = await gemini_call_with_retry(
             client.models.generate_content,
@@ -1655,6 +1673,7 @@ async def list_products(
         if brand:
             query["parent_brand"] = brand
         if search:
+            search = search[:200]  # Limit search length to prevent performance issues
             escaped = re.escape(search)
             query["$or"] = [
                 {"product_name":  {"$regex": escaped, "$options": "i"}},

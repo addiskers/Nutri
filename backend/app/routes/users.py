@@ -5,10 +5,11 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from typing import List, Optional
 from datetime import datetime, timezone
 from pydantic import BaseModel, EmailStr, Field
-from app.models.user import User, UserRole, ROLE_PERMISSIONS
+from app.models.user import User, UserRole, UserPermissions, ROLE_PERMISSIONS
 from app.schemas.auth import UserResponse, MessageResponse
 from app.dependencies.auth import get_current_user, require_permission as _require_permission_dep
 from app.utils.security import hash_password, validate_password_strength
+from app.utils.audit import log_event
 import logging
 import re
 
@@ -22,7 +23,7 @@ MAX_PAGE_SIZE = 200
 class UserCreateRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
     email: EmailStr
-    password: str = Field(..., min_length=8, max_length=128)
+    password: str = Field(..., min_length=12, max_length=128)
     department: Optional[str] = Field(None, max_length=100)
     role: UserRole = UserRole.RESEARCHER
 
@@ -49,6 +50,15 @@ def _check_permission(user: User, permission: str):
         )
 
 
+def _require_admin(user: User):
+    """Require Admin or Super Admin role."""
+    if user.role not in (UserRole.ADMIN, UserRole.SUPER_ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+
+
 @router.get("", response_model=UserListResponse)
 async def list_users(
     page: int = 1,
@@ -69,9 +79,10 @@ async def list_users(
     - **is_approved**: Filter by approval status
     - **search**: Search by name or email
     
-    Requires: view_users permission
+    Requires: view_users permission + Admin role
     """
     _check_permission(current_user, "view_users")
+    _require_admin(current_user)
 
     page_size = min(page_size, MAX_PAGE_SIZE)
 
@@ -85,6 +96,7 @@ async def list_users(
         query_filters.append(User.is_approved == is_approved)
 
     if search:
+        search = search[:200]  # Limit search length to prevent performance issues
         safe_search = re.escape(search)
         search_regex = {"$regex": safe_search, "$options": "i"}
         query_filters.append(
@@ -115,11 +127,12 @@ async def get_pending_users(
 ):
     """
     Get all users pending approval
-    
-    Requires: view_users permission
+
+    Requires: view_users permission + Admin role
     """
     _check_permission(current_user, "view_users")
-    
+    _require_admin(current_user)
+
     pending_users = await User.find(User.is_approved == False).to_list()
     return [UserResponse.from_user(u) for u in pending_users]
 
@@ -130,11 +143,12 @@ async def get_user_stats(
 ):
     """
     Get user statistics summary
-    
-    Requires: view_users permission
+
+    Requires: view_users permission + Admin role
     """
     _check_permission(current_user, "view_users")
-    
+    _require_admin(current_user)
+
     total_users = await User.count()
     active_users = await User.find(User.is_active == True).count()
     pending_approval = await User.find(User.is_approved == False).count()
@@ -163,18 +177,26 @@ async def get_user(
 ):
     """
     Get user by ID
-    
-    Requires: view_users permission
+
+    - Researchers can only view their own profile
+    - Admins/Super Admins can view any user
     """
     _check_permission(current_user, "view_users")
-    
+
+    # Researchers can only access their own profile
+    if current_user.role == UserRole.RESEARCHER and str(current_user.id) != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view your own profile"
+        )
+
     user = await User.get(user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     return UserResponse.from_user(user)
 
 
@@ -242,6 +264,7 @@ async def create_user(
     await new_user.insert()
     
     logger.info("New user created by admin (role=%s)", new_user.role)
+    log_event("USER_CREATE", user_id=str(current_user.id), user_email=current_user.email, target_id=str(new_user.id), detail=f"role={new_user.role}")
     
     return UserResponse.from_user(new_user)
 
@@ -296,12 +319,21 @@ async def update_user(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have permission to manage permissions"
             )
+        # Validate against allowed permission values
+        allowed_perms = {p.value for p in UserPermissions}
+        invalid = [p for p in user_data.permissions if p not in allowed_perms]
+        if invalid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid permissions: {', '.join(invalid)}"
+            )
         user.permissions = user_data.permissions
     
     user.updated_at = datetime.now(timezone.utc)
     await user.save()
     
     logger.info("User updated by admin")
+    log_event("USER_UPDATE", user_id=str(current_user.id), user_email=current_user.email, target_id=str(user.id))
     
     return UserResponse.from_user(user)
 
@@ -313,11 +345,12 @@ async def approve_user(
 ):
     """
     Approve a pending user
-    
-    Requires: Super Admin or Admin role
+
+    Requires: edit_users permission + Admin role
     """
     _check_permission(current_user, "edit_users")
-    
+    _require_admin(current_user)
+
     # Get user to approve
     user = await User.get(user_id)
     if not user:
@@ -338,6 +371,7 @@ async def approve_user(
     await user.save()
     
     logger.info("User approved")
+    log_event("USER_APPROVE", user_id=str(current_user.id), user_email=current_user.email, target_id=str(user.id))
     
     # TODO: Send approval email to user
     
@@ -351,11 +385,12 @@ async def toggle_user_status(
 ):
     """
     Toggle user active/inactive status
-    
-    Requires: edit_users permission
+
+    Requires: edit_users permission + Admin role
     """
     _check_permission(current_user, "edit_users")
-    
+    _require_admin(current_user)
+
     # Get user
     user = await User.get(user_id)
     if not user:
@@ -383,7 +418,9 @@ async def toggle_user_status(
     user.updated_at = datetime.now(timezone.utc)
     await user.save()
     
-    logger.info("User %s", "activated" if user.is_active else "deactivated")
+    status_str = "activated" if user.is_active else "deactivated"
+    logger.info("User %s", status_str)
+    log_event("USER_TOGGLE", user_id=str(current_user.id), user_email=current_user.email, target_id=str(user.id), detail=status_str)
     
     return UserResponse.from_user(user)
 
@@ -425,6 +462,7 @@ async def delete_user(
     await user.delete()
     
     logger.info("User deleted")
+    log_event("USER_DELETE", user_id=str(current_user.id), user_email=current_user.email, target_id=str(user.id), detail=user.email)
     
     return MessageResponse(
         message=f"User {user.name} has been deleted successfully",

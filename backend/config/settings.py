@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None
     ENVIRONMENT: str = "development"
     BEHIND_PROXY: bool = False
+    TRUSTED_PROXY_IPS: str = "127.0.0.1,::1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
+    PREVIOUS_SECRET_KEY: Optional[str] = None  # For key rotation: set old key here temporarily
     
     @field_validator('SECRET_KEY', mode='before')
     @classmethod

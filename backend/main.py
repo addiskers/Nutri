@@ -13,9 +13,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if settings.DEBUG and os.getenv("ENVIRONMENT", "").lower() in ("production", "prod"):
-        logger.critical("DEBUG=True in a production environment — refusing to start")
-        raise RuntimeError("DEBUG must be False in production")
+    env = os.getenv("ENVIRONMENT", "").lower()
+    if settings.DEBUG and env not in ("development", "dev", "local", ""):
+        logger.critical("DEBUG=True in a non-development environment (%s) — refusing to start", env)
+        raise RuntimeError("DEBUG must be False in non-development environments")
+    if settings.DEBUG:
+        logger.warning("DEBUG mode is ON — API docs exposed, CORS relaxed, HSTS disabled")
 
     logger.info("Starting NutriEyeQ Backend...")
     await Database.connect_db()
@@ -45,13 +48,53 @@ configure_cors(app)
 configure_rate_limiting(app)
 
 
+MAX_BODY_SIZE = 50 * 1024 * 1024  # 50MB (covers file uploads)
+MAX_JSON_BODY_SIZE = 50 * 1024 * 1024  # 50MB for JSON requests
+
+
+@app.middleware("http")
+async def enforce_body_size(request: Request, call_next):
+    """Reject oversized request bodies to prevent memory exhaustion."""
+    content_length = request.headers.get("content-length")
+    if content_length:
+        content_length = int(content_length)
+        content_type = (request.headers.get("content-type") or "").lower()
+        limit = MAX_BODY_SIZE if "multipart" in content_type else MAX_JSON_BODY_SIZE
+        if content_length > limit:
+            return JSONResponse(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                content={"detail": f"Request body too large (max {limit // 1024 // 1024}MB)"}
+            )
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def enforce_content_type(request: Request, call_next):
+    """Reject state-changing requests with unexpected Content-Type (CSRF defense)."""
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        content_type = (request.headers.get("content-type") or "").lower()
+        # Allow JSON, multipart (file uploads), and empty body (DELETE)
+        allowed = (
+            content_type.startswith("application/json")
+            or content_type.startswith("multipart/form-data")
+            or not content_type  # empty body (e.g. DELETE, PATCH with no body)
+        )
+        if not allowed:
+            return JSONResponse(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                content={"detail": "Unsupported Content-Type"}
+            )
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    if not settings.DEBUG:
+    is_localhost = "localhost" in settings.FRONTEND_URL or "127.0.0.1" in settings.FRONTEND_URL
+    if not is_localhost:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"

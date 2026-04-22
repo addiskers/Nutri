@@ -18,6 +18,7 @@ from app.utils.security import (
     validate_password_strength, deny_token, is_token_denied
 )
 from app.utils.email import send_login_otp_email, send_password_reset_email, send_user_approval_email
+from app.utils.audit import log_event
 from app.dependencies.auth import get_current_user
 from app.middleware.security import limiter
 from config.settings import settings
@@ -46,25 +47,20 @@ async def register(request: Request, user_data: UserRegister):
             success=True
         )
     
-    user_count = await User.count()
-    is_first_user = (user_count == 0)
-    
-    user_role = UserRole.SUPER_ADMIN if is_first_user else UserRole.RESEARCHER
-    is_approved = True if is_first_user else False
-    
+    # Always register as Researcher first -- promote to Super Admin only after
+    # verifying no other Super Admin exists (prevents race condition)
     new_user = User(
         name=user_data.name,
         email=user_data.email.lower(),
         hashed_password=hash_password(user_data.password),
         department=user_data.department,
-        role=user_role,
+        role=UserRole.RESEARCHER,
         is_active=True,
         is_verified=True,
-        is_approved=is_approved,
+        is_approved=False,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc)
     )
-    
     new_user.update_permissions_by_role()
 
     try:
@@ -78,9 +74,23 @@ async def register(request: Request, user_data: UserRegister):
             )
         raise
 
+    # After insert, atomically check if this is the only user (no Super Admin exists)
+    existing_super = await User.find_one(
+        User.role == UserRole.SUPER_ADMIN,
+        User.is_active == True,
+    )
+    is_first_user = existing_super is None
+
     if is_first_user:
-        recheck_count = await User.count()
-        if recheck_count > 1 and new_user.role == UserRole.SUPER_ADMIN:
+        # Promote to Super Admin only if no other Super Admin was created in the meantime
+        new_user.role = UserRole.SUPER_ADMIN
+        new_user.is_approved = True
+        new_user.update_permissions_by_role()
+        await new_user.save()
+
+        # Final verification: if another Super Admin appeared during our save, demote back
+        super_count = await User.find(User.role == UserRole.SUPER_ADMIN).count()
+        if super_count > 1:
             first_super = await User.find_one(
                 User.role == UserRole.SUPER_ADMIN,
                 {"_id": {"$ne": new_user.id}},
@@ -94,7 +104,7 @@ async def register(request: Request, user_data: UserRegister):
                     message="Registration successful! Your account is pending admin approval.",
                     success=True
                 )
-    
+
     if is_first_user:
         logger.info("First user registered as Super Admin")
         return MessageResponse(
@@ -149,9 +159,9 @@ async def login(request: Request, credentials: UserLogin):
     
     if not user.is_approved:
         logger.warning("Login attempt by unapproved user")
-        return MessageResponse(
-            message="Your account is pending admin approval",
-            success=False
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password"
         )
     
     if not user.is_active:
@@ -182,12 +192,19 @@ async def login(request: Request, credentials: UserLogin):
     )
 
 
-MAX_OTP_ATTEMPTS = 5
-OTP_LOCKOUT_MINUTES = 15
+MAX_OTP_ATTEMPTS = 3
+OTP_LOCKOUT_MINUTES_BASE = 15  # Escalates: 15min, 30min, 60min, 240min
+
+
+def _get_lockout_duration(lockout_count: int) -> int:
+    """Exponential backoff for repeated OTP lockouts (in minutes)."""
+    multipliers = [1, 2, 4, 16]  # 15min, 30min, 60min, 240min
+    idx = min(lockout_count, len(multipliers) - 1)
+    return OTP_LOCKOUT_MINUTES_BASE * multipliers[idx]
 
 
 @router.post("/verify-otp", response_model=TokenResponse)
-@limiter.limit("5/minute")
+@limiter.limit("3/minute")
 async def verify_login_otp(request: Request, otp_data: VerifyLoginOTP):
     user = await User.find_one(User.email == otp_data.email.lower())
     if not user:
@@ -195,21 +212,24 @@ async def verify_login_otp(request: Request, otp_data: VerifyLoginOTP):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid OTP"
         )
-    
+
     # Check OTP lockout
     if user.otp_locked_until and _as_utc(user.otp_locked_until) > datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many failed attempts. Please try again later."
         )
-    
+
     if not user.login_otp or not verify_otp(otp_data.otp, user.login_otp):
         user.otp_attempts = (user.otp_attempts or 0) + 1
         if user.otp_attempts >= MAX_OTP_ATTEMPTS:
-            user.otp_locked_until = datetime.now(timezone.utc) + timedelta(minutes=OTP_LOCKOUT_MINUTES)
+            lockout_minutes = _get_lockout_duration(user.otp_lockout_count or 0)
+            user.otp_locked_until = datetime.now(timezone.utc) + timedelta(minutes=lockout_minutes)
+            user.otp_lockout_count = (user.otp_lockout_count or 0) + 1
             user.login_otp = None
             user.login_otp_expires = None
-            logger.warning("OTP locked for user after %d failed attempts", user.otp_attempts)
+            logger.warning("OTP locked for user after %d failed attempts (lockout %d: %d min)",
+                           user.otp_attempts, user.otp_lockout_count, lockout_minutes)
         await user.save()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -227,6 +247,7 @@ async def verify_login_otp(request: Request, otp_data: VerifyLoginOTP):
     user.login_otp_expires = None
     user.otp_attempts = 0
     user.otp_locked_until = None
+    user.otp_lockout_count = 0
     user.last_login = datetime.now(timezone.utc)
     await user.save()
     
@@ -234,14 +255,16 @@ async def verify_login_otp(request: Request, otp_data: VerifyLoginOTP):
     token_data = {
         "user_id": str(user.id),
         "email": user.email,
-        "role": user.role
+        "role": user.role,
+        "tv": user.token_version,
     }
-    
+
     access_token = create_access_token(token_data)
     refresh_token = create_refresh_token(token_data)
-    
+
     logger.info("User logged in")
-    
+    log_event("LOGIN", user_id=str(user.id), user_email=user.email)
+
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -292,6 +315,13 @@ async def refresh_token(request: Request, body: RefreshTokenRequest):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
+    # Reject refresh tokens issued before a password change
+    token_version = payload.get("tv", 0)
+    if token_version != (user.token_version or 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired due to password change",
+        )
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -307,6 +337,7 @@ async def refresh_token(request: Request, body: RefreshTokenRequest):
         "user_id": str(user.id),
         "email": user.email,
         "role": user.role,
+        "tv": user.token_version,
     }
 
     new_access = create_access_token(token_data)
@@ -370,7 +401,7 @@ async def forgot_password(request: Request, forgot_data: ForgotPassword):
 
 
 @router.post("/reset-password", response_model=MessageResponse)
-@limiter.limit("5/minute")
+@limiter.limit("3/minute")
 async def reset_password(request: Request, reset_data: ResetPassword):
     """
     Reset password using OTP
@@ -381,21 +412,24 @@ async def reset_password(request: Request, reset_data: ResetPassword):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid OTP"
         )
-    
+
     # Check OTP lockout
     if user.otp_locked_until and _as_utc(user.otp_locked_until) > datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many failed attempts. Please try again later."
         )
-    
+
     if not user.reset_token or not verify_otp(reset_data.otp, user.reset_token):
         user.otp_attempts = (user.otp_attempts or 0) + 1
         if user.otp_attempts >= MAX_OTP_ATTEMPTS:
-            user.otp_locked_until = datetime.now(timezone.utc) + timedelta(minutes=OTP_LOCKOUT_MINUTES)
+            lockout_minutes = _get_lockout_duration(user.otp_lockout_count or 0)
+            user.otp_locked_until = datetime.now(timezone.utc) + timedelta(minutes=lockout_minutes)
+            user.otp_lockout_count = (user.otp_lockout_count or 0) + 1
             user.reset_token = None
             user.reset_token_expires = None
-            logger.warning("Reset OTP locked for user after %d failed attempts", user.otp_attempts)
+            logger.warning("Reset OTP locked for user after %d failed attempts (lockout %d: %d min)",
+                           user.otp_attempts, user.otp_lockout_count, lockout_minutes)
         await user.save()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -421,10 +455,13 @@ async def reset_password(request: Request, reset_data: ResetPassword):
     user.reset_token_expires = None
     user.otp_attempts = 0
     user.otp_locked_until = None
+    user.otp_lockout_count = 0
+    user.token_version = (user.token_version or 0) + 1
     user.updated_at = datetime.now(timezone.utc)
     await user.save()
-    
-    logger.info("Password reset completed")
+
+    logger.info("Password reset completed — all prior sessions invalidated")
+    log_event("PASSWORD_RESET", user_id=str(user.id), user_email=user.email)
     
     return MessageResponse(
         message="Password reset successful. You can now login with your new password.",
@@ -456,10 +493,12 @@ async def change_password(
         )
     
     current_user.hashed_password = hash_password(password_data.new_password)
+    current_user.token_version = (current_user.token_version or 0) + 1
     current_user.updated_at = datetime.now(timezone.utc)
     await current_user.save()
     
     logger.info("Password changed")
+    log_event("PASSWORD_CHANGE", user_id=str(current_user.id), user_email=current_user.email)
     
     return MessageResponse(
         message="Password changed successfully",
@@ -492,6 +531,7 @@ async def logout(
             await deny_token(payload["jti"], exp)
 
     logger.info("User logged out")
+    log_event("LOGOUT", user_id=str(current_user.id), user_email=current_user.email)
     return MessageResponse(
         message="Logged out successfully",
         success=True

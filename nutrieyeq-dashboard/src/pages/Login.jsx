@@ -10,9 +10,9 @@ const Login = () => {
   const [error, setError] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [step, setStep] = useState('credentials') // 'credentials' or 'otp'
-  const [otp, setOtp] = useState(['', '', '', '', '', ''])
+  const [otp, setOtp] = useState(['', '', '', '', '', '', '', ''])
   const [resendTimer, setResendTimer] = useState(0)
-  const otpRefs = [useRef(), useRef(), useRef(), useRef(), useRef(), useRef()]
+  const otpRefs = [useRef(), useRef(), useRef(), useRef(), useRef(), useRef(), useRef(), useRef()]
   const [formData, setFormData] = useState({
     email: '',
     password: ''
@@ -52,16 +52,26 @@ const Login = () => {
   }
 
   const handleOtpChange = (index, value) => {
-    if (value.length > 1) {
-      value = value[0]
+    // Handle multi-character input (autofill / paste via onChange)
+    const digits = value.replace(/\D/g, '')
+    if (digits.length > 1) {
+      const newOtp = [...otp]
+      for (let i = 0; i < digits.length && index + i < 8; i++) {
+        newOtp[index + i] = digits[i]
+      }
+      setOtp(newOtp)
+      setError('')
+      const focusIdx = Math.min(index + digits.length, 7)
+      otpRefs[focusIdx].current?.focus()
+      return
     }
-    
+
     const newOtp = [...otp]
-    newOtp[index] = value
+    newOtp[index] = digits
     setOtp(newOtp)
     setError('')
 
-    if (value && index < 5) {
+    if (digits && index < 7) {
       otpRefs[index + 1].current?.focus()
     }
   }
@@ -74,15 +84,12 @@ const Login = () => {
 
   const handleOtpPaste = (e) => {
     e.preventDefault()
-    const pastedData = e.clipboardData.getData('text').slice(0, 6)
-    const newOtp = pastedData.split('').concat(Array(6).fill('')).slice(0, 6)
-    setOtp(newOtp)
-    
-    const nextEmptyIndex = newOtp.findIndex(val => !val)
-    if (nextEmptyIndex !== -1) {
-      otpRefs[nextEmptyIndex].current?.focus()
-    } else {
-      otpRefs[5].current?.focus()
+    const pastedData = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 8)
+    if (pastedData.length > 0) {
+      const newOtp = pastedData.split('').concat(Array(8).fill('')).slice(0, 8)
+      setOtp(newOtp)
+      const focusIdx = Math.min(pastedData.length, 7)
+      otpRefs[focusIdx].current?.focus()
     }
   }
 
@@ -90,7 +97,7 @@ const Login = () => {
     e.preventDefault()
     const otpString = otp.join('')
     
-    if (otpString.length !== 6) {
+    if (otpString.length !== 8) {
       setError('Please enter complete OTP')
       return
     }
@@ -105,7 +112,7 @@ const Login = () => {
         navigate('/dashboard')
       } else {
         setError(result.error || 'OTP verification failed')
-        setOtp(['', '', '', '', '', ''])
+        setOtp(['', '', '', '', '', '', '', ''])
         otpRefs[0].current?.focus()
       }
     } catch (err) {
@@ -348,8 +355,8 @@ const Login = () => {
                         value={digit}
                         onChange={(e) => handleOtpChange(index, e.target.value)}
                         onKeyDown={(e) => handleOtpKeyDown(index, e)}
-                        onPaste={index === 0 ? handleOtpPaste : undefined}
-                        className="w-12 h-14 text-center text-2xl font-bold border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                        onPaste={handleOtpPaste}
+                        className="w-10 h-12 text-center text-xl font-bold border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
                       />
                     ))}
                   </div>
@@ -378,7 +385,7 @@ const Login = () => {
 
                 <div className="mt-4 text-center">
                   <button
-                    onClick={() => { setStep('credentials'); setOtp(['', '', '', '', '', '']) }}
+                    onClick={() => { setStep('credentials'); setOtp(['', '', '', '', '', '', '', '']) }}
                     className="text-sm text-gray-600 hover:text-gray-700"
                   >
                     ← Back to login

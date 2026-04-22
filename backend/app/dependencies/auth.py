@@ -49,6 +49,16 @@ async def get_current_user(
             detail="User not found",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Reject tokens issued before a password change
+    token_version = payload.get("tv", 0)
+    if token_version != (user.token_version or 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired due to password change",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -83,7 +93,7 @@ def require_role(required_role: UserRole):
         if user_level < required_level:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Insufficient permissions. {required_role} role required."
+                detail="Insufficient permissions"
             )
         
         return current_user
@@ -96,7 +106,7 @@ def require_permission(permission: str):
         if not current_user.has_permission(permission):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied. Required: {permission}"
+                detail="Permission denied"
             )
         
         return current_user

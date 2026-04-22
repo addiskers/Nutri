@@ -17,7 +17,7 @@ class SavedFormulation(Document):
     nutrient_selections: Dict[str, str] = Field(default_factory=dict)
     custom_values: Dict[str, float] = Field(default_factory=dict)
     serve_size: float = 30.0
-    created_by: Optional[str] = None
+    created_by: Optional[str] = None  # Stores user ID (str(user.id)); legacy records may contain email
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     status: str = "active"

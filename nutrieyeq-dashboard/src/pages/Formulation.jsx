@@ -1318,7 +1318,7 @@ const Formulation = () => {
     { name: 'DHA', unit: 'mg', indent: 2, aliases: ['Docosahexaenoic Acid'] },
     { name: 'EPA', unit: 'mg', indent: 2, aliases: ['Eicosapentaenoic Acid'] },
     { name: 'Trans Fat', unit: 'g', indent: 1, aliases: ['Trans Fa'] },
-    { name: 'Cholesterol', unit: 'mg', indent: 1 },
+    { name: 'Cholesterol', unit: 'mg', indent: 0 },
     { name: 'Vitamin A (palmitate)', unit: 'mcg (RE)', indent: 0, aliases: ['Vitamin A'], section: 'Vitamins' },
     { name: 'Vitamin D2', unit: 'mcg', indent: 0 },
     { name: 'Vitamin E', unit: 'mg (TE)', indent: 0 },

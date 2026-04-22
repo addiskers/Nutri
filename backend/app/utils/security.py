@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict
+from hashlib import sha256
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from config.settings import settings
@@ -8,6 +9,9 @@ import uuid
 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Key ID derived from first 8 chars of key hash (identifies which key signed a token)
+_CURRENT_KID = sha256(settings.SECRET_KEY.encode()).hexdigest()[:8]
 
 
 def hash_password(password: str) -> str:
@@ -33,7 +37,10 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         "jti": uuid.uuid4().hex,
     })
     
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    encoded_jwt = jwt.encode(
+        to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM,
+        headers={"kid": _CURRENT_KID},
+    )
     return encoded_jwt
 
 
@@ -48,16 +55,26 @@ def create_refresh_token(data: dict) -> str:
         "jti": uuid.uuid4().hex,
     })
 
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    encoded_jwt = jwt.encode(
+        to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM,
+        headers={"kid": _CURRENT_KID},
+    )
     return encoded_jwt
 
 
 def decode_token(token: str) -> Optional[Dict]:
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        return payload
-    except JWTError:
-        return None
+    """Decode JWT, trying current key first then previous key (for rotation)."""
+    keys_to_try = [settings.SECRET_KEY]
+    if settings.PREVIOUS_SECRET_KEY:
+        keys_to_try.append(settings.PREVIOUS_SECRET_KEY)
+
+    for key in keys_to_try:
+        try:
+            payload = jwt.decode(token, key, algorithms=[settings.ALGORITHM])
+            return payload
+        except JWTError:
+            continue
+    return None
 
 
 async def deny_token(jti: str, expires_at: datetime) -> None:
@@ -74,8 +91,8 @@ def generate_password_reset_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def generate_otp() -> str:
-    return ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+def generate_otp(length: int = 8) -> str:
+    return ''.join([str(secrets.randbelow(10)) for _ in range(length)])
 
 
 def hash_otp(otp: str) -> str:
@@ -87,8 +104,8 @@ def verify_otp(plain_otp: str, hashed_otp: str) -> bool:
 
 
 def validate_password_strength(password: str) -> tuple[bool, str]:
-    if len(password) < 8:
-        return False, "Password must be at least 8 characters long"
+    if len(password) < 12:
+        return False, "Password must be at least 12 characters long"
     
     if not any(c.isupper() for c in password):
         return False, "Password must contain at least one uppercase letter"

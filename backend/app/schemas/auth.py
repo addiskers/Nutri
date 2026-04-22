@@ -6,7 +6,7 @@ from datetime import datetime
 class UserRegister(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
     email: EmailStr
-    password: str = Field(..., min_length=8)
+    password: str = Field(..., min_length=12)
     department: Optional[str] = None
     
     class Config:
@@ -35,13 +35,13 @@ class UserLogin(BaseModel):
 
 class VerifyLoginOTP(BaseModel):
     email: EmailStr
-    otp: str = Field(..., min_length=6, max_length=6)
-    
+    otp: str = Field(..., min_length=8, max_length=8)
+
     class Config:
         json_schema_extra = {
             "example": {
                 "email": "user@example.com",
-                "otp": "123456"
+                "otp": "12345678"
             }
         }
 
@@ -59,22 +59,22 @@ class ForgotPassword(BaseModel):
 
 class ResetPassword(BaseModel):
     email: EmailStr
-    otp: str = Field(..., min_length=6, max_length=6)
-    new_password: str = Field(..., min_length=8)
-    
+    otp: str = Field(..., min_length=8, max_length=8)
+    new_password: str = Field(..., min_length=12)
+
     class Config:
         json_schema_extra = {
             "example": {
                 "email": "user@example.com",
-                "otp": "123456",
-                "new_password": "NewSecurePass123"
+                "otp": "12345678",
+                "new_password": "NewSecurePass!123"
             }
         }
 
 
 class ChangePassword(BaseModel):
     current_password: str = Field(..., max_length=128)
-    new_password: str = Field(..., min_length=8, max_length=128)
+    new_password: str = Field(..., min_length=12, max_length=128)
     
     class Config:
         json_schema_extra = {

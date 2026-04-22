@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /c/Users/adity/Downloads/Nutri/backend/*.py)",
+      "Bash(grep -r \"os.system\\\\|subprocess\\\\|exec\\\\|eval\" c:UsersadityDownloadsNutribackend --include=*.py)",
+      "Bash(grep -r \"PATH_TRAVERSAL\\\\|\\\\.\\\\.\\\\/\\\\|\\\\.\\\\.\\\\\" /c/Users/adity/Downloads/Nutri/backend/app --include=\"*.py \")"
+    ]
+  }
+}
