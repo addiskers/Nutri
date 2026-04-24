@@ -1,16 +1,18 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+const API_BASE_URL = import.meta.env.VITE_API_URL
+if (!API_BASE_URL) throw new Error('VITE_API_URL environment variable is not set')
 
 const getToken = () => sessionStorage.getItem('access_token')
 
+// The refresh token now lives in an httpOnly + Secure + SameSite=Strict cookie
+// set by the backend on /verify-otp and /refresh. It is never stored in or read
+// from JavaScript-accessible storage, eliminating the XSS-theft vector.
 export function clearAuthData() {
   sessionStorage.removeItem('access_token')
-  sessionStorage.removeItem('refresh_token')
   sessionStorage.removeItem('user')
 }
 
 function storeAuthData(data) {
   sessionStorage.setItem('access_token', data.access_token)
-  sessionStorage.setItem('refresh_token', data.refresh_token)
   if (data.user) sessionStorage.setItem('user', JSON.stringify(data.user))
 }
 
@@ -123,14 +125,14 @@ async function refreshAccessToken() {
   if (_refreshPromise) return _refreshPromise
 
   _refreshPromise = (async () => {
-    const refreshToken = sessionStorage.getItem('refresh_token')
-    if (!refreshToken) return false
-
     try {
       const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: refreshToken })
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
       })
 
       if (response.ok) {
@@ -504,11 +506,27 @@ export const authService = {
   },
   
   /**
-   * Logout
+   * Logout — revokes both tokens on backend, then clears local state
    */
-  logout() {
-    clearAuthData()
-    window.location.href = '/login'
+  async logout() {
+    try {
+      const token = getToken()
+      await fetch(`${API_BASE_URL}/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+          ...(token && { 'Authorization': `Bearer ${token}` }),
+        },
+        body: JSON.stringify({}),
+      })
+    } catch {
+      // Best-effort — always clear local state and redirect
+    } finally {
+      clearAuthData()
+      window.location.href = '/login'
+    }
   },
   
   getCurrentUser() {

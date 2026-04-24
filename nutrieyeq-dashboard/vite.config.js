@@ -7,6 +7,9 @@ export default defineConfig({
     host: '127.0.0.1',
     allowedHosts: ['localhost']
   },
+  build: {
+    sourcemap: false,
+  },
   esbuild: {
     drop: process.env.NODE_ENV === 'production' ? ['console', 'debugger'] : [],
   },

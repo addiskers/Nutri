@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Layout from '../components/Layout/Layout'
 import {
   Search, ChevronDown, ChevronRight, Plus, Edit2, Trash2,
@@ -372,11 +372,18 @@ const TreeNode = ({ node, depth, expanded, onToggle, onEdit, onDelete, onAddChil
   const isExpanded = expanded[node.id]
   const isMatch = searchQuery && node.nutrient_name.toLowerCase().includes(searchQuery.toLowerCase())
 
+  // Apply depth-based indentation via the Element.style API to avoid CSP
+  // `style-src 'unsafe-inline'`.
+  const rowRef = useRef(null)
+  useEffect(() => {
+    if (rowRef.current) rowRef.current.style.paddingLeft = `${12 + depth * 24}px`
+  }, [depth])
+
   return (
     <div>
       <div
+        ref={rowRef}
         className={`flex items-center gap-2 py-2.5 px-3 hover:bg-[#f9fafb] transition-colors border-b border-[#e1e7ef] ${isMatch ? 'bg-teal-50/50' : ''}`}
-        style={{ paddingLeft: `${12 + depth * 24}px` }}
       >
         <button
           onClick={() => onToggle(node.id)}

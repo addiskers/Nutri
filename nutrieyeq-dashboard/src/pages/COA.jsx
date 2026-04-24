@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout/Layout'
 import { Edit, Trash2, FileText, Loader2, RefreshCw, Save, X, AlertCircle, Check, Plus, Eye, Download, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, Image } from 'lucide-react'
@@ -26,10 +26,43 @@ const COA = () => {
   // File preview modal state
   const [isFilePreviewOpen, setIsFilePreviewOpen] = useState(false)
   const [previewImages, setPreviewImages] = useState([])
+  const [previewIsPdf, setPreviewIsPdf] = useState([])
   const [previewIndex, setPreviewIndex] = useState(0)
   const [previewZoom, setPreviewZoom] = useState(1)
+  // Imperative style application for the zoomable preview image — avoids CSP
+  // `style-src 'unsafe-inline'` while keeping the same zoom behaviour.
+  const previewImgRef = useRef(null)
+  useEffect(() => {
+    const el = previewImgRef.current
+    if (!el) return
+    el.style.transform = `scale(${previewZoom})`
+    el.style.transformOrigin = 'center center'
+    el.style.cursor = previewZoom > 1 ? 'grab' : 'default'
+  }, [previewZoom])
   const [isLoadingPreview, setIsLoadingPreview] = useState(false)
   const [previewIngredientName, setPreviewIngredientName] = useState('')
+  // Blob URLs created from PDF data URLs (Chrome blocks data:application/pdf in iframes).
+  // Tracked separately so we can revoke them to avoid memory leaks.
+  const blobUrlsRef = useRef([])
+
+  const revokePreviewBlobUrls = () => {
+    blobUrlsRef.current.forEach(url => URL.revokeObjectURL(url))
+    blobUrlsRef.current = []
+  }
+
+  const toPdfBlobUrl = (dataUrl) => {
+    const match = dataUrl.match(/^data:application\/pdf;base64,(.+)$/)
+    if (!match) return dataUrl
+    const binary = atob(match[1])
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    const blob = new Blob([bytes], { type: 'application/pdf' })
+    const url = URL.createObjectURL(blob)
+    blobUrlsRef.current.push(url)
+    return url
+  }
+
+  useEffect(() => () => revokePreviewBlobUrls(), [])
   
   // Edit form state
   const [ingredientName, setIngredientName] = useState('')
@@ -70,15 +103,21 @@ const COA = () => {
       setPreviewIngredientName(coa.ingredient_name || '')
       setPreviewIndex(0)
       setPreviewZoom(1)
+      revokePreviewBlobUrls()
       const fullCOA = await coaService.getCOA(coa.id)
       if (fullCOA && fullCOA.document_images && fullCOA.document_images.length > 0) {
-        setPreviewImages(fullCOA.document_images)
+        const flags = fullCOA.document_images.map(src => typeof src === 'string' && src.startsWith('data:application/pdf'))
+        const processed = fullCOA.document_images.map((src, i) => flags[i] ? toPdfBlobUrl(src) : src)
+        setPreviewImages(processed)
+        setPreviewIsPdf(flags)
       } else {
         setPreviewImages([])
+        setPreviewIsPdf([])
       }
     } catch (error) {
       console.error('Failed to load COA documents:', error)
       setPreviewImages([])
+      setPreviewIsPdf([])
     } finally {
       setIsLoadingPreview(false)
     }
@@ -86,13 +125,17 @@ const COA = () => {
 
   const handlePreviewDownload = () => {
     if (previewImages.length === 0) return
-    const dataUrl = previewImages[previewIndex]
+    const url = previewImages[previewIndex]
     const a = document.createElement('a')
-    a.href = dataUrl
-    // Detect extension from data URL
-    const match = dataUrl.match(/^data:([^;]+)/)
-    const mime = match ? match[1] : 'image/png'
-    const ext = mime.includes('pdf') ? 'pdf' : mime.includes('png') ? 'png' : 'jpg'
+    a.href = url
+    let ext = 'jpg'
+    if (previewIsPdf[previewIndex]) {
+      ext = 'pdf'
+    } else {
+      const match = typeof url === 'string' ? url.match(/^data:([^;]+)/) : null
+      const mime = match ? match[1] : 'image/png'
+      ext = mime.includes('png') ? 'png' : 'jpg'
+    }
     a.download = `COA_${previewIngredientName.replace(/\s+/g, '_')}_page${previewIndex + 1}.${ext}`
     a.click()
   }
@@ -545,7 +588,7 @@ const COA = () => {
               </div>
               <div className="flex items-center gap-2">
                 {/* Zoom Controls — only for images, PDFs have built-in zoom */}
-                {previewImages.length > 0 && !previewImages[previewIndex]?.startsWith('data:application/pdf') && (
+                {previewImages.length > 0 && !previewIsPdf[previewIndex] && (
                   <div className="flex items-center gap-1 bg-[#f1f5f9] rounded-md px-2 py-1">
                     <button
                       onClick={() => setPreviewZoom(z => Math.max(0.25, z - 0.25))}
@@ -584,7 +627,7 @@ const COA = () => {
                 </button>
                 {/* Close */}
                 <button
-                  onClick={() => { setIsFilePreviewOpen(false); setPreviewImages([]); setPreviewZoom(1) }}
+                  onClick={() => { setIsFilePreviewOpen(false); setPreviewImages([]); setPreviewIsPdf([]); setPreviewZoom(1); revokePreviewBlobUrls() }}
                   className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 transition-colors"
                 >
                   <X className="w-5 h-5 text-[#65758b]" />
@@ -604,26 +647,31 @@ const COA = () => {
                   <FileText className="w-12 h-12 text-[#e1e7ef] mx-auto mb-3" />
                   <p className="text-sm font-ibm-plex text-[#65758b]">No document images available for this COA.</p>
                 </div>
-              ) : previewImages[previewIndex]?.startsWith('data:application/pdf') ? (
-                <iframe
-                  src={previewImages[previewIndex]}
-                  title={`COA Document Page ${previewIndex + 1}`}
-                  className="w-full h-full border-0"
-                  style={{ minHeight: '600px' }}
-                  sandbox="allow-same-origin"
-                  referrerPolicy="no-referrer"
-                />
+              ) : previewIsPdf[previewIndex] ? (
+                <object
+                  data={previewImages[previewIndex]}
+                  type="application/pdf"
+                  className="w-full h-full min-h-[600px]"
+                  aria-label={`COA Document Page ${previewIndex + 1}`}
+                >
+                  <div className="py-16 text-center">
+                    <FileText className="w-12 h-12 text-[#e1e7ef] mx-auto mb-3" />
+                    <p className="text-sm font-ibm-plex text-[#65758b] mb-3">Your browser can't preview this PDF inline.</p>
+                    <button
+                      onClick={handlePreviewDownload}
+                      className="px-4 py-2 bg-[#009da5] text-white rounded text-sm font-ibm-plex font-medium hover:bg-[#008891] transition-colors"
+                    >
+                      Download PDF
+                    </button>
+                  </div>
+                </object>
               ) : (
-                <div className="p-4 flex items-center justify-center" style={{ minHeight: '400px' }}>
+                <div className="p-4 flex items-center justify-center min-h-[400px]">
                   <img
+                    ref={previewImgRef}
                     src={previewImages[previewIndex]}
                     alt={`COA Document Page ${previewIndex + 1}`}
                     className="max-w-none shadow-lg rounded border border-[#e1e7ef] transition-transform duration-200"
-                    style={{
-                      transform: `scale(${previewZoom})`,
-                      transformOrigin: 'center center',
-                      cursor: previewZoom > 1 ? 'grab' : 'default',
-                    }}
                     draggable={false}
                   />
                 </div>

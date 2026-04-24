@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout/Layout'
 import ProductPreviewModal from '../components/Modals/ProductPreviewModal'
@@ -7,6 +7,16 @@ import DeleteConfirmModal from '../components/Modals/DeleteConfirmModal'
 import { Package, FolderKanban, Clock, Eye, Edit2, Trash2, Loader, ImageIcon } from 'lucide-react'
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 import { productService, categoryService, userService } from '../services/api'
+
+// Apply background-color via Element.style API (CSP-safe — script-set styles
+// are not blocked by `style-src` directives that omit 'unsafe-inline').
+const ColorSwatch = ({ color }) => {
+  const ref = useRef(null)
+  useEffect(() => {
+    if (ref.current) ref.current.style.backgroundColor = color
+  }, [color])
+  return <div ref={ref} className="w-3.5 h-3.5 rounded-sm" />
+}
 
 const formatMrp = (mrp) => {
   if (!mrp || mrp === '0' || mrp === '0.0' || mrp === 0 || mrp === 0.0) return '—'
@@ -219,10 +229,7 @@ const Dashboard = () => {
       <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 mt-4">
         {payload.map((entry, index) => (
           <div key={`legend-${index}`} className="flex items-center gap-2">
-            <div
-              className="w-3.5 h-3.5 rounded-sm"
-              style={{ backgroundColor: entry.color }}
-            />
+            <ColorSwatch color={entry.color} />
             <span className="text-sm font-ibm-plex text-[#0f1729]">
               {entry.value}
             </span>

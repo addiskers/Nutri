@@ -21,6 +21,36 @@ def _is_owner(formulation: SavedFormulation, user: User) -> bool:
     owner = formulation.created_by
     return owner == str(user.id) or owner == user.email
 
+
+async def _resolve_owner_names(owners: set[str]) -> Dict[str, str]:
+    """Map each owner token (ObjectId string or legacy email) to the user's display name."""
+    if not owners:
+        return {}
+
+    from bson import ObjectId
+    name_map: Dict[str, str] = {}
+    ids: List[ObjectId] = []
+    emails: List[str] = []
+    for token in owners:
+        if not token:
+            continue
+        try:
+            ids.append(ObjectId(token))
+        except Exception:
+            emails.append(token)
+
+    if ids:
+        users = await User.find({"_id": {"$in": ids}}).to_list()
+        for u in users:
+            name_map[str(u.id)] = u.name
+    if emails:
+        users = await User.find({"email": {"$in": emails}}).to_list()
+        for u in users:
+            name_map[u.email] = u.name
+
+    return name_map
+
+
 MAX_PAGE_SIZE = 200
 MAX_TARGET_USERS = 50
 
@@ -107,7 +137,11 @@ async def list_formulations(
         
         formulations = await SavedFormulation.find(*query_filters).sort("-created_at").skip(skip).limit(limit).to_list()
         total = await SavedFormulation.find(*query_filters).count()
-        
+
+        # Resolve created_by (stored as user ID in new records, email in legacy records) to display names.
+        raw_owners = {f.created_by for f in formulations if f.created_by}
+        name_map = await _resolve_owner_names(raw_owners)
+
         result = []
         for f in formulations:
             result.append({
@@ -116,10 +150,11 @@ async def list_formulations(
                 "ingredients_count": len(f.ingredients),
                 "serve_size": f.serve_size,
                 "created_by": f.created_by or "admin",
+                "created_by_name": name_map.get(f.created_by, "Admin") if f.created_by else "Admin",
                 "created_at": f.created_at.isoformat() if f.created_at else None,
                 "updated_at": f.updated_at.isoformat() if f.updated_at else None,
             })
-        
+
         return {
             "formulations": result,
             "total": total
@@ -146,6 +181,7 @@ async def get_formulation(
         if not is_super_admin and not _is_owner(formulation, current_user):
             raise HTTPException(status_code=403, detail="Access denied")
 
+        name_map = await _resolve_owner_names({formulation.created_by} if formulation.created_by else set())
         return {
             "id": str(formulation.id),
             "name": formulation.name,
@@ -154,6 +190,7 @@ async def get_formulation(
             "custom_values": formulation.custom_values or {},
             "serve_size": formulation.serve_size,
             "created_by": formulation.created_by or "admin",
+            "created_by_name": name_map.get(formulation.created_by, "Admin") if formulation.created_by else "Admin",
             "created_at": formulation.created_at.isoformat() if formulation.created_at else None,
             "updated_at": formulation.updated_at.isoformat() if formulation.updated_at else None,
         }

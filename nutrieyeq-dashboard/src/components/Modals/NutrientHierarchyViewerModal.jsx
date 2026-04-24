@@ -226,11 +226,27 @@ const DraggableRow = ({
     isDragging,
   } = useSortable({ id: node._uid })
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.4 : 1,
-  }
+  // Apply dnd-kit's drag transform via the Element.style API to avoid CSP
+  // `style-src 'unsafe-inline'`. Combined ref keeps useSortable wired up.
+  const rowRef = useRef(null)
+  const setRefs = useCallback((node) => {
+    rowRef.current = node
+    setNodeRef(node)
+  }, [setNodeRef])
+  const transformStr = CSS.Transform.toString(transform)
+  useEffect(() => {
+    const el = rowRef.current
+    if (!el) return
+    el.style.transform = transformStr || ''
+    el.style.transition = transition || ''
+    el.style.opacity = isDragging ? '0.4' : '1'
+  }, [transformStr, transition, isDragging])
+
+  // Apply depth-based indentation on the drag handle via the Element.style API.
+  const handleRef = useRef(null)
+  useEffect(() => {
+    if (handleRef.current) handleRef.current.style.marginLeft = `${depth * 20}px`
+  }, [depth])
 
   const hasChildren = node.children?.length > 0
   const value = sumInfo?.value
@@ -251,8 +267,7 @@ const DraggableRow = ({
 
   return (
     <div
-      ref={setNodeRef}
-      style={style}
+      ref={setRefs}
       title={
         depth === 0
           ? 'Level 1 — top of hierarchy'
@@ -264,10 +279,10 @@ const DraggableRow = ({
     >
       {/* Drag handle */}
       <button
+        ref={handleRef}
         {...attributes}
         {...listeners}
         className="flex-shrink-0 w-5 h-5 flex items-center justify-center cursor-grab active:cursor-grabbing text-[#c0c7d1] hover:text-[#65758b] transition-colors"
-        style={{ marginLeft: `${depth * 20}px` }}
       >
         <GripVertical className="w-4 h-4" />
       </button>

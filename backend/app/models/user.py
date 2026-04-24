@@ -76,6 +76,8 @@ class User(Document):
     otp_attempts: int = Field(default=0)
     otp_locked_until: Optional[datetime] = None
     otp_lockout_count: int = Field(default=0)
+    failed_login_attempts: int = Field(default=0)
+    login_locked_until: Optional[datetime] = None
     token_version: int = Field(default=0)
     department: Optional[str] = None
     job_title: Optional[str] = None

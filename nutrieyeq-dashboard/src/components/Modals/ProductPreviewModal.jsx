@@ -9,6 +9,19 @@ const ProductPreviewModal = ({ product, isOpen, onClose }) => {
   const isDragging = useRef(false)
   const dragStart = useRef({ x: 0, y: 0 })
 
+  // Imperative style application to avoid CSP `style-src 'unsafe-inline'`.
+  const viewerRef = useRef(null)
+  const imgRef = useRef(null)
+  useEffect(() => {
+    if (viewerRef.current) {
+      viewerRef.current.style.cursor = zoom > 1 ? (isDragging.current ? 'grabbing' : 'grab') : 'zoom-in'
+    }
+    if (imgRef.current) {
+      imgRef.current.style.transform = `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`
+      imgRef.current.style.transition = isDragging.current ? 'none' : 'transform 0.15s ease'
+    }
+  }, [zoom, pan.x, pan.y])
+
   useEffect(() => {
     if (isOpen) {
       setCurrentImageIndex(0)
@@ -184,13 +197,13 @@ const ProductPreviewModal = ({ product, isOpen, onClose }) => {
               </button>
 
               <div
+                ref={viewerRef}
                 className="w-80 h-80 flex items-center justify-center bg-gray-50 rounded-lg overflow-hidden"
                 onWheel={handleWheel}
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseUp}
-                style={{ cursor: zoom > 1 ? (isDragging.current ? 'grabbing' : 'grab') : 'zoom-in' }}
               >
                 {imgError ? (
                   <div className="flex flex-col items-center gap-2">
@@ -199,14 +212,11 @@ const ProductPreviewModal = ({ product, isOpen, onClose }) => {
                   </div>
                 ) : (
                   <img
+                    ref={imgRef}
                     key={productImages[currentImageIndex]}
                     src={productImages[currentImageIndex]}
                     alt={`Product image ${currentImageIndex + 1}`}
                     className="max-w-full max-h-full object-contain select-none"
-                    style={{
-                      transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`,
-                      transition: isDragging.current ? 'none' : 'transform 0.15s ease',
-                    }}
                     draggable={false}
                     onClick={() => { if (zoom === 1) setZoom(2); else resetZoom() }}
                     onError={() => setImgError(true)}

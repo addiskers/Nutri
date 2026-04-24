@@ -1,7 +1,7 @@
 """
 User Management Routes - CRUD operations for user management
 """
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Request
 from typing import List, Optional
 from datetime import datetime, timezone
 from pydantic import BaseModel, EmailStr, Field
@@ -10,6 +10,7 @@ from app.schemas.auth import UserResponse, MessageResponse
 from app.dependencies.auth import get_current_user, require_permission as _require_permission_dep
 from app.utils.security import hash_password, validate_password_strength
 from app.utils.audit import log_event
+from app.middleware.security import limiter
 import logging
 import re
 
@@ -60,7 +61,9 @@ def _require_admin(user: User):
 
 
 @router.get("", response_model=UserListResponse)
+@limiter.limit("30/minute")
 async def list_users(
+    request: Request,
     page: int = 1,
     page_size: int = 50,
     role: Optional[str] = None,
@@ -122,7 +125,9 @@ async def list_users(
 
 
 @router.get("/pending", response_model=List[UserResponse])
+@limiter.limit("30/minute")
 async def get_pending_users(
+    request: Request,
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -138,7 +143,9 @@ async def get_pending_users(
 
 
 @router.get("/stats/summary")
+@limiter.limit("30/minute")
 async def get_user_stats(
+    request: Request,
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -201,7 +208,9 @@ async def get_user(
 
 
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/minute")
 async def create_user(
+    request: Request,
     user_data: UserCreateRequest,
     current_user: User = Depends(get_current_user)
 ):
@@ -270,7 +279,9 @@ async def create_user(
 
 
 @router.put("/{user_id}", response_model=UserResponse)
+@limiter.limit("10/minute")
 async def update_user(
+    request: Request,
     user_id: str,
     user_data: UserUpdateRequest,
     current_user: User = Depends(get_current_user)
@@ -426,7 +437,9 @@ async def toggle_user_status(
 
 
 @router.delete("/{user_id}", response_model=MessageResponse)
+@limiter.limit("10/minute")
 async def delete_user(
+    request: Request,
     user_id: str,
     current_user: User = Depends(get_current_user)
 ):

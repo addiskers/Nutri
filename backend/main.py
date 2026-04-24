@@ -57,7 +57,13 @@ async def enforce_body_size(request: Request, call_next):
     """Reject oversized request bodies to prevent memory exhaustion."""
     content_length = request.headers.get("content-length")
     if content_length:
-        content_length = int(content_length)
+        try:
+            content_length = int(content_length)
+        except ValueError:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"detail": "Invalid Content-Length header"}
+            )
         content_type = (request.headers.get("content-type") or "").lower()
         limit = MAX_BODY_SIZE if "multipart" in content_type else MAX_JSON_BODY_SIZE
         if content_length > limit:
@@ -90,17 +96,13 @@ async def enforce_content_type(request: Request, call_next):
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
-    
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    is_localhost = "localhost" in settings.FRONTEND_URL or "127.0.0.1" in settings.FRONTEND_URL
-    if not is_localhost:
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+
+    # Cache-Control is the only header we set at the app layer.
+    # All other security headers (HSTS, X-Frame-Options, X-Content-Type-Options,
+    # Referrer-Policy, Permissions-Policy, CSP) are set by Nginx at the edge —
+    # single source of truth to avoid duplicate/conflicting values in audits.
     response.headers["Cache-Control"] = "no-store"
-    
+
     return response
 
 

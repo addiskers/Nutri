@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     BEHIND_PROXY: bool = False
     TRUSTED_PROXY_IPS: str = "127.0.0.1,::1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
     PREVIOUS_SECRET_KEY: Optional[str] = None  # For key rotation: set old key here temporarily
+    JWT_ISSUER: str = "nutrieyeq"
+    JWT_AUDIENCE: str = "nutrieyeq-api"
     
     @field_validator('SECRET_KEY', mode='before')
     @classmethod

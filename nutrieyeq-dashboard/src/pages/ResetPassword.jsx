@@ -178,7 +178,7 @@ const ResetPassword = () => {
               {/* OTP Input */}
               <div className="relative">
                 <input
-                  type="password"
+                  type="text"
                   inputMode="numeric"
                   autoComplete="one-time-code"
                   name="otp"

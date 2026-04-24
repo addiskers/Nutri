@@ -1,7 +1,7 @@
 # FastAPI and Server
-fastapi==0.135.3
+fastapi>=0.115.0,<1.0.0
 uvicorn[standard]==0.32.0
-python-multipart==0.0.22
+python-multipart==0.0.26
 
 # Database
 motor==3.6.0
@@ -9,11 +9,11 @@ pymongo>=4.9,<4.10
 beanie==1.27.0
 
 # Authentication & Security
-python-jose[cryptography]==3.4.0
+PyJWT[crypto]>=2.8.1,<3.0.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 pydantic[email]==2.10.2
-python-dotenv==1.0.1
+python-dotenv==1.2.2
 
 # Security & Rate Limiting
 slowapi==0.1.9
@@ -26,7 +26,7 @@ jinja2==3.1.6
 rapidfuzz==3.14.3
 # AI/ML - Image Extraction
 google-genai>=1.0.0,<2.0.0
-Pillow>=10.0.0,<11.0.0
+Pillow>=10.4.0
 PyMuPDF>=1.23.0,<2.0.0
 
 python-dateutil==2.9.0

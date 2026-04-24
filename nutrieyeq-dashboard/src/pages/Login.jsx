@@ -348,10 +348,9 @@ const Login = () => {
                       <input
                         key={index}
                         ref={otpRefs[index]}
-                        type="password"
+                        type="text"
                         inputMode="numeric"
                         autoComplete="one-time-code"
-                        maxLength={1}
                         value={digit}
                         onChange={(e) => handleOtpChange(index, e.target.value)}
                         onKeyDown={(e) => handleOtpKeyDown(index, e)}

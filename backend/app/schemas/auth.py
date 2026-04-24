@@ -152,6 +152,17 @@ class RefreshTokenRequest(BaseModel):
         }
 
 
+class LogoutRequest(BaseModel):
+    refresh_token: Optional[str] = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+            }
+        }
+
+
 class MessageResponse(BaseModel):
     message: str
     success: bool = True

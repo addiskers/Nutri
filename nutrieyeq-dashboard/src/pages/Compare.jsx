@@ -1250,7 +1250,7 @@ const Compare = () => {
                 <ChevronDown className={`w-3.5 h-3.5 text-[#65758b] transition-transform flex-shrink-0 ${showBrandFilter ? 'rotate-180' : ''}`} />
               </button>
               {showBrandFilter && (
-                <div className="absolute top-10 left-0 w-full bg-white border border-[#e1e7ef] rounded-md shadow-lg z-50 max-h-48 overflow-y-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                <div className="absolute top-10 left-0 w-full bg-white border border-[#e1e7ef] rounded-md shadow-lg z-50 max-h-48 overflow-y-auto scrollbar-hide">
                   {uniqueBrands.map((brand) => (
                     <button
                       key={brand}
@@ -1287,7 +1287,7 @@ const Compare = () => {
                 <ChevronDown className={`w-3.5 h-3.5 text-[#65758b] transition-transform flex-shrink-0 ${showCategoryFilter ? 'rotate-180' : ''}`} />
               </button>
               {showCategoryFilter && (
-                <div className="absolute top-10 left-0 w-full bg-white border border-[#e1e7ef] rounded-md shadow-lg z-50 max-h-48 overflow-y-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                <div className="absolute top-10 left-0 w-full bg-white border border-[#e1e7ef] rounded-md shadow-lg z-50 max-h-48 overflow-y-auto scrollbar-hide">
                   {uniqueCategories.map((cat) => (
                     <button
                       key={cat}

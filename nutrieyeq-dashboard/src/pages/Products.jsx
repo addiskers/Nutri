@@ -245,7 +245,7 @@ const Products = () => {
                 <ChevronDown className={`w-4 h-4 text-[#65758b] transition-transform ${showBrandDropdown ? 'rotate-180' : ''}`} />
               </button>
               {showBrandDropdown && (
-                <div className="absolute top-12 left-0 min-w-[160px] bg-white border border-[#e1e7ef] rounded-md shadow-lg z-50 max-h-60 overflow-y-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                <div className="absolute top-12 left-0 min-w-[160px] bg-white border border-[#e1e7ef] rounded-md shadow-lg z-50 max-h-60 overflow-y-auto scrollbar-hide">
                   {uniqueBrands.map((brand) => (
                     <button key={brand} onClick={() => handleBrandSelect(brand)}
                       className={`w-full px-4 py-2.5 text-left text-sm font-ibm-plex hover:bg-gray-50 transition-colors ${selectedBrand === brand ? 'bg-primary/10 text-primary font-medium' : 'text-[#0f1729]'}`}>
@@ -267,7 +267,7 @@ const Products = () => {
                 <ChevronDown className={`w-4 h-4 text-[#65758b] transition-transform ${showCategoryDropdown ? 'rotate-180' : ''}`} />
               </button>
               {showCategoryDropdown && (
-                <div className="absolute top-12 left-0 min-w-[180px] bg-white border border-[#e1e7ef] rounded-md shadow-lg z-50 max-h-60 overflow-y-auto scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                <div className="absolute top-12 left-0 min-w-[180px] bg-white border border-[#e1e7ef] rounded-md shadow-lg z-50 max-h-60 overflow-y-auto scrollbar-hide">
                   {categories.map((category) => (
                     <button key={category} onClick={() => handleCategorySelect(category)}
                       className={`w-full px-4 py-2.5 text-left text-sm font-ibm-plex hover:bg-gray-50 transition-colors ${selectedCategory === category ? 'bg-primary/10 text-primary font-medium' : 'text-[#0f1729]'}`}>

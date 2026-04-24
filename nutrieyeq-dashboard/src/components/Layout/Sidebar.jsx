@@ -48,7 +48,7 @@ const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
         />
       </div>
 
-      <nav className="flex-1 overflow-y-auto py-4 px-3 scrollbar-hide" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+      <nav className="flex-1 overflow-y-auto py-4 px-3 scrollbar-hide">
         <div className="mb-6">
           {!isCollapsed && (
             <div className="px-3 mb-2">

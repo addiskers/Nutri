@@ -8,6 +8,33 @@ import { coaService, formulationService, apiRequest, nutrientHierarchyService } 
 import authService from '../services/api'
 import TransferFormulationModal from '../components/Modals/TransferFormulationModal'
 import IngredientMappingModal from '../components/Modals/IngredientMappingModal'
+
+// Apply hierarchy-driven border / padding via the Element.style API to avoid
+// CSP `style-src 'unsafe-inline'`.
+const NutrientHeaderCell = ({ barColor, depth, isInHierarchy, level, nutrient, nameClasses }) => {
+  const wrapperRef = useRef(null)
+  useEffect(() => {
+    const el = wrapperRef.current
+    if (!el) return
+    el.style.borderLeft = barColor ? `3px solid ${barColor}` : ''
+    el.style.paddingLeft = isInHierarchy ? `${6 + Math.min(depth, 6) * 8}px` : ''
+  }, [barColor, depth, isInHierarchy])
+  return (
+    <div
+      ref={wrapperRef}
+      className="inline-flex flex-col items-end gap-0.5 max-w-full"
+    >
+      {isInHierarchy && depth > 0 && (
+        <span className="text-[9px] font-ibm-plex font-bold tabular-nums leading-none text-[#009da5] tracking-wide">
+          L{level}
+        </span>
+      )}
+      <span className={`block whitespace-nowrap text-right ${nameClasses}`}>
+        {nutrient}
+      </span>
+    </div>
+  )
+}
 import NutrientHierarchyViewerModal from '../components/Modals/NutrientHierarchyViewerModal'
 import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
@@ -545,21 +572,22 @@ const Formulation = () => {
         serveSize,
         savedAt: new Date().toISOString(),
       }
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
+      sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
     } catch (e) {
       console.warn('[AUTO-SAVE] Failed to save draft:', e)
     }
   }, [ingredients, nutrientSelections, customValues, serveSize])
 
   const clearDraft = useCallback(() => {
-    localStorage.removeItem(DRAFT_KEY)
+    sessionStorage.removeItem(DRAFT_KEY)
   }, [])
 
   const restoreDraft = useCallback(() => {
     try {
-      const raw = localStorage.getItem(DRAFT_KEY)
+      const raw = sessionStorage.getItem(DRAFT_KEY)
       if (!raw) return
       const draft = JSON.parse(raw)
+      if (!draft || typeof draft !== 'object' || !Array.isArray(draft.ingredients)) return
       isRestoringDraft.current = true
       setHierarchyTableLayout(null)
       setHierarchyViewerUiByIngredientId({})
@@ -586,16 +614,15 @@ const Formulation = () => {
     if (draftChecked.current) return
     draftChecked.current = true
     try {
-      const raw = localStorage.getItem(DRAFT_KEY)
+      const raw = sessionStorage.getItem(DRAFT_KEY)
       if (raw) {
         const draft = JSON.parse(raw)
-        if (draft.ingredients && draft.ingredients.length > 0) {
-          // Auto-restore immediately (covers session timeout / disconnect)
+        if (draft && typeof draft === 'object' && Array.isArray(draft.ingredients) && draft.ingredients.length > 0) {
           restoreDraft()
         }
       }
     } catch (e) {
-      localStorage.removeItem(DRAFT_KEY)
+      sessionStorage.removeItem(DRAFT_KEY)
     }
   }, [])
 
@@ -1145,7 +1172,7 @@ const Formulation = () => {
     return savedFormulations.filter(formulation => {
       const matchesSearch = formulationSearch === '' ||
         formulation.name.toLowerCase().includes(formulationSearch.toLowerCase()) ||
-        (formulation.created_by && formulation.created_by.toLowerCase().includes(formulationSearch.toLowerCase()))
+        (formulation.created_by_name && formulation.created_by_name.toLowerCase().includes(formulationSearch.toLowerCase()))
       
       return matchesSearch
     })
@@ -1841,22 +1868,14 @@ const Formulation = () => {
                           title={levelTitle}
                           className="px-3 py-3 text-right min-w-[100px] w-[100px] align-bottom"
                         >
-                          <div
-                            className="inline-flex flex-col items-end gap-0.5 max-w-full"
-                            style={{
-                              borderLeft: barColor ? `3px solid ${barColor}` : undefined,
-                              paddingLeft: isInHierarchy ? `${6 + Math.min(depth, 6) * 8}px` : undefined,
-                            }}
-                          >
-                            {isInHierarchy && depth > 0 && (
-                              <span className="text-[9px] font-ibm-plex font-bold tabular-nums leading-none text-[#009da5] tracking-wide">
-                                L{level}
-                              </span>
-                            )}
-                            <span className={`block whitespace-nowrap text-right ${nameClasses}`}>
-                              {nutrient}
-                            </span>
-                          </div>
+                          <NutrientHeaderCell
+                            barColor={barColor}
+                            depth={depth}
+                            isInHierarchy={isInHierarchy}
+                            level={level}
+                            nutrient={nutrient}
+                            nameClasses={nameClasses}
+                          />
                         </th>
                       )
                     })}
@@ -2731,7 +2750,7 @@ const Formulation = () => {
                               <span>{formulation.ingredients_count} ingredients</span>
                               <span>{formulation.serve_size}g</span>
                               {isSuperAdmin && (
-                                <span className="truncate max-w-[200px]">{formulation.created_by || 'N/A'}</span>
+                                <span className="truncate max-w-[200px]">{formulation.created_by_name || 'Admin'}</span>
                               )}
                             </div>
                             <div className="flex gap-2">
@@ -2805,7 +2824,7 @@ const Formulation = () => {
                             <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">{formulation.ingredients_count} ingredients</td>
                             <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b]">{formulation.serve_size}g</td>
                             {isSuperAdmin && (
-                              <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b] max-w-[200px] truncate">{formulation.created_by || 'N/A'}</td>
+                              <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b] max-w-[200px] truncate">{formulation.created_by_name || 'Admin'}</td>
                             )}
                             <td className="px-4 py-3 text-sm font-ibm-plex text-[#65758b] whitespace-nowrap">
                               {formulation.created_at ? new Date(formulation.created_at).toLocaleDateString() : '-'}

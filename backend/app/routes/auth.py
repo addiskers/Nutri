@@ -1,6 +1,6 @@
 import asyncio
 import random
-from fastapi import APIRouter, HTTPException, status, Depends, Request
+from fastapi import APIRouter, HTTPException, status, Depends, Request, Response
 from datetime import datetime, timedelta, timezone
 
 
@@ -10,7 +10,7 @@ def _as_utc(dt: datetime) -> datetime:
 from app.models.user import User, UserRole
 from app.schemas.auth import (
     UserRegister, UserLogin, VerifyLoginOTP, ForgotPassword, ResetPassword, ChangePassword,
-    RefreshTokenRequest, TokenResponse, UserResponse, MessageResponse
+    LogoutRequest, TokenResponse, UserResponse, MessageResponse
 )
 from app.utils.security import (
     create_access_token, create_refresh_token, decode_token,
@@ -29,6 +29,48 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
+# Refresh-token cookie configuration.
+# Path scoped to /api/auth so the browser only attaches it to auth endpoints.
+# `Secure` is conditional on environment so local HTTP dev still works; in any
+# deployed environment (production / uat / staging) the cookie is HTTPS-only.
+REFRESH_COOKIE_NAME = "refresh_token"
+REFRESH_COOKIE_PATH = "/api/auth"
+
+
+def _refresh_cookie_secure() -> bool:
+    return (settings.ENVIRONMENT or "").lower() in ("production", "prod", "uat", "staging")
+
+
+def _set_refresh_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=_refresh_cookie_secure(),
+        samesite="strict",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
+        path=REFRESH_COOKIE_PATH,
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=REFRESH_COOKIE_NAME,
+        path=REFRESH_COOKIE_PATH,
+    )
+
+
+def _require_csrf_header(request: Request) -> None:
+    # Custom-header CSRF defence: browsers cannot set this header on a
+    # cross-origin request without a CORS preflight that our backend would
+    # reject for unknown origins. Layered with SameSite=Strict on the cookie.
+    if request.headers.get("x-requested-with") != "XMLHttpRequest":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Missing CSRF header",
+        )
+
+
 @router.post("/register", response_model=MessageResponse)
 @limiter.limit("3/minute")
 async def register(request: Request, user_data: UserRegister):
@@ -39,9 +81,11 @@ async def register(request: Request, user_data: UserRegister):
             detail=error_msg
         )
 
+    # Constant-time delay on all paths to prevent user enumeration via timing
+    await asyncio.sleep(random.uniform(0.2, 0.6))
+
     existing_user = await User.find_one(User.email == user_data.email.lower())
     if existing_user:
-        await asyncio.sleep(random.uniform(0.2, 0.6))
         return MessageResponse(
             message="Registration successful! Your account is pending admin approval.",
             success=True
@@ -112,33 +156,44 @@ async def register(request: Request, user_data: UserRegister):
             success=True
         )
     
-    # Send approval emails to existing admins for non-first users
-    try:
-        super_admins = await User.find(User.role == UserRole.SUPER_ADMIN, User.is_active == True).to_list()
-        logger.info("Found %d super admins to notify", len(super_admins))
-        
-        for admin in super_admins:
-            try:
-                await send_user_approval_email(
-                    admin_email=admin.email,
-                    admin_name=admin.name,
-                    new_user_name=new_user.name,
-                    new_user_email=new_user.email,
-                    new_user_id=str(new_user.id),
-                    department=new_user.department or "Not specified"
-                )
-                logger.info("Approval email sent to admin")
-            except Exception as e:
-                logger.warning("Failed to send approval email: %s", type(e).__name__)
-    except Exception as e:
-        logger.error("Failed to notify super admins: %s", type(e).__name__)
-    
+    # Send approval emails to existing admins as a background task so the response
+    # time of /register does not depend on whether the user already existed
+    # (defends against user-enumeration via timing analysis).
+    async def _notify_super_admins(new_user_id: str, new_user_name: str, new_user_email: str, new_user_dept: str) -> None:
+        try:
+            super_admins = await User.find(User.role == UserRole.SUPER_ADMIN, User.is_active == True).to_list()
+            logger.info("Found %d super admins to notify", len(super_admins))
+            for admin in super_admins:
+                try:
+                    await send_user_approval_email(
+                        admin_email=admin.email,
+                        admin_name=admin.name,
+                        new_user_name=new_user_name,
+                        new_user_email=new_user_email,
+                        new_user_id=new_user_id,
+                        department=new_user_dept,
+                    )
+                    logger.info("Approval email sent to admin")
+                except Exception as e:
+                    logger.warning("Failed to send approval email: %s", type(e).__name__)
+        except Exception as e:
+            logger.error("Failed to notify super admins: %s", type(e).__name__)
+
+    asyncio.create_task(_notify_super_admins(
+        str(new_user.id), new_user.name, new_user.email,
+        new_user.department or "Not specified",
+    ))
+
     logger.info("New user registered")
     
     return MessageResponse(
         message="Registration successful! Your account is pending admin approval.",
         success=True
     )
+
+
+MAX_LOGIN_ATTEMPTS = 10
+LOGIN_LOCKOUT_MINUTES = 15
 
 
 @router.post("/login")
@@ -150,26 +205,45 @@ async def login(request: Request, credentials: UserLogin):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
         )
-    
+
+    # Check login lockout before doing any password work
+    if user.login_locked_until and _as_utc(user.login_locked_until) > datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed login attempts. Please try again later."
+        )
+
     if not verify_password(credentials.password, user.hashed_password):
+        user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
+        if user.failed_login_attempts >= MAX_LOGIN_ATTEMPTS:
+            user.login_locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)
+            logger.warning("Login locked after %d failed attempts", user.failed_login_attempts)
+            log_event("LOGIN_LOCKED", user_id=str(user.id), user_email=user.email, detail=f"attempts={user.failed_login_attempts}")
+        else:
+            log_event("LOGIN_FAILED", user_id=str(user.id), user_email=user.email, detail=f"attempts={user.failed_login_attempts}")
+        await user.save()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
         )
-    
+
+    # Successful password — clear lockout state
+    user.failed_login_attempts = 0
+    user.login_locked_until = None
+
     if not user.is_approved:
         logger.warning("Login attempt by unapproved user")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
         )
-    
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your account has been deactivated"
         )
-    
+
     otp = generate_otp()
     user.login_otp = hash_otp(otp)
     user.login_otp_expires = datetime.now(timezone.utc) + timedelta(minutes=10)
@@ -205,7 +279,7 @@ def _get_lockout_duration(lockout_count: int) -> int:
 
 @router.post("/verify-otp", response_model=TokenResponse)
 @limiter.limit("3/minute")
-async def verify_login_otp(request: Request, otp_data: VerifyLoginOTP):
+async def verify_login_otp(request: Request, response: Response, otp_data: VerifyLoginOTP):
     user = await User.find_one(User.email == otp_data.email.lower())
     if not user:
         raise HTTPException(
@@ -262,12 +336,17 @@ async def verify_login_otp(request: Request, otp_data: VerifyLoginOTP):
     access_token = create_access_token(token_data)
     refresh_token = create_refresh_token(token_data)
 
+    # Refresh token is delivered as an httpOnly + Secure + SameSite=Strict cookie
+    # (not exposed to JavaScript) to eliminate the XSS-theft vector. The body
+    # field is left blank for backwards compatibility with older clients.
+    _set_refresh_cookie(response, refresh_token)
+
     logger.info("User logged in")
     log_event("LOGIN", user_id=str(user.id), user_email=user.email)
 
     return TokenResponse(
         access_token=access_token,
-        refresh_token=refresh_token,
+        refresh_token="",
         token_type="bearer",
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         user=UserResponse.from_user(user)
@@ -276,9 +355,19 @@ async def verify_login_otp(request: Request, otp_data: VerifyLoginOTP):
 
 @router.post("/refresh", response_model=TokenResponse)
 @limiter.limit("10/minute")
-async def refresh_token(request: Request, body: RefreshTokenRequest):
-    """Exchange a valid refresh token for a new access + refresh token pair (rotation)."""
-    payload = decode_token(body.refresh_token)
+async def refresh_token(request: Request, response: Response):
+    """Exchange a valid refresh token (read from httpOnly cookie) for a new access
+    + refresh token pair (rotation)."""
+    _require_csrf_header(request)
+
+    cookie_token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if not cookie_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing refresh token",
+        )
+
+    payload = decode_token(cookie_token)
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -343,9 +432,11 @@ async def refresh_token(request: Request, body: RefreshTokenRequest):
     new_access = create_access_token(token_data)
     new_refresh = create_refresh_token(token_data)
 
+    _set_refresh_cookie(response, new_refresh)
+
     return TokenResponse(
         access_token=new_access,
-        refresh_token=new_refresh,
+        refresh_token="",
         token_type="bearer",
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         user=UserResponse.from_user(user),
@@ -357,42 +448,35 @@ async def refresh_token(request: Request, body: RefreshTokenRequest):
 async def forgot_password(request: Request, forgot_data: ForgotPassword):
     """
     Request password reset OTP
+
+    Both branches (user-exists, user-not-exists) take roughly the same wall-clock
+    time and return the same message body. Email delivery happens in a background
+    task so response timing does not leak account existence.
     """
+    # Always pay the same minimum delay so both paths are time-equalised.
+    await asyncio.sleep(random.uniform(0.2, 0.5))
+
     user = await User.find_one(User.email == forgot_data.email.lower())
     if not user:
         return MessageResponse(
             message="If the email exists, a password reset OTP has been sent.",
             success=True
         )
-    
+
     otp = generate_otp()
     user.reset_token = hash_otp(otp)
     user.reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=settings.PASSWORD_RESET_TOKEN_EXPIRE_HOURS)
     await user.save()
 
-    try:
-        sent = await send_password_reset_email(user.email, otp, user.name)
-        if not sent:
-            user.reset_token = None
-            user.reset_token_expires = None
-            await user.save()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to send reset email. Please try again later."
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Failed to send password reset email: %s", type(e).__name__)
-        user.reset_token = None
-        user.reset_token_expires = None
-        await user.save()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send reset email. Please try again later."
-        )
+    async def _send_reset_email_bg(email: str, code: str, name: str) -> None:
+        try:
+            await send_password_reset_email(email, code, name)
+        except Exception as e:
+            logger.error("Failed to send password reset email: %s", type(e).__name__)
 
-    logger.info("Password reset OTP sent")
+    asyncio.create_task(_send_reset_email_bg(user.email, otp, user.name))
+
+    logger.info("Password reset OTP scheduled for delivery")
 
     return MessageResponse(
         message="If the email exists, a password reset OTP has been sent.",
@@ -519,16 +603,29 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
 @router.post("/logout", response_model=MessageResponse)
 async def logout(
     request: Request,
+    response: Response,
+    body: LogoutRequest = LogoutRequest(),
     current_user: User = Depends(get_current_user),
 ):
-    """Logout and revoke the current access token server-side."""
-    from fastapi.security import HTTPBearer as _HB
+    """Logout: revoke both the current access token and the refresh token (read
+    from cookie, with body fallback for legacy clients), then clear the cookie."""
+    # Deny the access token
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         payload = decode_token(auth_header.split(" ", 1)[1])
         if payload and payload.get("jti"):
             exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
             await deny_token(payload["jti"], exp)
+
+    # Deny the refresh token: prefer cookie, fall back to body
+    refresh_value = request.cookies.get(REFRESH_COOKIE_NAME) or body.refresh_token
+    if refresh_value:
+        refresh_payload = decode_token(refresh_value)
+        if refresh_payload and refresh_payload.get("type") == "refresh" and refresh_payload.get("jti"):
+            exp = datetime.fromtimestamp(refresh_payload["exp"], tz=timezone.utc)
+            await deny_token(refresh_payload["jti"], exp)
+
+    _clear_refresh_cookie(response)
 
     logger.info("User logged out")
     log_event("LOGOUT", user_id=str(current_user.id), user_email=current_user.email)

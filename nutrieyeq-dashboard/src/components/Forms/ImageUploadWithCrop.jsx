@@ -125,7 +125,7 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
       {/* Cropper Modal */}
       {showCropper && imageSrc && (
         <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg p-6 max-w-4xl w-full flex flex-col" style={{ maxHeight: '92vh' }}>
+          <div className="bg-white rounded-lg p-6 max-w-4xl w-full flex flex-col max-h-[92vh]">
 
             {/* Header – never scrolls away */}
             <div className="flex items-center justify-between mb-4 flex-shrink-0">
@@ -146,22 +146,21 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
                 crop={crop}
                 onChange={(c) => setCrop(c)}
                 onComplete={(c) => setCompletedCrop(c)}
-                style={{ maxWidth: '100%', maxHeight: '100%' }}
+                className="max-w-full max-h-full"
               >
                 <img
                   ref={imgRef}
                   src={imageSrc}
                   alt="Crop preview"
-                  style={{
-                    maxWidth: '100%',
-                    maxHeight: 'calc(92vh - 240px)', // fits in modal; no scroll needed
-                    objectFit: 'contain',
-                    display: 'block',
-                    userSelect: 'none',  // prevent text-selection fighting with drag
-                  }}
+                  className="object-contain block select-none"
                   onLoad={(e) => {
-                    imgRef.current = e.currentTarget
-                    const { width, height } = e.currentTarget
+                    const el = e.currentTarget
+                    imgRef.current = el
+                    // Imperative sizing avoids CSP style-src block and works regardless of
+                    // ReactCrop wrapper's lack of a definite height.
+                    el.style.maxWidth = '100%'
+                    el.style.maxHeight = 'calc(92vh - 240px)'
+                    const { width, height } = el
                     setCrop({ unit: '%', width: 90, height: 90, x: 5, y: 5 })
                     setCompletedCrop({
                       x: Math.round(width * 0.05),

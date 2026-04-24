@@ -18,7 +18,7 @@ const NoPermissionContent = ({ pageName = 'this page' }) => {
   }
 
   return (
-    <div className="flex items-center justify-center min-h-[calc(100vh-200px)]">
+    <div className="flex items-center justify-center min-h-[calc(100vh_-_200px)]">
       <div className="max-w-md w-full text-center px-4">
         {/* Icon */}
         <div className="w-20 h-20 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-6">

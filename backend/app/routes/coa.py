@@ -652,8 +652,14 @@ async def extract_coa_from_images(
                 if len(content) > 50 * 1024 * 1024:
                     raise HTTPException(status_code=400, detail=f"File '{safe_filename}' exceeds 50MB limit")
 
-                # Check if it's a PDF
-                if safe_filename.lower().endswith('.pdf'):
+                # Detect file type by magic bytes, not filename
+                is_pdf = content[:4] == b"%PDF"
+                if safe_filename.lower().endswith('.pdf') and not is_pdf:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"File '{safe_filename}' does not appear to be a valid PDF"
+                    )
+                if is_pdf:
                     safe_print(f"[COA EXTRACTION] Converting PDF to images...")
                     pdf_document = fitz.open(stream=content, filetype="pdf")
                     total_pages = len(pdf_document)

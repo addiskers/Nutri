@@ -2,13 +2,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict
 from hashlib import sha256
 from passlib.context import CryptContext
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import PyJWTError
 from config.settings import settings
 import secrets
 import uuid
 
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
 
 # Key ID derived from first 8 chars of key hash (identifies which key signed a token)
 _CURRENT_KID = sha256(settings.SECRET_KEY.encode()).hexdigest()[:8]
@@ -24,19 +25,23 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
-    
+    now = datetime.now(timezone.utc)
+
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = now + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
     to_encode.update({
         "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "iat": now,
+        "nbf": now,
+        "iss": settings.JWT_ISSUER,
+        "aud": settings.JWT_AUDIENCE,
         "type": "access",
         "jti": uuid.uuid4().hex,
     })
-    
+
     encoded_jwt = jwt.encode(
         to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM,
         headers={"kid": _CURRENT_KID},
@@ -46,11 +51,15 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 def create_refresh_token(data: dict) -> str:
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    now = datetime.now(timezone.utc)
+    expire = now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
     to_encode.update({
         "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "iat": now,
+        "nbf": now,
+        "iss": settings.JWT_ISSUER,
+        "aud": settings.JWT_AUDIENCE,
         "type": "refresh",
         "jti": uuid.uuid4().hex,
     })
@@ -70,9 +79,14 @@ def decode_token(token: str) -> Optional[Dict]:
 
     for key in keys_to_try:
         try:
-            payload = jwt.decode(token, key, algorithms=[settings.ALGORITHM])
+            payload = jwt.decode(
+                token, key,
+                algorithms=[settings.ALGORITHM],
+                audience=settings.JWT_AUDIENCE,
+                issuer=settings.JWT_ISSUER,
+            )
             return payload
-        except JWTError:
+        except PyJWTError:
             continue
     return None
 
