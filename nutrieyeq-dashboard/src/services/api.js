@@ -26,6 +26,19 @@ function safeParseUser() {
   }
 }
 
+// Decode a `data:<mime>;base64,<payload>` URL to a Blob without using fetch().
+// fetch() on data: URIs is blocked by CSP `connect-src` (would require allowing data:).
+function dataUrlToBlob(dataUrl) {
+  const match = /^data:([^;,]+)(?:;base64)?,(.*)$/.exec(dataUrl)
+  if (!match) throw new Error('Invalid data URL')
+  const mime = match[1] || 'application/octet-stream'
+  const isBase64 = /;base64,/i.test(dataUrl)
+  const payload = isBase64 ? atob(match[2]) : decodeURIComponent(match[2])
+  const bytes = new Uint8Array(payload.length)
+  for (let i = 0; i < payload.length; i++) bytes[i] = payload.charCodeAt(i)
+  return new Blob([bytes], { type: mime })
+}
+
 function sanitizeError(detail, fallback = 'Request failed') {
   if (!detail) return fallback
   if (typeof detail === 'string') {
@@ -163,8 +176,7 @@ export const productService = {
         const image = images[i]
         
         if (typeof image === 'string' && image.startsWith('data:')) {
-          const response = await fetch(image)
-          const blob = await response.blob()
+          const blob = dataUrlToBlob(image)
           formData.append('images', blob, `image_${i}.jpg`)
         } else if (image instanceof File || image instanceof Blob) {
           formData.append('images', image, `image_${i}.jpg`)
@@ -1164,8 +1176,7 @@ export const coaService = {
         const image = images[i]
         
         if (typeof image === 'string' && image.startsWith('data:')) {
-          const response = await fetch(image)
-          const blob = await response.blob()
+          const blob = dataUrlToBlob(image)
           formData.append('images', blob, `coa_image_${i}.jpg`)
         } else if (image instanceof File || image instanceof Blob) {
           formData.append('images', image, image.name || `coa_image_${i}.jpg`)

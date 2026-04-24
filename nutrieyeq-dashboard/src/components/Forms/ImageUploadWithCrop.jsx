@@ -7,8 +7,10 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
   const [imageSrc, setImageSrc] = useState(null)
   const [crop, setCrop] = useState({
     unit: '%',
+    x: 5,
+    y: 5,
     width: 90,
-    aspect: undefined 
+    height: 90,
   })
   const [completedCrop, setCompletedCrop] = useState(null)
   const [croppedImage, setCroppedImage] = useState(null)
@@ -74,8 +76,10 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
     setShowCropper(false)
     setCrop({
       unit: '%',
+      x: 5,
+      y: 5,
       width: 90,
-      aspect: undefined
+      height: 90,
     })
     if (onRemove) {
       onRemove()
