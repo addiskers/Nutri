@@ -1,54 +1,83 @@
-"""
-COA Routes - Certificate of Analysis Extraction and Management
-"""
-import logging
 import os
 import re
 import json
-import unicodedata
 import fitz  # PyMuPDF for PDF handling
 from io import BytesIO
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
 from pydantic import BaseModel
-from PIL import Image, ImageOps
+from PIL import Image
 
-from app.models.user import User
+from app.models.user import User, UserPermissions
 from app.models.coa import COA
 from app.dependencies.auth import get_current_user, require_permission
 from app.middleware.security import limiter
+from app.utils.queries import safe_regex, parse_object_id, normalize_pagination
+from app.utils.audit import audit_event
+from app.utils.uploads import read_upload_capped
 from config.settings import settings
-
-MAX_PDF_PAGES = 50
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/coa", tags=["COA"])
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
+
+# Whitelist of accepted COA upload MIME types (images + PDF).
+_ALLOWED_COA_CONTENT_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "application/pdf",
+}
+
+
+def _validate_coa_uploads(files, max_files):
+    """Pre-flight upload validation shared by the COA extract route."""
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one file is required")
+    if len(files) > max_files:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum {max_files} files allowed"
+        )
+
+    per_file_cap = settings.MAX_UPLOAD_FILE_SIZE_MB * 1024 * 1024
+    total_cap = settings.MAX_UPLOAD_TOTAL_SIZE_MB * 1024 * 1024
+    total = 0
+    for f in files:
+        if f.content_type and f.content_type.lower() not in _ALLOWED_COA_CONTENT_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type for {f.filename!r}: {f.content_type}"
+            )
+        size = getattr(f, "size", None) or 0
+        if size and size > per_file_cap:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File {f.filename!r} exceeds {settings.MAX_UPLOAD_FILE_SIZE_MB}MB limit"
+            )
+        total += size
+    if total and total > total_cap:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Total upload size exceeds {settings.MAX_UPLOAD_TOTAL_SIZE_MB}MB limit"
+        )
+
+GEMINI_MODEL = "gemini-2.5-flash"
 
 PRICING = {
     "input": 0.30,
     "output": 2.50,
 }
 
-# ============================================================
-# NOMENCLATURE MAPPING (COA specific)
-# ============================================================
 NOMENCLATURE_MAP = {
     # Proteins
     "protein": "Protein",
     "proteins": "Protein",
     "crude protein": "Protein",
     "total protein": "Protein",
-    "protein (n x 6.25)": "protein (n x 6.25)",
-    "protein (n x 6.38)": "Protein (N x 6.38)",
-    "protein as is (n x 6.38)": "Protein as is (N x 6.38)",
-    "protein (n x 6.38) dry basis": "Protein (N x 6.38) Dry Basis",
+    "protein (n x 6.25)": "Protein",
     "protein (dry basis)": "Protein (Dry Basis)",
     "protein (wet basis)": "Protein (Wet Basis)",
     # Fats
@@ -202,28 +231,6 @@ NOMENCLATURE_MAP = {
     "mo": "Molybdenum",
     "selenium": "Selenium",
     "se": "Selenium",
-    # Polyols / Sugar Alcohols
-    "sorbitol": "Sorbitol",
-    "sorbitol syrup": "Sorbitol Syrup",
-    "mannitol": "Mannitol",
-    "xylitol": "Xylitol",
-    "maltitol": "Maltitol",
-    "maltitol syrup": "Maltitol Syrup",
-    "isomalt": "Isomalt",
-    "lactitol": "Lactitol",
-    "erythritol": "Erythritol",
-    "glycerin": "Glycerin",
-    "glycerine": "Glycerin",
-    "glycerol": "Glycerin",
-    "hydrogenated glucose syrup": "Hydrogenated Glucose Syrup",
-    "hydrogenated starch hydrolysate": "Hydrogenated Starch Hydrolysate",
-    "polyol": "Polyol",
-    "polyols": "Polyol",
-    "sugar alcohol": "Polyol",
-    "sugar alcohols": "Polyol",
-    # Other Carbs
-    "other carbohydrates": "Other Carbs",
-    "other carbs": "Other Carbs",
     # Other Nutrients
     "carnitine": "Carnitine",
     "l-carnitine": "Carnitine",
@@ -238,8 +245,6 @@ NOMENCLATURE_MAP = {
 # Target units for normalization
 TARGET_UNITS = {
     "Protein": "g", "Protein (Dry Basis)": "g", "Protein (Wet Basis)": "g",
-    "protein (n x 6.25)": "g", "Protein (N x 6.38)": "g",
-    "Protein as is (N x 6.38)": "g", "Protein (N x 6.38) Dry Basis": "g",
     "Total Fat": "g", "Saturated Fat": "g", "Monounsaturated Fat": "g",
     "Polyunsaturated Fat": "g", "Linoleic Acid": "g", "Alpha-Linolenic Acid": "g",
     "DHA": "mg", "EPA": "mg", "Trans Fat": "g",
@@ -258,12 +263,7 @@ TARGET_UNITS = {
     "Omega 3 Fatty Acid": "g", "Omega 6 Fatty Acid": "g",
     "Iodine": "mcg", "Copper": "mcg", "Chromium": "mcg", "Manganese": "mg",
     "Molybdenum": "mcg", "Selenium": "mcg",
-    "Sorbitol": "g", "Sorbitol Syrup": "g", "Mannitol": "g", "Xylitol": "g",
-    "Maltitol": "g", "Maltitol Syrup": "g", "Isomalt": "g", "Lactitol": "g",
-    "Erythritol": "g", "Glycerin": "g", "Hydrogenated Glucose Syrup": "g",
-    "Hydrogenated Starch Hydrolysate": "g", "Polyol": "g",
     "Carnitine": "mg", "Choline": "mg", "Inositol": "mg", "Nucleotides": "mg", "Taurine": "mg",
-    "Other Carbs": "g",
 }
 
 UNIT_CONVERSIONS = {
@@ -277,40 +277,7 @@ UNIT_CONVERSIONS = {
 }
 
 
-def canonicalize(label: str) -> str:
-    """Normalize a nutrient label for fuzzy matching: strip units, parens,
-    special chars, normalize spelling and light de-pluralization —
-    mirrors the logic in products.py."""
-    label = unicodedata.normalize("NFKC", label)
-    label = label.lower()
-    SPELLING_MAP = {"fibre": "fiber"}
-    for wrong, correct in SPELLING_MAP.items():
-        label = re.sub(rf"\b{wrong}\b", correct, label)
-    label = re.sub(r"^-+", "", label)
-    label = re.sub(r"\(.*?\)", "", label)
-    label = re.sub(r"[^\w\s:\-]", " ", label)
-    label = re.sub(r"\b(kcal|kj|mg|g|gm|gram|grams|mcg|ug|[μµ]g|%)\b", "", label)
-    label = re.sub(r"^of which[:\s]+", "", label)
-    label = re.sub(r"\s+", " ", label).strip()
-    words = label.split()
-    normalized_words = []
-    for w in words:
-        if len(w) > 3 and w.endswith("s") and not w.endswith(("ss", "us", "ns")):
-            normalized_words.append(w[:-1])
-        else:
-            normalized_words.append(w)
-    return " ".join(normalized_words)
-
-CANONICAL_NOMENCLATURE = {
-    canonicalize(k): v for k, v in NOMENCLATURE_MAP.items()
-}
-
-
-# ============================================================
-# HELPER FUNCTIONS
-# ============================================================
 def calculate_cost(input_tokens: int, output_tokens: int) -> dict:
-    """Calculate API cost"""
     input_cost = (input_tokens / 1_000_000) * PRICING["input"]
     output_cost = (output_tokens / 1_000_000) * PRICING["output"]
     return {
@@ -322,34 +289,14 @@ def calculate_cost(input_tokens: int, output_tokens: int) -> dict:
     }
 
 
-def standardize_nutrient_name(
-    raw_name: str,
-    db_map: dict | None = None,
-    db_canonical: dict | None = None,
-) -> str:
-    """Map raw nutrient name to standardized name.
-    Uses canonicalize() to strip units/punctuation before lookup.
-    Checks DB-backed map first, then canonical hardcoded map."""
+def standardize_nutrient_name(raw_name: str) -> str:
     cleaned = raw_name.lower().strip()
     cleaned = re.sub(r"\s*\(.*?\)\s*", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
-
-    if db_map and cleaned in db_map:
-        return db_map[cleaned]
-    if cleaned in NOMENCLATURE_MAP:
-        return NOMENCLATURE_MAP[cleaned]
-
-    canon = canonicalize(raw_name)
-    if db_canonical and canon in db_canonical:
-        return db_canonical[canon]
-    if canon in CANONICAL_NOMENCLATURE:
-        return CANONICAL_NOMENCLATURE[canon]
-
-    return raw_name.title()
+    return NOMENCLATURE_MAP.get(cleaned, raw_name.title())
 
 
 def normalize_unit(value: float, from_unit: str, nutrient_name: str) -> tuple:
-    """Convert value from source unit to target unit"""
     from_unit_lower = from_unit.lower().strip()
     target_unit = TARGET_UNITS.get(nutrient_name, "g")
     
@@ -368,7 +315,6 @@ def normalize_unit(value: float, from_unit: str, nutrient_name: str) -> tuple:
 
 
 def get_nutrient_category(nutrient_name: str) -> str:
-    """Categorize nutrient for organization"""
     categories = {
         "Macronutrient": ["Protein", "Total Fat", "Total Carbohydrates", "Energy", "Moisture", "Ash"],
         "Fat - Saturated": ["Saturated Fat"],
@@ -378,11 +324,6 @@ def get_nutrient_category(nutrient_name: str) -> str:
         "Carbohydrate - Sugar": ["Total Sugars", "Added Sugars", "Sucrose", "Added Sucrose"],
         "Carbohydrate - Fiber": ["Dietary Fiber", "Soluble Fiber", "Insoluble Fiber", 
                                   "FOS (Fructooligosaccharides)"],
-        "Carbohydrate - Polyol": ["Sorbitol", "Sorbitol Syrup", "Mannitol", "Xylitol",
-                                   "Maltitol", "Maltitol Syrup", "Isomalt", "Lactitol",
-                                   "Erythritol", "Glycerin", "Hydrogenated Glucose Syrup",
-                                   "Hydrogenated Starch Hydrolysate", "Polyol"],
-        "Carbohydrate - Other": ["Other Carbs"],
         "Mineral": ["Sodium", "Potassium", "Calcium", "Iron", "Zinc", "Magnesium", 
                    "Phosphorus", "Chloride", "Cholesterol"],
         "Vitamin - Fat Soluble": ["Vitamin A", "Vitamin D", "Vitamin D3", "Vitamin E"],
@@ -397,27 +338,26 @@ def get_nutrient_category(nutrient_name: str) -> str:
     return "Other"
 
 
-def process_extracted_coa(raw_data: dict, db_map: dict | None = None, db_canonical: dict | None = None) -> dict:
-    """Post-process extracted COA data: standardize names and normalize units"""
+def process_extracted_coa(raw_data: dict) -> dict:
+    """Standardize nutrient names and normalize units to a consistent basis."""
     processed = raw_data.copy()
-    
+
     if "nutritional_data" not in processed:
         return processed
-    
+
     normalized_nutrients = []
-    
+
     for nutrient in processed["nutritional_data"]:
         raw_name = nutrient.get("nutrient_name_raw", nutrient.get("nutrient_name", ""))
-        std_name = standardize_nutrient_name(raw_name, db_map, db_canonical)
+        std_name = standardize_nutrient_name(raw_name)
         raw_unit = nutrient.get("unit", nutrient.get("unit_raw", "g"))
-        
+
         normalized_nutrient = {
             "nutrient_name": std_name,
             "nutrient_name_raw": raw_name,
             "category": get_nutrient_category(std_name),
         }
-        
-        # Normalize values
+
         for value_key in ["min_value", "max_value", "actual_value"]:
             if nutrient.get(value_key) is not None:
                 try:
@@ -428,25 +368,22 @@ def process_extracted_coa(raw_data: dict, db_map: dict | None = None, db_canonic
                     normalized_nutrient[value_key] = None
             else:
                 normalized_nutrient[value_key] = None
-        
-        # Set target unit
+
         normalized_nutrient["unit"] = TARGET_UNITS.get(std_name, "g")
         normalized_nutrient["unit_raw"] = raw_unit
         normalized_nutrient["basis"] = "per 100g"
-        
-        # Calculate average if range exists
+
         if normalized_nutrient["min_value"] and normalized_nutrient["max_value"]:
             normalized_nutrient["average_value"] = round(
                 (normalized_nutrient["min_value"] + normalized_nutrient["max_value"]) / 2, 6
             )
         else:
             normalized_nutrient["average_value"] = None
-        
-        # Preserve other fields
+
         for key in ["source_section", "notes"]:
             if key in nutrient:
                 normalized_nutrient[key] = nutrient[key]
-        
+
         normalized_nutrients.append(normalized_nutrient)
     
     processed["nutritional_data"] = normalized_nutrients
@@ -455,9 +392,6 @@ def process_extracted_coa(raw_data: dict, db_map: dict | None = None, db_canonic
     return processed
 
 
-# ============================================================
-# COA EXTRACTION PROMPT
-# ============================================================
 COA_EXTRACTION_PROMPT = """Extract complete nutritional data from this Certificate of Analysis (COA) document.
 
 CRITICAL: Return ONLY raw JSON. DO NOT wrap in markdown code fences. Start with { and end with }.
@@ -471,11 +405,10 @@ EXTRACTION RULES:
 
 1. INGREDIENT IDENTIFICATION:
    - Extract the product/ingredient name exactly as stated
-   - Extract product description if present (brief description of the product)
    - Extract lot/batch number if present
    - Extract manufacturer/supplier name
    - Extract storage condition/instructions if visible (e.g. "Store in cool dry place")
-   - DATES: Preserve dates EXACTLY as printed on the document (e.g. "01.01.2025 TO 20.01.2025", "24 months from the date of production"). Do NOT reformat or parse date ranges — keep the original string.
+   - ALL DATES must be in DD/MM/YYYY format
 
 2. NUTRIENT VALUES - CRITICAL:
    For EACH nutrient found, extract THREE possible values:
@@ -500,6 +433,22 @@ EXTRACTION RULES:
    - "< 1.0" or "less than 1" → actual: 1.0 (use limit as actual)
    - Single value "34.5" → actual: 34.5
 
+4. NUTRIENTS TO EXTRACT (if present):
+   
+   MACRONUTRIENTS:
+   - Moisture, Protein, Total Fat, Saturated Fat, Trans Fat
+   - Total Carbohydrates, Total Sugars, Dietary Fiber
+   - Cholesterol, Ash, Energy
+   
+   MINERALS:
+   - Sodium, Potassium, Calcium, Iron, Zinc
+   - Magnesium, Phosphorus, Chloride
+   
+   VITAMINS:
+   - Vitamin A, D, E, C
+   - B-vitamins (B1, B2, B3, B6, B12)
+   - Folic Acid, Biotin, Pantothenic Acid
+
 JSON STRUCTURE:
 {
   "document_type": "COA",
@@ -507,7 +456,6 @@ JSON STRUCTURE:
   
   "ingredient_info": {
     "ingredient_name": "exact name from document",
-    "product_description": "brief product description if present or null",
     "product_code": "if present or null",
     "lot_number": "batch/lot number or null",
     "manufacturing_date": "DD/MM/YYYY or null",
@@ -556,11 +504,7 @@ RULES:
 Return ONLY the JSON structure above."""
 
 
-# ============================================================
-# SCHEMAS
-# ============================================================
 class ExtractedCOAData(BaseModel):
-    """Response schema for extracted COA data"""
     success: bool
     data: Optional[dict] = None
     error: Optional[str] = None
@@ -568,9 +512,7 @@ class ExtractedCOAData(BaseModel):
 
 
 class COACreate(BaseModel):
-    """Schema for creating a COA entry"""
     ingredient_name: str
-    product_description: Optional[str] = None
     product_code: Optional[str] = None
     lot_number: Optional[str] = None
     manufacturing_date: Optional[str] = None
@@ -588,7 +530,6 @@ class COACreate(BaseModel):
 
 
 class COAResponse(BaseModel):
-    """Response schema for COA"""
     id: str
     ingredient_name: str
     supplier_name: Optional[str]
@@ -597,128 +538,100 @@ class COAResponse(BaseModel):
     created_at: datetime
 
 
-# ============================================================
-# ROUTES
-# ============================================================
-
 @router.post("/extract", response_model=ExtractedCOAData)
-@limiter.limit("10/minute")
+@limiter.limit(settings.EXTRACT_RATE_LIMIT)
 async def extract_coa_from_images(
     request: Request,
     images: List[UploadFile] = File(...),
-    current_user: User = Depends(require_permission("add_coa"))
+    current_user: User = Depends(get_current_user)
 ):
-    """
-    Extract COA data from uploaded images using Gemini AI
-    
-    - Accepts multiple COA images (PDF pages or images)
-    - Returns structured nutritional data
-    - User can review and edit before saving
-    """
     def safe_print(msg):
-        logger.debug("%s", msg)
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            try:
+                print(msg.encode('ascii', 'replace').decode('ascii'))
+            except:
+                print("[LOG] (message contains special characters)")
     
     safe_print("\n" + "="*60)
     safe_print("[COA EXTRACTION] ===== NEW COA EXTRACTION REQUEST =====")
     safe_print("="*60)
     
     try:
-        safe_print(f"[COA EXTRACTION] User: {str(current_user.id)}")
-        safe_print(f"[COA EXTRACTION] Number of images received: {len(images)}")
-        
-        # Check API key
+        # Log only the actor id and aggregate counts – never the email or
+        # user-supplied filenames – so logs don't double as a PII channel.
+        safe_print(
+            f"[COA EXTRACTION] actor_id={current_user.id} files={len(images)}"
+        )
+
         api_key = settings.GEMINI_API_KEY
         if not api_key:
-            logger.error("Gemini API key not configured")
+            safe_print("[ERROR] Gemini API key not configured")
             raise HTTPException(
-                status_code=500, 
+                status_code=500,
                 detail="Gemini API key not configured. Please set GEMINI_API_KEY in environment."
             )
-        
-        # Validate file count
-        if len(images) == 0:
-            raise HTTPException(status_code=400, detail="At least one file is required")
-        if len(images) > 15:
-            raise HTTPException(status_code=400, detail="Maximum 15 files allowed")
-        
-        # Load and validate images (including PDF conversion)
+
+        _validate_coa_uploads(images, max_files=15)
+
+        per_file_cap = settings.MAX_UPLOAD_FILE_SIZE_MB * 1024 * 1024
+        total_cap = settings.MAX_UPLOAD_TOTAL_SIZE_MB * 1024 * 1024
+        bytes_read = 0
+
         pil_images = []
         for idx, img in enumerate(images):
+            position_label = f"file at position {idx + 1}"
+            # Decide PDF vs image off the declared content-type, not the
+            # extension – `_validate_coa_uploads` already whitelists this.
+            is_pdf = (img.content_type or "").lower() == "application/pdf"
             try:
-                import os as _os
-                safe_filename = _os.path.basename(img.filename or "unknown").replace("\n", "").replace("\r", "")
-                safe_print(f"[COA EXTRACTION] Loading file {idx + 1}/{len(images)}: {safe_filename}")
-                content = await img.read()
-                if len(content) > 50 * 1024 * 1024:
-                    raise HTTPException(status_code=400, detail=f"File '{safe_filename}' exceeds 50MB limit")
+                safe_print(
+                    f"[COA EXTRACTION] Loading file[{idx + 1}]/{len(images)} "
+                    f"content_type={img.content_type}"
+                )
+                # Stream-read with hard caps so a hostile client that omits
+                # Content-Length / `size` can't exhaust memory.
+                content = await read_upload_capped(
+                    img,
+                    per_file_cap_bytes=per_file_cap,
+                    remaining_total_cap_bytes=total_cap - bytes_read,
+                    file_label=position_label,
+                )
+                bytes_read += len(content)
 
-                # Detect file type by magic bytes, not filename
-                is_pdf = content[:4] == b"%PDF"
-                if safe_filename.lower().endswith('.pdf') and not is_pdf:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"File '{safe_filename}' does not appear to be a valid PDF"
-                    )
                 if is_pdf:
                     safe_print(f"[COA EXTRACTION] Converting PDF to images...")
                     pdf_document = fitz.open(stream=content, filetype="pdf")
                     total_pages = len(pdf_document)
-                    
-                    if total_pages > MAX_PDF_PAGES:
-                        pdf_document.close()
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"PDF has {total_pages} pages, maximum allowed is {MAX_PDF_PAGES}"
-                        )
-                    
+
                     for page_num in range(total_pages):
                         page = pdf_document[page_num]
-                        # Render page to image at 300 DPI for good quality
                         mat = fitz.Matrix(300 / 72, 300 / 72)  # 300 DPI
                         pix = page.get_pixmap(matrix=mat)
-                        
-                        # Convert to PIL Image
+
                         img_data = pix.tobytes("png")
                         pil_img = Image.open(BytesIO(img_data))
-
-                        # Validate rendered page dimensions
-                        w, h = pil_img.size
-                        if w * h > 100_000_000:
-                            pdf_document.close()
-                            raise HTTPException(status_code=400, detail=f"PDF page {page_num + 1} renders too large ({w}x{h})")
-
                         pil_images.append(pil_img)
                         safe_print(f"[COA EXTRACTION] PDF page {page_num + 1}/{total_pages} converted: {pil_img.size} pixels")
-                    
+
                     pdf_document.close()
                     safe_print(f"[COA EXTRACTION] PDF converted successfully: {total_pages} pages")
                 else:
-                    # Regular image file
                     pil_img = Image.open(BytesIO(content))
-
-                    # Validate image dimensions to prevent OOM
-                    MAX_DIMENSION = 10000
-                    MAX_PIXELS = 100_000_000
-                    w, h = pil_img.size
-                    if w > MAX_DIMENSION or h > MAX_DIMENSION:
-                        raise HTTPException(status_code=400, detail=f"File '{safe_filename}': dimensions {w}x{h} exceed {MAX_DIMENSION}px limit")
-                    if w * h > MAX_PIXELS:
-                        raise HTTPException(status_code=400, detail=f"File '{safe_filename}': total pixels ({w*h}) exceed limit")
-
-                    # Strip EXIF metadata
-                    pil_img = ImageOps.exif_transpose(pil_img)
-
                     pil_images.append(pil_img)
-                    safe_print(f"[COA EXTRACTION] Image {idx + 1} loaded: {pil_img.size} pixels")
+                    safe_print(f"[COA EXTRACTION] file[{idx + 1}] loaded: {pil_img.size} pixels")
 
+            except HTTPException:
+                raise
             except Exception as e:
-                logger.error("Failed to load file %s: %s", safe_filename, type(e).__name__)
+                # Echo the position, not the filename, to keep logs PII-clean.
+                safe_print(f"[ERROR] Failed to load file[{idx + 1}]: {type(e).__name__}")
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid file: {safe_filename}"
+                    detail=f"Invalid file at position {idx + 1}",
                 )
-        
-        # Call Gemini API
+
         safe_print("[COA EXTRACTION] Initializing Gemini client...")
         from google import genai
         
@@ -739,16 +652,13 @@ async def extract_coa_from_images(
         )
         
         safe_print("[COA EXTRACTION] Response received from Gemini API")
-        
-        # Calculate cost
+
         usage = response.usage_metadata
         cost_info = calculate_cost(usage.prompt_token_count, usage.candidates_token_count)
         safe_print(f"[COA EXTRACTION] Estimated cost: ${cost_info['total_cost']:.4f}")
-        
-        # Parse response
+
         raw_json = response.text.strip()
-        
-        # Clean markdown if present
+
         if raw_json.startswith("```"):
             first_newline = raw_json.find("\n")
             if first_newline != -1:
@@ -769,34 +679,14 @@ async def extract_coa_from_images(
         
         coa_data = json.loads(raw_json)
         safe_print("[COA EXTRACTION] JSON parsed successfully")
-        
-        # Load DB-backed nomenclature map for standardization
-        db_map = None
-        db_canonical = None
-        try:
-            from app.models.coa_nomenclature import COANomenclatureMapping
-            all_mappings = await COANomenclatureMapping.find_all().to_list()
-            if all_mappings:
-                db_map = {}
-                for m in all_mappings:
-                    db_map[m.standardized_name.lower()] = m.standardized_name
-                    for raw in m.raw_names:
-                        db_map[raw.lower()] = m.standardized_name
-                db_canonical = {canonicalize(k): v for k, v in db_map.items()}
-                safe_print(f"[COA EXTRACTION] Loaded {len(all_mappings)} DB nomenclature mappings")
-        except Exception as map_err:
-            safe_print(f"[COA EXTRACTION] DB nomenclature not available, using hardcoded: {map_err}")
-        
-        # Post-process the data
-        processed_data = process_extracted_coa(coa_data, db_map, db_canonical)
-        
-        # Transform to frontend-friendly format
+
+        processed_data = process_extracted_coa(coa_data)
+
         ingredient_info = processed_data.get("ingredient_info", {})
         
         transformed_data = {
             "ingredient_info": {
                 "ingredient_name": ingredient_info.get("ingredient_name", ""),
-                "product_description": ingredient_info.get("product_description"),
                 "product_code": ingredient_info.get("product_code"),
                 "lot_number": ingredient_info.get("lot_number"),
                 "manufacturing_date": ingredient_info.get("manufacturing_date"),
@@ -811,7 +701,7 @@ async def extract_coa_from_images(
             "certifications": processed_data.get("certifications", []),
             "analysis_method": processed_data.get("analysis_method"),
             "additional_notes": processed_data.get("additional_notes", []),
-            "raw": coa_data,  # Keep raw data for reference
+            "raw": coa_data,
         }
         
         safe_print("[COA EXTRACTION] SUCCESS - Extraction completed!")
@@ -822,7 +712,7 @@ async def extract_coa_from_images(
         )
         
     except json.JSONDecodeError as e:
-        logger.error("COA JSON parsing failed: %s", e)
+        safe_print(f"[ERROR] JSON parsing failed: {type(e).__name__}")
         return ExtractedCOAData(
             success=False,
             error="Failed to parse AI response"
@@ -830,21 +720,20 @@ async def extract_coa_from_images(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("COA extraction failed: %s", e, exc_info=True)
+        # Generic client response; internal log retains type only.
+        safe_print(f"[ERROR] COA extraction failed: {type(e).__name__}")
         return ExtractedCOAData(
             success=False,
-            error="Extraction failed. Please try again."
+            error="Extraction failed. Please try again or contact support."
         )
 
 
 @router.post("", response_model=dict)
 async def create_coa(
     coa: COACreate,
-    current_user: User = Depends(require_permission("add_coa"))
+    current_user: User = Depends(require_permission(UserPermissions.ADD_PRODUCTS.value))
 ):
-    """Create a new COA entry (requires add_coa permission)"""
     try:
-        # Build master entry for formulation calculations
         master_entry = {
             "ingredient_name": coa.ingredient_name,
             "product_code": coa.product_code,
@@ -867,7 +756,6 @@ async def create_coa(
         
         new_coa = COA(
             ingredient_name=coa.ingredient_name,
-            product_description=coa.product_description,
             product_code=coa.product_code,
             lot_number=coa.lot_number,
             manufacturing_date=coa.manufacturing_date,
@@ -881,24 +769,32 @@ async def create_coa(
             analysis_method=coa.analysis_method,
             additional_notes=coa.additional_notes,
             document_images=coa.document_images,
-            extraction_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            extraction_date=datetime.utcnow().strftime("%Y-%m-%d"),
             master_entry=master_entry,
             status=coa.status,
             created_by=str(current_user.id),
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc)
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
         )
         
         await new_coa.insert()
-        
+
+        audit_event(
+            "coa.create",
+            actor_id=str(current_user.id),
+            actor_role=current_user.role,
+            target_type="coa",
+            target_id=str(new_coa.id),
+        )
+
         return {
             "success": True,
             "message": "COA created successfully",
             "coa_id": str(new_coa.id)
         }
-        
+
     except Exception as e:
-        logger.error(f"Failed to create COA: {e}")
+        print(f"[ERROR] create_coa failed: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Failed to create COA")
 
 
@@ -908,24 +804,24 @@ async def list_coas(
     limit: int = 50,
     search: Optional[str] = None,
     status: Optional[str] = None,
-    current_user: User = Depends(require_permission("view_coa"))
+    current_user: User = Depends(require_permission(UserPermissions.VIEW_PRODUCTS.value))
 ):
-    """List all COA entries with optional filters (requires view_coa permission)"""
     try:
-        limit = min(limit, 200)
+        skip, limit = normalize_pagination(skip, limit)
+
         query = {}
-        
+
         if status:
             query["status"] = status
         if search:
-            search = search[:200]  # Limit search length to prevent performance issues
-            escaped = re.escape(search)
-            query["$or"] = [
-                {"ingredient_name": {"$regex": escaped, "$options": "i"}},
-                {"supplier_name": {"$regex": escaped, "$options": "i"}},
-                {"lot_number": {"$regex": escaped, "$options": "i"}}
-            ]
-        
+            escaped = safe_regex(search)
+            if escaped:
+                query["$or"] = [
+                    {"ingredient_name": {"$regex": escaped, "$options": "i"}},
+                    {"supplier_name": {"$regex": escaped, "$options": "i"}},
+                    {"lot_number": {"$regex": escaped, "$options": "i"}},
+                ]
+
         coas = await COA.find(query).skip(skip).limit(limit).to_list()
         total = await COA.find(query).count()
         
@@ -945,6 +841,7 @@ async def list_coas(
                     "has_documents": bool(c.document_images and len(c.document_images) > 0),
                     "documents_count": len(c.document_images) if c.document_images else 0,
                     "created_at": c.created_at.isoformat(),
+                    "nutritional_data": c.nutritional_data,
                 }
                 for c in coas
             ],
@@ -954,19 +851,17 @@ async def list_coas(
         }
         
     except Exception as e:
-        logger.error(f"Failed to fetch COAs: {e}")
+        print(f"[ERROR] list_coas failed: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Failed to fetch COAs")
 
 
 @router.get("/{coa_id}", response_model=dict)
 async def get_coa(
     coa_id: str,
-    current_user: User = Depends(require_permission("view_coa"))
+    current_user: User = Depends(require_permission(UserPermissions.VIEW_PRODUCTS.value))
 ):
-    """Get a single COA by ID (requires view_coa permission)"""
     try:
-        from bson import ObjectId
-        coa = await COA.get(ObjectId(coa_id))
+        coa = await COA.get(parse_object_id(coa_id, field="coa_id"))
         
         if not coa:
             raise HTTPException(status_code=404, detail="COA not found")
@@ -974,7 +869,6 @@ async def get_coa(
         return {
             "id": str(coa.id),
             "ingredient_name": coa.ingredient_name,
-            "product_description": coa.product_description,
             "product_code": coa.product_code,
             "lot_number": coa.lot_number,
             "manufacturing_date": coa.manufacturing_date,
@@ -997,7 +891,7 @@ async def get_coa(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to fetch COA: {e}")
+        print(f"[ERROR] get_coa failed: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Failed to fetch COA")
 
 
@@ -1005,20 +899,17 @@ async def get_coa(
 async def update_coa(
     coa_id: str,
     coa_update: COACreate,
-    current_user: User = Depends(require_permission("edit_coa"))
+    current_user: User = Depends(require_permission(UserPermissions.EDIT_PRODUCTS.value))
 ):
-    """Update a COA entry (requires edit_coa permission)"""
     try:
-        from bson import ObjectId
-        coa = await COA.get(ObjectId(coa_id))
-        
+        coa = await COA.get(parse_object_id(coa_id, field="coa_id"))
+
         if not coa:
             raise HTTPException(status_code=404, detail="COA not found")
-        
+
         update_data = coa_update.model_dump(exclude_unset=True)
-        update_data["updated_at"] = datetime.now(timezone.utc)
-        
-        # Rebuild master entry
+        update_data["updated_at"] = datetime.utcnow()
+
         master_entry = {
             "ingredient_name": coa_update.ingredient_name,
             "product_code": coa_update.product_code,
@@ -1044,43 +935,58 @@ async def update_coa(
             setattr(coa, field, value)
         
         await coa.save()
-        
+
+        audit_event(
+            "coa.update",
+            actor_id=str(current_user.id),
+            actor_role=current_user.role,
+            target_type="coa",
+            target_id=str(coa.id),
+            fields=list(update_data.keys()),
+        )
+
         return {
             "success": True,
             "message": "COA updated successfully",
             "coa_id": str(coa.id)
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update COA: {e}")
+        print(f"[ERROR] update_coa failed: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Failed to update COA")
 
 
 @router.delete("/{coa_id}", response_model=dict)
 async def delete_coa(
     coa_id: str,
-    current_user: User = Depends(require_permission("delete_coa"))
+    current_user: User = Depends(require_permission(UserPermissions.DELETE_PRODUCTS.value))
 ):
-    """Delete a COA entry (requires delete_coa permission)"""
     try:
-        from bson import ObjectId
-        coa = await COA.get(ObjectId(coa_id))
+        coa = await COA.get(parse_object_id(coa_id, field="coa_id"))
         
         if not coa:
             raise HTTPException(status_code=404, detail="COA not found")
         
         await coa.delete()
-        
+
+        audit_event(
+            "coa.delete",
+            actor_id=str(current_user.id),
+            actor_role=current_user.role,
+            target_type="coa",
+            target_id=str(coa_id),
+        )
+
         return {
             "success": True,
             "message": "COA deleted successfully"
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete COA: {e}")
+        print(f"[ERROR] delete_coa failed: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Failed to delete COA")
 

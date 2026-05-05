@@ -1,38 +1,35 @@
 import { useState, useRef } from 'react'
-import { useNavigate, Link, Navigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { Upload, Brain, BarChart3 } from 'lucide-react'
 import { authService } from '../services/api'
 
 const Login = () => {
   const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState('email') // email login only
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [step, setStep] = useState('credentials') // 'credentials' or 'otp'
-  const [otp, setOtp] = useState(['', '', '', '', '', '', '', ''])
+  // Backend generates an 8-digit OTP (see `generate_otp` default in
+  // backend/app/utils/security.py) and the verify-otp endpoint enforces
+  // `Field(..., min_length=8, max_length=8)`. Any shorter value yields a 422
+  // and a render-time crash, so keep these 8-wide.
+  const OTP_LENGTH = 8
+  const [otp, setOtp] = useState(Array(OTP_LENGTH).fill(''))
   const [resendTimer, setResendTimer] = useState(0)
-  const otpRefs = [useRef(), useRef(), useRef(), useRef(), useRef(), useRef(), useRef(), useRef()]
+  // Allocate refs via explicit useRef calls (not a loop) so the rules-of-hooks
+  // lint rule stays happy. OTP_LENGTH is a compile-time constant.
+  const otpRefs = [
+    useRef(), useRef(), useRef(), useRef(),
+    useRef(), useRef(), useRef(), useRef(),
+  ]
   const [formData, setFormData] = useState({
     email: '',
     password: ''
   })
 
-  if (authService.isAuthenticated() && authService.getCurrentUser()?.is_approved) {
-    return <Navigate to="/dashboard" replace />
-  }
-
-  const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-
   const handleEmailLogin = async (e) => {
     e.preventDefault()
     setError('')
-
-    if (!isValidEmail(formData.email)) {
-      setError('Please enter a valid email address')
-      return
-    }
-
     setLoading(true)
 
     try {
@@ -52,26 +49,16 @@ const Login = () => {
   }
 
   const handleOtpChange = (index, value) => {
-    // Handle multi-character input (autofill / paste via onChange)
-    const digits = value.replace(/\D/g, '')
-    if (digits.length > 1) {
-      const newOtp = [...otp]
-      for (let i = 0; i < digits.length && index + i < 8; i++) {
-        newOtp[index + i] = digits[i]
-      }
-      setOtp(newOtp)
-      setError('')
-      const focusIdx = Math.min(index + digits.length, 7)
-      otpRefs[focusIdx].current?.focus()
-      return
+    if (value.length > 1) {
+      value = value[0]
     }
-
+    
     const newOtp = [...otp]
-    newOtp[index] = digits
+    newOtp[index] = value
     setOtp(newOtp)
     setError('')
 
-    if (digits && index < 7) {
+    if (value && index < OTP_LENGTH - 1) {
       otpRefs[index + 1].current?.focus()
     }
   }
@@ -84,12 +71,18 @@ const Login = () => {
 
   const handleOtpPaste = (e) => {
     e.preventDefault()
-    const pastedData = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 8)
-    if (pastedData.length > 0) {
-      const newOtp = pastedData.split('').concat(Array(8).fill('')).slice(0, 8)
-      setOtp(newOtp)
-      const focusIdx = Math.min(pastedData.length, 7)
-      otpRefs[focusIdx].current?.focus()
+    const pastedData = e.clipboardData.getData('text').slice(0, OTP_LENGTH)
+    const newOtp = pastedData
+      .split('')
+      .concat(Array(OTP_LENGTH).fill(''))
+      .slice(0, OTP_LENGTH)
+    setOtp(newOtp)
+
+    const nextEmptyIndex = newOtp.findIndex(val => !val)
+    if (nextEmptyIndex !== -1) {
+      otpRefs[nextEmptyIndex].current?.focus()
+    } else {
+      otpRefs[OTP_LENGTH - 1].current?.focus()
     }
   }
 
@@ -97,7 +90,7 @@ const Login = () => {
     e.preventDefault()
     const otpString = otp.join('')
     
-    if (otpString.length !== 8) {
+    if (otpString.length !== OTP_LENGTH) {
       setError('Please enter complete OTP')
       return
     }
@@ -112,7 +105,7 @@ const Login = () => {
         navigate('/dashboard')
       } else {
         setError(result.error || 'OTP verification failed')
-        setOtp(['', '', '', '', '', '', '', ''])
+        setOtp(Array(OTP_LENGTH).fill(''))
         otpRefs[0].current?.focus()
       }
     } catch (err) {
@@ -270,7 +263,6 @@ const Login = () => {
                     <input
                       type="email"
                       name="email"
-                      autoComplete="email"
                       value={formData.email}
                       onChange={handleChange}
                       required
@@ -285,7 +277,6 @@ const Login = () => {
                       <input
                         type={showPassword ? 'text' : 'password'}
                         name="password"
-                        autoComplete="current-password"
                         value={formData.password}
                         onChange={handleChange}
                         required
@@ -311,7 +302,7 @@ const Login = () => {
                   <button
                     type="submit"
                     disabled={loading}
-                    className="w-full bg-[#b455a0] text-white py-3 rounded-lg font-medium hover:bg-[#9d4a8a] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:bg-blue-300 disabled:cursor-not-allowed"
                   >
                     {loading ? 'Signing in...' : 'Sign In'}
                   </button>
@@ -343,7 +334,7 @@ const Login = () => {
                 </div>
 
                 <form onSubmit={handleVerifyOtp} className="space-y-4">
-                  <div className="flex justify-center gap-2">
+                  <div className="flex justify-center gap-1.5">
                     {otp.map((digit, index) => (
                       <input
                         key={index}
@@ -351,11 +342,12 @@ const Login = () => {
                         type="text"
                         inputMode="numeric"
                         autoComplete="one-time-code"
+                        maxLength={1}
                         value={digit}
                         onChange={(e) => handleOtpChange(index, e.target.value)}
                         onKeyDown={(e) => handleOtpKeyDown(index, e)}
-                        onPaste={handleOtpPaste}
-                        className="w-10 h-12 text-center text-xl font-bold border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                        onPaste={index === 0 ? handleOtpPaste : undefined}
+                        className="w-10 h-14 text-center text-xl font-bold border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
                       />
                     ))}
                   </div>
@@ -384,7 +376,7 @@ const Login = () => {
 
                 <div className="mt-4 text-center">
                   <button
-                    onClick={() => { setStep('credentials'); setOtp(['', '', '', '', '', '', '', '']) }}
+                    onClick={() => { setStep('credentials'); setOtp(Array(OTP_LENGTH).fill('')) }}
                     className="text-sm text-gray-600 hover:text-gray-700"
                   >
                     ← Back to login

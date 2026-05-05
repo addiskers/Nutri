@@ -1,79 +1,91 @@
-import asyncio
-import random
-from fastapi import APIRouter, HTTPException, status, Depends, Request, Response
+from fastapi import APIRouter, HTTPException, status, Depends, Request, BackgroundTasks
+from fastapi.security import HTTPAuthorizationCredentials
 from datetime import datetime, timedelta, timezone
-
-
-def _as_utc(dt: datetime) -> datetime:
-    """Coerce a naive datetime (assumed UTC) to aware. Handles old DB documents."""
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, AuthProvider
 from app.schemas.auth import (
     UserRegister, UserLogin, VerifyLoginOTP, ForgotPassword, ResetPassword, ChangePassword,
-    LogoutRequest, TokenResponse, UserResponse, MessageResponse
+    TokenResponse, UserResponse, MessageResponse,
+    RefreshTokenRequest, RefreshTokenResponse,
 )
 from app.utils.security import (
-    create_access_token, create_refresh_token, decode_token,
-    hash_password, verify_password, generate_otp, hash_otp, verify_otp,
-    validate_password_strength, deny_token, is_token_denied
+    create_access_token, create_refresh_token,
+    hash_password, verify_password, verify_dummy_password, verify_dummy_otp, generate_otp,
+    validate_password_strength, decode_token, hash_otp, verify_otp, deny_token,
 )
 from app.utils.email import send_login_otp_email, send_password_reset_email, send_user_approval_email
-from app.utils.audit import log_event
-from app.dependencies.auth import get_current_user
+from app.utils.audit import audit_event
+from app.dependencies.auth import get_current_user, security
 from app.middleware.security import limiter
 from config.settings import settings
-import logging
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-# Refresh-token cookie configuration.
-# Path scoped to /api/auth so the browser only attaches it to auth endpoints.
-# `Secure` is conditional on environment so local HTTP dev still works; in any
-# deployed environment (production / uat / staging) the cookie is HTTPS-only.
-REFRESH_COOKIE_NAME = "refresh_token"
-REFRESH_COOKIE_PATH = "/api/auth"
+def _build_token_payload(user: User) -> dict:
+    """Shared JWT payload. `tv` (token_version) is enforced by get_current_user
+    so we can invalidate all issued tokens on password change / reset."""
+    return {
+        "user_id": str(user.id),
+        "email": user.email,
+        "role": user.role,
+        "tv": user.token_version,
+    }
 
 
-def _refresh_cookie_secure() -> bool:
-    return (settings.ENVIRONMENT or "").lower() in ("production", "prod", "uat", "staging")
-
-
-def _set_refresh_cookie(response: Response, token: str) -> None:
-    response.set_cookie(
-        key=REFRESH_COOKIE_NAME,
-        value=token,
-        httponly=True,
-        secure=_refresh_cookie_secure(),
-        samesite="strict",
-        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
-        path=REFRESH_COOKIE_PATH,
+def _otp_locked_out(user: User) -> bool:
+    return bool(
+        user.otp_lockout_until
+        and user.otp_lockout_until > datetime.utcnow()
     )
 
 
-def _clear_refresh_cookie(response: Response) -> None:
-    response.delete_cookie(
-        key=REFRESH_COOKIE_NAME,
-        path=REFRESH_COOKIE_PATH,
-    )
-
-
-def _require_csrf_header(request: Request) -> None:
-    # Custom-header CSRF defence: browsers cannot set this header on a
-    # cross-origin request without a CORS preflight that our backend would
-    # reject for unknown origins. Layered with SameSite=Strict on the cookie.
-    if request.headers.get("x-requested-with") != "XMLHttpRequest":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Missing CSRF header",
+async def _record_otp_failure(user: User) -> None:
+    """Count failed OTP attempts and trigger a per-account lockout once the
+    threshold is reached. Resets the attempt counter after lockout."""
+    user.otp_attempts = (user.otp_attempts or 0) + 1
+    if user.otp_attempts >= settings.OTP_MAX_ATTEMPTS:
+        user.otp_lockout_until = datetime.utcnow() + timedelta(
+            minutes=settings.OTP_LOCKOUT_MINUTES
         )
+        user.otp_attempts = 0
+    await user.save()
+
+
+async def _clear_otp_state(user: User, *, clear_login: bool = False, clear_reset: bool = False) -> None:
+    if clear_login:
+        user.login_otp = None
+        user.login_otp_expires = None
+    if clear_reset:
+        user.password_reset_otp = None
+        user.password_reset_otp_expires = None
+    user.otp_attempts = 0
+    user.otp_lockout_until = None
+    await user.save()
+
+
+def _email_domain_allowed(email: str) -> bool:
+    """Optional allow-list of registrable email domains.
+
+    Returns True when no allow-list is configured (registration is open) or
+    the email's domain is in the list. Always called case-insensitively.
+    """
+    allowed = settings.get_allowed_domains()
+    if not allowed:
+        return True
+    _, _, domain = (email or "").lower().partition("@")
+    return any(domain == d.lower().strip() for d in allowed if d)
 
 
 @router.post("/register", response_model=MessageResponse)
-@limiter.limit("3/minute")
-async def register(request: Request, user_data: UserRegister):
+@limiter.limit("2/minute")
+async def register(
+    request: Request,
+    user_data: UserRegister,
+    background_tasks: BackgroundTasks,
+):
+    # Avoid user-enumeration via distinct error messages. We still validate
+    # password strength up-front, but we do not tell the caller whether the
+    # email is already registered.
     is_valid, error_msg = validate_password_strength(user_data.password)
     if not is_valid:
         raise HTTPException(
@@ -81,472 +93,307 @@ async def register(request: Request, user_data: UserRegister):
             detail=error_msg
         )
 
-    # Constant-time delay on all paths to prevent user enumeration via timing
-    await asyncio.sleep(random.uniform(0.2, 0.6))
+    email = user_data.email.lower()
 
-    existing_user = await User.find_one(User.email == user_data.email.lower())
+    generic_response = MessageResponse(
+        message="Registration received. If the email is eligible, an admin will review it shortly.",
+        success=True,
+    )
+
+    # Enforce domain allow-list (when configured) but keep the response
+    # identical to the happy path so we don't leak which domains are allowed.
+    if not _email_domain_allowed(email):
+        verify_dummy_password(user_data.password)
+        return generic_response
+
+    existing_user = await User.find_one(User.email == email)
+
     if existing_user:
-        return MessageResponse(
-            message="Registration successful! Your account is pending admin approval.",
-            success=True
-        )
-    
-    # Always register as Researcher first -- promote to Super Admin only after
-    # verifying no other Super Admin exists (prevents race condition)
+        # Silently swallow the duplicate so attackers can't enumerate accounts.
+        # Burn the same bcrypt cost as ``hash_password`` on the new-user path
+        # so timing can't distinguish "exists" from "newly registered".
+        verify_dummy_password(user_data.password)
+        return generic_response
+
     new_user = User(
         name=user_data.name,
-        email=user_data.email.lower(),
+        email=email,
         hashed_password=hash_password(user_data.password),
         department=user_data.department,
+        auth_provider=AuthProvider.LOCAL,
         role=UserRole.RESEARCHER,
         is_active=True,
         is_verified=True,
         is_approved=False,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc)
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
     )
+
     new_user.update_permissions_by_role()
+    await new_user.insert()
 
+    # Dispatch admin notifications via BackgroundTasks so SMTP latency (which
+    # scales with the number of super-admins) doesn't leak the new-user path
+    # via response time. The async helper enumerates admins itself so the DB
+    # query also moves out of the request lifecycle.
+    background_tasks.add_task(
+        _notify_super_admins_of_registration,
+        new_user_name=new_user.name,
+        new_user_email=new_user.email,
+        new_user_id=str(new_user.id),
+        department=new_user.department or "Not specified",
+    )
+
+    return generic_response
+
+
+async def _notify_super_admins_of_registration(
+    *,
+    new_user_name: str,
+    new_user_email: str,
+    new_user_id: str,
+    department: str,
+) -> None:
     try:
-        await new_user.insert()
-    except Exception:
-        recheck = await User.find_one(User.email == user_data.email.lower())
-        if recheck:
-            return MessageResponse(
-                message="Registration successful! Your account is pending admin approval.",
-                success=True
-            )
-        raise
-
-    # After insert, atomically check if this is the only user (no Super Admin exists)
-    existing_super = await User.find_one(
-        User.role == UserRole.SUPER_ADMIN,
-        User.is_active == True,
-    )
-    is_first_user = existing_super is None
-
-    if is_first_user:
-        # Promote to Super Admin only if no other Super Admin was created in the meantime
-        new_user.role = UserRole.SUPER_ADMIN
-        new_user.is_approved = True
-        new_user.update_permissions_by_role()
-        await new_user.save()
-
-        # Final verification: if another Super Admin appeared during our save, demote back
-        super_count = await User.find(User.role == UserRole.SUPER_ADMIN).count()
-        if super_count > 1:
-            first_super = await User.find_one(
-                User.role == UserRole.SUPER_ADMIN,
-                {"_id": {"$ne": new_user.id}},
-            )
-            if first_super:
-                new_user.role = UserRole.RESEARCHER
-                new_user.is_approved = False
-                new_user.update_permissions_by_role()
-                await new_user.save()
-                return MessageResponse(
-                    message="Registration successful! Your account is pending admin approval.",
-                    success=True
+        super_admins = await User.find(
+            User.role == UserRole.SUPER_ADMIN, User.is_active == True
+        ).to_list()
+        for admin in super_admins:
+            try:
+                await send_user_approval_email(
+                    admin_email=admin.email,
+                    admin_name=admin.name,
+                    new_user_name=new_user_name,
+                    new_user_email=new_user_email,
+                    new_user_id=new_user_id,
+                    department=department,
                 )
-
-    if is_first_user:
-        logger.info("First user registered as Super Admin")
-        return MessageResponse(
-            message="Welcome! You are the first user and have been granted Super Admin privileges.",
-            success=True
-        )
-    
-    # Send approval emails to existing admins as a background task so the response
-    # time of /register does not depend on whether the user already existed
-    # (defends against user-enumeration via timing analysis).
-    async def _notify_super_admins(new_user_id: str, new_user_name: str, new_user_email: str, new_user_dept: str) -> None:
-        try:
-            super_admins = await User.find(User.role == UserRole.SUPER_ADMIN, User.is_active == True).to_list()
-            logger.info("Found %d super admins to notify", len(super_admins))
-            for admin in super_admins:
-                try:
-                    await send_user_approval_email(
-                        admin_email=admin.email,
-                        admin_name=admin.name,
-                        new_user_name=new_user_name,
-                        new_user_email=new_user_email,
-                        new_user_id=new_user_id,
-                        department=new_user_dept,
-                    )
-                    logger.info("Approval email sent to admin")
-                except Exception as e:
-                    logger.warning("Failed to send approval email: %s", type(e).__name__)
-        except Exception as e:
-            logger.error("Failed to notify super admins: %s", type(e).__name__)
-
-    asyncio.create_task(_notify_super_admins(
-        str(new_user.id), new_user.name, new_user.email,
-        new_user.department or "Not specified",
-    ))
-
-    logger.info("New user registered")
-    
-    return MessageResponse(
-        message="Registration successful! Your account is pending admin approval.",
-        success=True
-    )
-
-
-MAX_LOGIN_ATTEMPTS = 10
-LOGIN_LOCKOUT_MINUTES = 15
+            except Exception as e:
+                print(f"[WARNING] Failed to send approval email to admin: {e}")
+    except Exception as e:
+        print(f"[ERROR] Failed to notify super admins of new registration: {e}")
 
 
 @router.post("/login")
-@limiter.limit("5/minute")
-async def login(request: Request, credentials: UserLogin):
+@limiter.limit("10/minute")
+async def login(
+    request: Request,
+    credentials: UserLogin,
+    background_tasks: BackgroundTasks,
+):
     user = await User.find_one(User.email == credentials.email.lower())
     if not user or not user.hashed_password:
+        # Burn the same bcrypt cycles as a real verify so the missing-user
+        # path can't be distinguished from the wrong-password path by timing.
+        verify_dummy_password(credentials.password)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
-        )
-
-    # Check login lockout before doing any password work
-    if user.login_locked_until and _as_utc(user.login_locked_until) > datetime.now(timezone.utc):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many failed login attempts. Please try again later."
         )
 
     if not verify_password(credentials.password, user.hashed_password):
-        user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
-        if user.failed_login_attempts >= MAX_LOGIN_ATTEMPTS:
-            user.login_locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)
-            logger.warning("Login locked after %d failed attempts", user.failed_login_attempts)
-            log_event("LOGIN_LOCKED", user_id=str(user.id), user_email=user.email, detail=f"attempts={user.failed_login_attempts}")
-        else:
-            log_event("LOGIN_FAILED", user_id=str(user.id), user_email=user.email, detail=f"attempts={user.failed_login_attempts}")
-        await user.save()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
         )
 
-    # Successful password — clear lockout state
-    user.failed_login_attempts = 0
-    user.login_locked_until = None
-
-    if not user.is_approved:
-        logger.warning("Login attempt by unapproved user")
+    # Collapse approval / activation failures into the same generic message
+    # so an attacker with a valid password cannot distinguish account state.
+    if not user.is_approved or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
+            detail="Invalid email or password",
         )
 
-    if not user.is_active:
+    if _otp_locked_out(user):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your account has been deactivated"
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed OTP attempts. Please try again later.",
         )
 
+    # Issue the login OTP into a dedicated column so the password-reset flow
+    # can run independently without clobbering it. We send the plaintext OTP
+    # via email but persist only its hash so a DB read never yields a working
+    # OTP.
     otp = generate_otp()
     user.login_otp = hash_otp(otp)
-    user.login_otp_expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+    user.login_otp_expires = datetime.utcnow() + timedelta(
+        minutes=settings.LOGIN_OTP_EXPIRE_MINUTES
+    )
     user.otp_attempts = 0
-    user.otp_locked_until = None
+    user.otp_lockout_until = None
     await user.save()
 
-    try:
-        await send_login_otp_email(user.email, otp, user.name)
-    except Exception as e:
-        logger.error("Failed to send OTP email: %s", type(e).__name__)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send verification email. Please try again."
-        )
-    
+    # SMTP send dispatched after the response is sent so a 1-3s mail latency
+    # can't be used as a timing oracle to confirm valid credentials. Failures
+    # are logged by FastAPI's BackgroundTasks runner; operators correlate via
+    # logs (same contract as before).
+    background_tasks.add_task(send_login_otp_email, user.email, otp, user.name)
+
     return MessageResponse(
-        message="OTP sent to your email. Please verify to continue.",
-        success=True
+        message="If the credentials are valid, an OTP has been sent to the registered email.",
+        success=True,
     )
 
 
-MAX_OTP_ATTEMPTS = 3
-OTP_LOCKOUT_MINUTES_BASE = 15  # Escalates: 15min, 30min, 60min, 240min
-
-
-def _get_lockout_duration(lockout_count: int) -> int:
-    """Exponential backoff for repeated OTP lockouts (in minutes)."""
-    multipliers = [1, 2, 4, 16]  # 15min, 30min, 60min, 240min
-    idx = min(lockout_count, len(multipliers) - 1)
-    return OTP_LOCKOUT_MINUTES_BASE * multipliers[idx]
-
-
 @router.post("/verify-otp", response_model=TokenResponse)
-@limiter.limit("3/minute")
-async def verify_login_otp(request: Request, response: Response, otp_data: VerifyLoginOTP):
+@limiter.limit("10/minute")
+async def verify_login_otp(request: Request, otp_data: VerifyLoginOTP):
     user = await User.find_one(User.email == otp_data.email.lower())
     if not user:
+        # Burn matching bcrypt cycles so timing can't distinguish missing
+        # account from "account exists but wrong/no active OTP".
+        verify_dummy_otp(str(otp_data.otp))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid OTP"
         )
 
-    # Check OTP lockout
-    if user.otp_locked_until and _as_utc(user.otp_locked_until) > datetime.now(timezone.utc):
+    if _otp_locked_out(user):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many failed attempts. Please try again later."
+            detail="Too many failed OTP attempts. Please try again later.",
         )
 
-    if not user.login_otp or not verify_otp(otp_data.otp, user.login_otp):
-        user.otp_attempts = (user.otp_attempts or 0) + 1
-        if user.otp_attempts >= MAX_OTP_ATTEMPTS:
-            lockout_minutes = _get_lockout_duration(user.otp_lockout_count or 0)
-            user.otp_locked_until = datetime.now(timezone.utc) + timedelta(minutes=lockout_minutes)
-            user.otp_lockout_count = (user.otp_lockout_count or 0) + 1
-            user.login_otp = None
-            user.login_otp_expires = None
-            logger.warning("OTP locked for user after %d failed attempts (lockout %d: %d min)",
-                           user.otp_attempts, user.otp_lockout_count, lockout_minutes)
-        await user.save()
+    if not user.login_otp or not user.login_otp_expires:
+        verify_dummy_otp(str(otp_data.otp))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid OTP"
         )
-    
-    if not user.login_otp_expires or _as_utc(user.login_otp_expires) < datetime.now(timezone.utc):
+
+    if user.login_otp_expires < datetime.utcnow():
+        # Consume expired OTP so it cannot be replayed.
+        await _clear_otp_state(user, clear_login=True)
+        verify_dummy_otp(str(otp_data.otp))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="OTP expired. Please request a new one."
         )
-    
-    # Success — reset OTP state
-    user.login_otp = None
-    user.login_otp_expires = None
-    user.otp_attempts = 0
-    user.otp_locked_until = None
-    user.otp_lockout_count = 0
-    user.last_login = datetime.now(timezone.utc)
-    await user.save()
-    
-    # Create JWT tokens
-    token_data = {
-        "user_id": str(user.id),
-        "email": user.email,
-        "role": user.role,
-        "tv": user.token_version,
-    }
 
+    # OTP is stored as a bcrypt hash; passlib's verify is constant-time.
+    if not verify_otp(str(otp_data.otp), str(user.login_otp)):
+        await _record_otp_failure(user)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid OTP"
+        )
+
+    await _clear_otp_state(user, clear_login=True)
+    user.last_login = datetime.utcnow()
+    await user.save()
+
+    token_data = _build_token_payload(user)
     access_token = create_access_token(token_data)
     refresh_token = create_refresh_token(token_data)
 
-    # Refresh token is delivered as an httpOnly + Secure + SameSite=Strict cookie
-    # (not exposed to JavaScript) to eliminate the XSS-theft vector. The body
-    # field is left blank for backwards compatibility with older clients.
-    _set_refresh_cookie(response, refresh_token)
-
-    logger.info("User logged in")
-    log_event("LOGIN", user_id=str(user.id), user_email=user.email)
-
     return TokenResponse(
         access_token=access_token,
-        refresh_token="",
+        refresh_token=refresh_token,
         token_type="bearer",
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         user=UserResponse.from_user(user)
     )
 
 
-@router.post("/refresh", response_model=TokenResponse)
-@limiter.limit("10/minute")
-async def refresh_token(request: Request, response: Response):
-    """Exchange a valid refresh token (read from httpOnly cookie) for a new access
-    + refresh token pair (rotation)."""
-    _require_csrf_header(request)
-
-    cookie_token = request.cookies.get(REFRESH_COOKIE_NAME)
-    if not cookie_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing refresh token",
-        )
-
-    payload = decode_token(cookie_token)
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token",
-        )
-
-    if payload.get("type") != "refresh":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token type",
-        )
-
-    jti = payload.get("jti")
-    if jti and await is_token_denied(jti):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token has been revoked",
-        )
-
-    if jti:
-        exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
-        await deny_token(jti, exp)
-
-    user_id = payload.get("user_id")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
-        )
-
-    user = await User.get(user_id)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-        )
-    # Reject refresh tokens issued before a password change
-    token_version = payload.get("tv", 0)
-    if token_version != (user.token_version or 0):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session expired due to password change",
-        )
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is deactivated",
-        )
-    if not user.is_approved:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is not approved",
-        )
-
-    token_data = {
-        "user_id": str(user.id),
-        "email": user.email,
-        "role": user.role,
-        "tv": user.token_version,
-    }
-
-    new_access = create_access_token(token_data)
-    new_refresh = create_refresh_token(token_data)
-
-    _set_refresh_cookie(response, new_refresh)
-
-    return TokenResponse(
-        access_token=new_access,
-        refresh_token="",
-        token_type="bearer",
-        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        user=UserResponse.from_user(user),
-    )
-
-
 @router.post("/forgot-password", response_model=MessageResponse)
 @limiter.limit("3/minute")
-async def forgot_password(request: Request, forgot_data: ForgotPassword):
-    """
-    Request password reset OTP
+async def forgot_password(
+    request: Request,
+    reset_request: ForgotPassword,
+    background_tasks: BackgroundTasks,
+):
+    user = await User.find_one(User.email == reset_request.email.lower())
 
-    Both branches (user-exists, user-not-exists) take roughly the same wall-clock
-    time and return the same message body. Email delivery happens in a background
-    task so response timing does not leak account existence.
-    """
-    # Always pay the same minimum delay so both paths are time-equalised.
-    await asyncio.sleep(random.uniform(0.2, 0.5))
-
-    user = await User.find_one(User.email == forgot_data.email.lower())
-    if not user:
-        return MessageResponse(
-            message="If the email exists, a password reset OTP has been sent.",
-            success=True
-        )
-
-    otp = generate_otp()
-    user.reset_token = hash_otp(otp)
-    user.reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=settings.PASSWORD_RESET_TOKEN_EXPIRE_HOURS)
-    await user.save()
-
-    async def _send_reset_email_bg(email: str, code: str, name: str) -> None:
-        try:
-            await send_password_reset_email(email, code, name)
-        except Exception as e:
-            logger.error("Failed to send password reset email: %s", type(e).__name__)
-
-    asyncio.create_task(_send_reset_email_bg(user.email, otp, user.name))
-
-    logger.info("Password reset OTP scheduled for delivery")
-
-    return MessageResponse(
+    generic_response = MessageResponse(
         message="If the email exists, a password reset OTP has been sent.",
         success=True
     )
 
+    # Always respond the same way whether or not the email exists so we don't
+    # leak account enumeration. Also skip for non-local auth providers.
+    # Burn the same bcrypt cost as the user-found branch (where ``hash_otp``
+    # runs) so timing can't distinguish the two; the email send is dispatched
+    # via BackgroundTasks so SMTP latency doesn't leak either.
+    if not user or user.auth_provider != AuthProvider.LOCAL:
+        verify_dummy_otp("")
+        return generic_response
+
+    # Dedicated short-lived OTP for password reset (minutes, not hours).
+    # Store only the hash; the plaintext is delivered to the user via email.
+    otp = generate_otp()
+    user.password_reset_otp = hash_otp(otp)
+    user.password_reset_otp_expires = datetime.utcnow() + timedelta(
+        minutes=settings.PASSWORD_RESET_OTP_EXPIRE_MINUTES
+    )
+    user.otp_attempts = 0
+    user.otp_lockout_until = None
+    await user.save()
+
+    background_tasks.add_task(send_password_reset_email, user.email, otp, user.name)
+
+    return generic_response
+
 
 @router.post("/reset-password", response_model=MessageResponse)
-@limiter.limit("3/minute")
-async def reset_password(request: Request, reset_data: ResetPassword):
-    """
-    Reset password using OTP
-    """
-    user = await User.find_one(User.email == reset_data.email.lower())
+@limiter.limit("5/minute")
+async def reset_password(request: Request, reset: ResetPassword):
+    user = await User.find_one(User.email == reset.email.lower())
     if not user:
+        # Match the bcrypt cost of a real verify so timing doesn't reveal
+        # whether the account exists.
+        verify_dummy_otp(str(reset.otp))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid OTP"
         )
 
-    # Check OTP lockout
-    if user.otp_locked_until and _as_utc(user.otp_locked_until) > datetime.now(timezone.utc):
+    if _otp_locked_out(user):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many failed attempts. Please try again later."
+            detail="Too many failed OTP attempts. Please try again later.",
         )
 
-    if not user.reset_token or not verify_otp(reset_data.otp, user.reset_token):
-        user.otp_attempts = (user.otp_attempts or 0) + 1
-        if user.otp_attempts >= MAX_OTP_ATTEMPTS:
-            lockout_minutes = _get_lockout_duration(user.otp_lockout_count or 0)
-            user.otp_locked_until = datetime.now(timezone.utc) + timedelta(minutes=lockout_minutes)
-            user.otp_lockout_count = (user.otp_lockout_count or 0) + 1
-            user.reset_token = None
-            user.reset_token_expires = None
-            logger.warning("Reset OTP locked for user after %d failed attempts (lockout %d: %d min)",
-                           user.otp_attempts, user.otp_lockout_count, lockout_minutes)
-        await user.save()
+    if not user.password_reset_otp or not user.password_reset_otp_expires:
+        verify_dummy_otp(str(reset.otp))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid OTP"
         )
-    
-    # Check expiration
-    if not user.reset_token_expires or _as_utc(user.reset_token_expires) < datetime.now(timezone.utc):
+
+    if user.password_reset_otp_expires < datetime.utcnow():
+        await _clear_otp_state(user, clear_reset=True)
+        verify_dummy_otp(str(reset.otp))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="OTP expired"
         )
-    
-    is_valid, error_msg = validate_password_strength(reset_data.new_password)
+
+    if not verify_otp(str(reset.otp), str(user.password_reset_otp)):
+        await _record_otp_failure(user)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid OTP"
+        )
+
+    is_valid, error_msg = validate_password_strength(reset.new_password)
     if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error_msg
         )
-    
-    user.hashed_password = hash_password(reset_data.new_password)
-    user.reset_token = None
-    user.reset_token_expires = None
-    user.otp_attempts = 0
-    user.otp_locked_until = None
-    user.otp_lockout_count = 0
+
+    user.hashed_password = hash_password(reset.new_password)
+    user.password_reset_otp = None
+    user.password_reset_otp_expires = None
+    # Invalidate every existing session now that the password has changed —
+    # otherwise a stolen token outlives the reset.
     user.token_version = (user.token_version or 0) + 1
-    user.updated_at = datetime.now(timezone.utc)
+    user.otp_attempts = 0
+    user.otp_lockout_until = None
+    user.updated_at = datetime.utcnow()
     await user.save()
 
-    logger.info("Password reset completed — all prior sessions invalidated")
-    log_event("PASSWORD_RESET", user_id=str(user.id), user_email=user.email)
-    
     return MessageResponse(
         message="Password reset successful. You can now login with your new password.",
         success=True
@@ -557,79 +404,133 @@ async def reset_password(request: Request, reset_data: ResetPassword):
 @limiter.limit("5/minute")
 async def change_password(
     request: Request,
-    password_data: ChangePassword,
+    change: ChangePassword,
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Change password for authenticated user
-    """
-    if not verify_password(password_data.current_password, current_user.hashed_password):
+    if current_user.auth_provider != AuthProvider.LOCAL or not current_user.hashed_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password change is not available for this account"
+        )
+    
+    if not verify_password(change.current_password, current_user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Current password is incorrect"
         )
     
-    is_valid, error_msg = validate_password_strength(password_data.new_password)
+    is_valid, error_msg = validate_password_strength(change.new_password)
     if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error_msg
         )
     
-    current_user.hashed_password = hash_password(password_data.new_password)
+    current_user.hashed_password = hash_password(change.new_password)
     current_user.token_version = (current_user.token_version or 0) + 1
-    current_user.updated_at = datetime.now(timezone.utc)
+    current_user.updated_at = datetime.utcnow()
     await current_user.save()
-    
-    logger.info("Password changed")
-    log_event("PASSWORD_CHANGE", user_id=str(current_user.id), user_email=current_user.email)
-    
+
     return MessageResponse(
-        message="Password changed successfully",
+        message="Password changed successfully. Please log in again.",
         success=True
     )
 
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(current_user: User = Depends(get_current_user)):
-    """
-    Get current authenticated user's information
-    
-    Requires valid JWT token
-    """
     return UserResponse.from_user(current_user)
 
 
 @router.post("/logout", response_model=MessageResponse)
 async def logout(
-    request: Request,
-    response: Response,
-    body: LogoutRequest = LogoutRequest(),
     current_user: User = Depends(get_current_user),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
-    """Logout: revoke both the current access token and the refresh token (read
-    from cookie, with body fallback for legacy clients), then clear the cookie."""
-    # Deny the access token
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        payload = decode_token(auth_header.split(" ", 1)[1])
-        if payload and payload.get("jti"):
-            exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
-            await deny_token(payload["jti"], exp)
+    """JWT is stateless, but we still:
+      1) deny the just-used access token's `jti` until its `exp` (so an
+         attacker who already exfiltrated the bearer can't replay it during
+         the access-token's remaining lifetime), and
+      2) bump `token_version` so any refresh token in flight is rejected.
+    """
+    payload = decode_token(credentials.credentials) or {}
+    jti = payload.get("jti")
+    exp_ts = payload.get("exp")
+    if jti and exp_ts:
+        try:
+            expires_at = datetime.fromtimestamp(int(exp_ts), tz=timezone.utc)
+            await deny_token(jti, expires_at)
+        except Exception as e:
+            # Denylist insert failures are non-fatal: token_version bump below
+            # still revokes future use; surface only via internal log.
+            print(f"[WARNING] deny_token failed during logout: {type(e).__name__}")
 
-    # Deny the refresh token: prefer cookie, fall back to body
-    refresh_value = request.cookies.get(REFRESH_COOKIE_NAME) or body.refresh_token
-    if refresh_value:
-        refresh_payload = decode_token(refresh_value)
-        if refresh_payload and refresh_payload.get("type") == "refresh" and refresh_payload.get("jti"):
-            exp = datetime.fromtimestamp(refresh_payload["exp"], tz=timezone.utc)
-            await deny_token(refresh_payload["jti"], exp)
-
-    _clear_refresh_cookie(response)
-
-    logger.info("User logged out")
-    log_event("LOGOUT", user_id=str(current_user.id), user_email=current_user.email)
+    current_user.token_version = (current_user.token_version or 0) + 1
+    current_user.updated_at = datetime.utcnow()
+    await current_user.save()
+    audit_event(
+        "auth.logout",
+        actor_id=str(current_user.id),
+        actor_role=current_user.role,
+    )
     return MessageResponse(
-        message="Logged out successfully",
+        message="Logged out successfully.",
         success=True
+    )
+
+
+@router.post("/refresh", response_model=RefreshTokenResponse)
+@limiter.limit("30/minute")
+async def refresh_token(request: Request, body: RefreshTokenRequest):
+    """Exchange a refresh token for a new access token.
+
+    Security properties:
+      - Only refresh-typed JWTs are accepted.
+      - The `tv` claim must still match the user's current `token_version`,
+        so password change / reset / logout revokes refresh tokens too.
+      - We rotate the refresh token on every call so a leaked refresh token
+        is usable at most once before the legitimate client invalidates it.
+    """
+    payload = decode_token(body.refresh_token)
+    if not payload or payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
+
+    user_id = payload.get("user_id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
+
+    user = await User.get(user_id)
+    if not user or not user.is_active or not user.is_approved:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
+
+    if payload.get("tv", 0) != user.token_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has been revoked",
+        )
+
+    # Rotate: bump token_version so the consumed refresh token can't be
+    # replayed. The fresh tokens carry the new version.
+    user.token_version = (user.token_version or 0) + 1
+    user.updated_at = datetime.utcnow()
+    await user.save()
+
+    token_data = _build_token_payload(user)
+    new_access = create_access_token(token_data)
+    new_refresh = create_refresh_token(token_data)
+
+    return RefreshTokenResponse(
+        access_token=new_access,
+        refresh_token=new_refresh,
+        token_type="bearer",
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )

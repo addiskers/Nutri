@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout/Layout'
 import { User, Lock, Mail, Briefcase, Shield, Calendar, CheckCircle, AlertCircle } from 'lucide-react'
-import { apiRequest, clearAuthData } from '../services/api'
+import authService, { apiRequest, clearAuthData } from '../services/api'
 
 const SettingsPage = () => {
   const navigate = useNavigate()
@@ -27,7 +27,9 @@ const SettingsPage = () => {
   const fetchUserProfile = async () => {
     try {
       setLoading(true)
-      if (!sessionStorage.getItem('access_token')) {
+      // Centralised auth check — never read sessionStorage directly so token
+      // storage policy (currently sessionStorage) can change in one place.
+      if (!authService.isAuthenticated()) {
         navigate('/login')
         return
       }

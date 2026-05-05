@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 from app.models.nutrient_hierarchy import NutrientHierarchyNode
 from app.models.user import User
-from app.dependencies.auth import get_current_user, require_permission
+from app.dependencies.auth import require_permission
+from app.utils.queries import parse_object_id
 
 router = APIRouter(prefix="/nutrient-hierarchy", tags=["Nutrient Hierarchy"])
 
@@ -84,7 +85,7 @@ async def create_node(
 
 @router.get("", response_model=dict)
 async def list_nodes(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("view_nomenclature")),
 ):
     nodes = await NutrientHierarchyNode.find_all().sort("+display_order").to_list()
     return {
@@ -95,7 +96,7 @@ async def list_nodes(
 
 @router.get("/tree", response_model=dict)
 async def get_tree(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("view_nomenclature")),
 ):
     """Return the hierarchy as a nested tree structure for frontend consumption."""
     nodes = await NutrientHierarchyNode.find_all().sort("+display_order").to_list()
@@ -121,11 +122,9 @@ async def get_tree(
 @router.get("/{node_id}", response_model=dict)
 async def get_node(
     node_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("view_nomenclature")),
 ):
-    from bson import ObjectId
-
-    node = await NutrientHierarchyNode.get(ObjectId(node_id))
+    node = await NutrientHierarchyNode.get(parse_object_id(node_id, field="node_id"))
     if not node:
         raise HTTPException(status_code=404, detail="Hierarchy node not found")
     return _serialize(node)
@@ -137,9 +136,7 @@ async def update_node(
     update: NodeUpdate,
     current_user: User = Depends(require_permission("edit_nomenclature")),
 ):
-    from bson import ObjectId
-
-    node = await NutrientHierarchyNode.get(ObjectId(node_id))
+    node = await NutrientHierarchyNode.get(parse_object_id(node_id, field="node_id"))
     if not node:
         raise HTTPException(status_code=404, detail="Hierarchy node not found")
 
@@ -198,9 +195,7 @@ async def delete_node(
     cascade: bool = False,
     current_user: User = Depends(require_permission("edit_nomenclature")),
 ):
-    from bson import ObjectId
-
-    node = await NutrientHierarchyNode.get(ObjectId(node_id))
+    node = await NutrientHierarchyNode.get(parse_object_id(node_id, field="node_id"))
     if not node:
         raise HTTPException(status_code=404, detail="Hierarchy node not found")
 

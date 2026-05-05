@@ -1,7 +1,18 @@
 import { useState, useRef } from 'react'
 import ReactCrop from 'react-image-crop'
 import 'react-image-crop/dist/ReactCrop.css'
-import { Upload, X, Crop } from 'lucide-react'
+import { Upload, X, Crop, AlertCircle } from 'lucide-react'
+
+// Mirrors backend `MAX_UPLOAD_FILE_SIZE_MB` (10 MB). Reject oversize uploads
+// before reading them into a data URL so we don't blow up RAM on huge files
+// just to have the server return a 413.
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
+const ALLOWED_UPLOAD_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+])
 
 const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
   const [imageSrc, setImageSrc] = useState(null)
@@ -15,19 +26,39 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
   const [completedCrop, setCompletedCrop] = useState(null)
   const [croppedImage, setCroppedImage] = useState(null)
   const [showCropper, setShowCropper] = useState(false)
+  const [error, setError] = useState(null)
   const imgRef = useRef(null)
   const fileInputRef = useRef(null)
 
   const handleFileChange = (e) => {
     const file = e.target.files[0]
-    if (file) {
-      const reader = new FileReader()
-      reader.addEventListener('load', () => {
-        setImageSrc(reader.result)
-        setShowCropper(true)
-      })
-      reader.readAsDataURL(file)
+    if (!file) {
+      e.target.value = ''
+      return
     }
+
+    if (file.type && !ALLOWED_UPLOAD_TYPES.has(file.type)) {
+      setError(`Unsupported type "${file.type}". Use JPG, PNG, or WebP.`)
+      e.target.value = ''
+      return
+    }
+
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setError(
+        `File is ${(file.size / (1024 * 1024)).toFixed(1)} MB. ` +
+        `Maximum size is 10 MB.`
+      )
+      e.target.value = ''
+      return
+    }
+
+    setError(null)
+    const reader = new FileReader()
+    reader.addEventListener('load', () => {
+      setImageSrc(reader.result)
+      setShowCropper(true)
+    })
+    reader.readAsDataURL(file)
     // Reset input so the same file can be re-selected
     e.target.value = ''
   }
@@ -74,6 +105,7 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
     setImageSrc(null)
     setCroppedImage(null)
     setShowCropper(false)
+    setError(null)
     setCrop({
       unit: '%',
       x: 5,
@@ -99,6 +131,7 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
           />
           <Upload className="w-6 h-6 text-[#65758b] mb-2" />
           <span className="text-xs font-ibm-plex text-[#65758b]">{label}</span>
+          <span className="text-[10px] font-ibm-plex text-[#94a3b8] mt-1">JPG, PNG, WebP · max 10 MB</span>
         </label>
       ) : (
         <div className="aspect-square border-2 border-[#e1e7ef] rounded-lg overflow-hidden relative group">
@@ -123,6 +156,13 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
               <X className="w-4 h-4 text-[#0f1729]" />
             </button>
           </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-2 flex items-start gap-1.5 text-[11px] font-ibm-plex text-red-600">
+          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+          <span>{error}</span>
         </div>
       )}
 

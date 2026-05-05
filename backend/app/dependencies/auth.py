@@ -50,7 +50,6 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Reject tokens issued before a password change
     token_version = payload.get("tv", 0)
     if token_version != (user.token_version or 0):
         raise HTTPException(
@@ -69,7 +68,7 @@ async def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is not approved",
         )
-    
+
     return user
 
 

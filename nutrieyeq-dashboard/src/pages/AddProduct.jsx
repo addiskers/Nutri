@@ -117,9 +117,6 @@ const AddProduct = () => {
   })
   const [directionsToUse, setDirectionsToUse]     = useState('')
   const [preparationMethod, setPreparationMethod] = useState('')
-  const [medicalInfo, setMedicalInfo] = useState({
-    intendedUse: '', warnings: '', contraindications: ''
-  })
 
   // ── Company ───────────────────────────────────────────────────────────────
   const [companyData, setCompanyData] = useState({
@@ -221,7 +218,6 @@ const AddProduct = () => {
         serveSize:       data.basic.serveSize       || prev.serveSize,
         mrp:             data.basic.mrp             || prev.mrp,
         uspf:            data.basic.uspf            || prev.uspf,
-        packingFormat:   data.basic.packingFormat   || prev.packingFormat,
         manufactured:    data.basic.manufactured    || prev.manufactured,
         expiry:          data.basic.expiry          || prev.expiry,
         shelfLife:       data.basic.shelfLife       || prev.shelfLife,
@@ -303,15 +299,6 @@ const AddProduct = () => {
           setDirectionsToUse(ui)
         }
       }
-      // Medical information
-      if (comp.medicalInformation) {
-        const mi = comp.medicalInformation
-        setMedicalInfo({
-          intendedUse:      (mi.intended_use     || []).join('\n'),
-          warnings:         (mi.warnings         || []).join('\n'),
-          contraindications:(mi.contraindications|| []).join('\n'),
-        })
-      }
     }
 
     // Company
@@ -362,11 +349,11 @@ const AddProduct = () => {
       }
     }
 
-    // Batch
+    // Batch (transformer emits camelCase; older payloads used snake_case)
     if (data.batch) {
       setBatchData({
-        lotNumber:   data.batch.lot_number   || '',
-        machineCode: data.batch.machine_code || '',
+        lotNumber:   data.batch.lotNumber   || data.batch.lot_number   || '',
+        machineCode: data.batch.machineCode || data.batch.machine_code || '',
         otherCodes:  (data.batch.other_codes || []).join('\n'),
       })
     }
@@ -534,11 +521,6 @@ const AddProduct = () => {
         allergen_information:  allergens.join(', ') || null,
         claims:                claims,
 
-        medical_information: {
-          intended_use:      medicalInfo.intendedUse.split('\n').filter(Boolean),
-          warnings:          medicalInfo.warnings.split('\n').filter(Boolean),
-          contraindications: medicalInfo.contraindications.split('\n').filter(Boolean),
-        },
         usage_instructions: {
           directions_to_use: directionsToUse.split('\n').filter(Boolean),
           preparation_method: preparationMethod.split('\n').filter(Boolean),
@@ -785,14 +767,14 @@ const AddProduct = () => {
                       </div>
                     </div>
 
-                    {/* Packing Format */}
+                    {/* Packing Format — user choice only; not from AI extraction */}
                     <div>
                       <label className={labelClass}>Packing Format</label>
                       <div className="relative">
                         <select value={formData.packingFormat}
                           onChange={e => setFormData({ ...formData, packingFormat: e.target.value })}
                           className={inputClass.replace('pr-9','pr-9')}>
-                          <option value="">Select format</option>
+                          <option value="">None</option>
                           {['sachet','bottle','pouch','jar','can','tetra pack','carton','box','tub','pack','bag','wrapper','tube','blister pack','strip','container','drum','barrel','clamshell','standup pouch'].map(f => (
                             <option key={f} value={f}>{f.charAt(0).toUpperCase()+f.slice(1)}</option>
                           ))}
@@ -1029,21 +1011,6 @@ const AddProduct = () => {
                   </div>
                 </div>
 
-                {/* Medical Information */}
-                <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
-                  <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Medical Information</h3>
-                  <p className="text-xs text-[#65758b] mb-4">Applicable for pharmaceutical or health products. One item per line.</p>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5 md:mb-2">
-                      <label className={labelClass.replace('block','')}>Warnings</label>
-                      <CopyBtnStandalone value={medicalInfo.warnings} field="add_med_warnings" />
-                    </div>
-                    <textarea placeholder="e.g., Do not exceed recommended dose" value={medicalInfo.warnings}
-                      onChange={e => setMedicalInfo({ ...medicalInfo, warnings: e.target.value })} rows={3}
-                      className={textareaClass} />
-                  </div>
-                </div>
               </div>
             )}
 

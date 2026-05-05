@@ -1,91 +1,88 @@
-"""
-Category Management Routes - CRUD operations for product categories
-"""
-import logging
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
-from datetime import datetime, timezone
+from datetime import datetime
 from pydantic import BaseModel
 from app.models.category import Category
-from app.models.user import User
-from app.dependencies.auth import get_current_user, require_permission
-
-logger = logging.getLogger(__name__)
+from app.models.user import User, UserRole
+from app.dependencies.auth import get_current_user, require_role
+from app.utils.queries import parse_object_id, normalize_pagination
+from app.utils.audit import audit_event
 
 router = APIRouter(prefix="/categories", tags=["Categories"])
 
 
-# Request Schemas
+# Categories are shared taxonomy across the whole product catalog. Writes are
+# restricted to Admin+ (there is no finer-grained permission).
+_admin_or_above = require_role(UserRole.ADMIN)
+
+
 class CategoryCreate(BaseModel):
-    """Schema for creating a category"""
     name: str
     description: Optional[str] = None
 
 
 class CategoryUpdate(BaseModel):
-    """Schema for updating a category"""
     name: Optional[str] = None
     description: Optional[str] = None
 
 
-# ============================================================
-# CREATE
-# ============================================================
 @router.post("", response_model=dict)
 async def create_category(
     category_data: CategoryCreate,
-    current_user: User = Depends(require_permission("add_products"))
+    current_user: User = Depends(_admin_or_above)
 ):
-    """Create a new category"""
     try:
-        # Check if category already exists
         existing = await Category.find_one(Category.name == category_data.name)
         if existing:
             raise HTTPException(
                 status_code=400,
                 detail=f"Category '{category_data.name}' already exists"
             )
-        
-        # Create category
+
         category = Category(
             name=category_data.name,
             description=category_data.description,
             created_by=current_user.email
         )
         await category.insert()
-        
+
+        audit_event(
+            "category.create",
+            actor_id=str(current_user.id),
+            actor_role=current_user.role,
+            target_type="category",
+            target_id=str(category.id),
+        )
+
         return {
             "id": str(category.id),
             "name": category.name,
             "description": category.description,
             "created_at": category.created_at.isoformat()
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to create category: {e}")
+        print(f"[ERROR] create_category failed: {type(e).__name__}")
         raise HTTPException(
             status_code=500,
             detail="Failed to create category"
         )
 
 
-# ============================================================
-# READ
-# ============================================================
 @router.get("", response_model=dict)
 async def list_categories(
     skip: int = 0,
     limit: int = 100,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
-    """List all categories"""
     try:
-        limit = min(limit, 200)
+        skip, limit = normalize_pagination(skip, limit, max_limit=200)
+
         categories = await Category.find_all().skip(skip).limit(limit).to_list()
         total = await Category.find_all().count()
-        
+
         return {
             "categories": [
                 {
@@ -98,9 +95,9 @@ async def list_categories(
             ],
             "total": total
         }
-        
+
     except Exception as e:
-        logger.error(f"Failed to fetch categories: {e}")
+        print(f"[ERROR] list_categories failed: {type(e).__name__}")
         raise HTTPException(
             status_code=500,
             detail="Failed to fetch categories"
@@ -108,15 +105,16 @@ async def list_categories(
 
 
 @router.get("/{category_id}", response_model=dict)
-async def get_category(category_id: str, current_user: User = Depends(get_current_user)):
-    """Get a specific category"""
+async def get_category(
+    category_id: str,
+    current_user: User = Depends(get_current_user),
+):
     try:
-        from bson import ObjectId
-        category = await Category.get(ObjectId(category_id))
-        
+        category = await Category.get(parse_object_id(category_id, field="category_id"))
+
         if not category:
             raise HTTPException(status_code=404, detail="Category not found")
-        
+
         return {
             "id": str(category.id),
             "name": category.name,
@@ -124,35 +122,29 @@ async def get_category(category_id: str, current_user: User = Depends(get_curren
             "created_at": category.created_at.isoformat(),
             "updated_at": category.updated_at.isoformat()
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to fetch category: {e}")
+        print(f"[ERROR] get_category failed: {type(e).__name__}")
         raise HTTPException(
             status_code=500,
             detail="Failed to fetch category"
         )
 
 
-# ============================================================
-# UPDATE
-# ============================================================
 @router.put("/{category_id}", response_model=dict)
 async def update_category(
     category_id: str,
     category_update: CategoryUpdate,
-    current_user: User = Depends(require_permission("edit_products"))
+    current_user: User = Depends(_admin_or_above)
 ):
-    """Update a category"""
     try:
-        from bson import ObjectId
-        category = await Category.get(ObjectId(category_id))
-        
+        category = await Category.get(parse_object_id(category_id, field="category_id"))
+
         if not category:
             raise HTTPException(status_code=404, detail="Category not found")
-        
-        # Check for duplicate name if changing name
+
         if category_update.name and category_update.name != category.name:
             existing = await Category.find_one(Category.name == category_update.name)
             if existing:
@@ -160,65 +152,75 @@ async def update_category(
                     status_code=400,
                     detail=f"Category '{category_update.name}' already exists"
                 )
-        
-        # Update fields
+
+        changed: List[str] = []
         if category_update.name is not None:
             category.name = category_update.name
+            changed.append("name")
         if category_update.description is not None:
             category.description = category_update.description
-        
-        category.updated_at = datetime.now(timezone.utc)
+            changed.append("description")
+
+        category.updated_at = datetime.utcnow()
         await category.save()
-        
+
+        audit_event(
+            "category.update",
+            actor_id=str(current_user.id),
+            actor_role=current_user.role,
+            target_type="category",
+            target_id=str(category.id),
+            fields=changed,
+        )
+
         return {
             "id": str(category.id),
             "name": category.name,
             "description": category.description,
             "updated_at": category.updated_at.isoformat()
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update category: {e}")
+        print(f"[ERROR] update_category failed: {type(e).__name__}")
         raise HTTPException(
             status_code=500,
             detail="Failed to update category"
         )
 
 
-# ============================================================
-# DELETE
-# ============================================================
 @router.delete("/{category_id}", response_model=dict)
 async def delete_category(
     category_id: str,
-    current_user: User = Depends(require_permission("delete_products"))
+    current_user: User = Depends(_admin_or_above)
 ):
-    """Delete a category"""
     try:
-        from bson import ObjectId
-        category = await Category.get(ObjectId(category_id))
-        
+        category = await Category.get(parse_object_id(category_id, field="category_id"))
+
         if not category:
             raise HTTPException(status_code=404, detail="Category not found")
-        
+
+        category_name = category.name
         await category.delete()
-        
+
+        audit_event(
+            "category.delete",
+            actor_id=str(current_user.id),
+            actor_role=current_user.role,
+            target_type="category",
+            target_id=str(category_id),
+        )
+
         return {
-            "message": f"Category '{category.name}' deleted successfully"
+            "message": f"Category '{category_name}' deleted successfully"
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete category: {e}")
+        print(f"[ERROR] delete_category failed: {type(e).__name__}")
         raise HTTPException(
             status_code=500,
             detail="Failed to delete category"
         )
-
-
-
-
-

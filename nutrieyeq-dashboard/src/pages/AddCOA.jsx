@@ -4,6 +4,20 @@ import Layout from '../components/Layout/Layout'
 import { Upload, Plus, Trash2, Sparkles, Save, Loader2, Check, AlertCircle, FileText } from 'lucide-react'
 import { coaService } from '../services/api'
 
+// Mirrors backend `MAX_UPLOAD_FILE_SIZE_MB` (10 MB). Reject oversize uploads
+// in the browser so users get instant feedback instead of waiting for a 413
+// after the bytes are already on the wire.
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
+const MAX_TOTAL_SIZE_BYTES = 50 * 1024 * 1024
+const ALLOWED_UPLOAD_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+])
+
 const AddCOA = () => {
   const navigate = useNavigate()
   
@@ -100,6 +114,37 @@ const AddCOA = () => {
   // Process selected files
   const handleFiles = (files) => {
     const fileArray = Array.from(files)
+
+    const oversize = fileArray.find(f => f.size > MAX_FILE_SIZE_BYTES)
+    if (oversize) {
+      setExtractionError(
+        `"${oversize.name}" is ${(oversize.size / (1024 * 1024)).toFixed(1)} MB. ` +
+        `Each file must be under 10 MB.`
+      )
+      return
+    }
+
+    const badType = fileArray.find(f => f.type && !ALLOWED_UPLOAD_TYPES.has(f.type))
+    if (badType) {
+      setExtractionError(
+        `"${badType.name}" has unsupported type "${badType.type}". ` +
+        `Use PDF, JPG, PNG, or WebP.`
+      )
+      return
+    }
+
+    const newTotal = [...uploadedFiles, ...fileArray].reduce(
+      (sum, f) => sum + (f.size || 0),
+      0
+    )
+    if (newTotal > MAX_TOTAL_SIZE_BYTES) {
+      setExtractionError(
+        `Combined upload size would be ${(newTotal / (1024 * 1024)).toFixed(1)} MB. ` +
+        `Total must stay under 50 MB.`
+      )
+      return
+    }
+
     setUploadedFiles(prev => [...prev, ...fileArray])
     // Reset extraction state when new files are added
     setExtractionComplete(false)

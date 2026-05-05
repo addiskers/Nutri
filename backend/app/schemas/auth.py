@@ -93,6 +93,24 @@ class TokenResponse(BaseModel):
     user: 'UserResponse'
 
 
+class RefreshTokenRequest(BaseModel):
+    """Body for POST /auth/refresh. The refresh token is accepted from the
+    JSON body because we do not (yet) store it in an httpOnly cookie."""
+    refresh_token: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {"refresh_token": "eyJhbGciOi..."}
+        }
+
+
+class RefreshTokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int
+
+
 class UserResponse(BaseModel):
     id: str
     name: str
@@ -137,17 +155,6 @@ class UserResponse(BaseModel):
                 "is_verified": True,
                 "created_at": "2026-01-22T10:00:00Z",
                 "last_login": "2026-01-22T15:30:00Z"
-            }
-        }
-
-
-class RefreshTokenRequest(BaseModel):
-    refresh_token: str
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
             }
         }
 

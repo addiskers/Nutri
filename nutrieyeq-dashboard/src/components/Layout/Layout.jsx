@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import Sidebar from './Sidebar'
 import Navbar from './Navbar'
 import authService from '../../services/api'
+import { debugLog } from '../../utils/debugLog'
 
 const Layout = ({ children }) => {
   const [isCollapsed, setIsCollapsed] = useState(false)
@@ -17,7 +18,7 @@ const Layout = ({ children }) => {
           lastCheck = now
           try {
             await authService.getCurrentUserInfo()
-            setUserRefreshKey(prev => prev + 1) // Force sidebar re-render
+            setUserRefreshKey(prev => prev + 1)
           } catch (error) {
             console.error('Failed to refresh user data:', error)
           }
@@ -25,27 +26,24 @@ const Layout = ({ children }) => {
       }
     }
 
-    // Listen for immediate permission changes
     const handlePermissionsChanged = () => {
-      console.log('Permissions changed - updating sidebar immediately')
-      setUserRefreshKey(prev => prev + 1) // Force sidebar re-render
+      debugLog('Permissions changed - updating sidebar immediately')
+      setUserRefreshKey(prev => prev + 1)
     }
 
-    // Periodic refresh every 30 seconds
     const refreshInterval = setInterval(async () => {
       try {
         const oldUser = authService.getCurrentUser()
         await authService.getCurrentUserInfo()
         const newUser = authService.getCurrentUser()
-        
-        // Check if permissions changed
+
         if (JSON.stringify(oldUser?.permissions) !== JSON.stringify(newUser?.permissions)) {
-          setUserRefreshKey(prev => prev + 1) // Force sidebar re-render
+          setUserRefreshKey(prev => prev + 1)
         }
       } catch (error) {
         console.error('Failed to refresh user data:', error)
       }
-    }, 30000) // 30 seconds
+    }, 30000)
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
     window.addEventListener('permissionsChanged', handlePermissionsChanged)

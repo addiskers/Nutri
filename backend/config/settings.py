@@ -1,19 +1,29 @@
-import logging
-import sys
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from typing import Optional
-
-logger = logging.getLogger(__name__)
+import secrets
 
 
 class Settings(BaseSettings):
     MONGODB_URL: str = "mongodb://localhost:27017"
     DATABASE_NAME: str = "nutrieyeq"
-    SECRET_KEY: str = ""
+    # Must be supplied via env in production. None => validator either fills
+    # an ephemeral key (DEBUG=True) or raises (DEBUG=False).
+    SECRET_KEY: Optional[str] = None
+    # Accepted as a fallback when `decode_token` validates a JWT, so an
+    # operator can rotate SECRET_KEY without forcing every active session to
+    # 401 at once. Set this to the old SECRET_KEY during the rotation window,
+    # then clear it after outstanding refresh tokens expire.
+    PREVIOUS_SECRET_KEY: Optional[str] = None
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # JWT `iss`/`aud` claims. Hardcoded pair so `jwt.decode(..., audience=,
+    # issuer=)` rejects tokens minted by any other service that happens to
+    # share the signing key (defence-in-depth against key-confusion attacks).
+    JWT_ISSUER: str = "nutrieyeq-api"
+    JWT_AUDIENCE: str = "nutrieyeq-dashboard"
+    ALLOWED_EMAIL_DOMAINS: str = ""
     SUPER_ADMIN_EMAILS: str = ""
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
@@ -21,37 +31,27 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     FROM_EMAIL: str = ""
     FROM_NAME: str = "NutriEyeQ Dashboard"
+    # Legacy (kept for back-compat); new code reads PASSWORD_RESET_OTP_EXPIRE_MINUTES.
     PASSWORD_RESET_TOKEN_EXPIRE_HOURS: int = 24
+    PASSWORD_RESET_OTP_EXPIRE_MINUTES: int = 15
+    LOGIN_OTP_EXPIRE_MINUTES: int = 10
+    OTP_MAX_ATTEMPTS: int = 5
+    OTP_LOCKOUT_MINUTES: int = 15
+    MAX_UPLOAD_FILE_SIZE_MB: int = 10
+    MAX_UPLOAD_TOTAL_SIZE_MB: int = 50
+    # Global cap on any incoming request body. Set above the total extract cap
+    # so multipart overhead fits, but low enough to stop resource exhaustion.
+    MAX_REQUEST_BODY_SIZE_MB: int = 100
     FRONTEND_URL: str = "http://localhost:5173/"
     RATE_LIMIT_PER_MINUTE: int = 60
+    # Per-user extract throttle — these hit a paid Gemini endpoint, so a valid
+    # session must not be usable as a billing DoS.
+    EXTRACT_RATE_LIMIT: str = "10/minute"
     APP_NAME: str = "NutriEyeQ Dashboard"
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
     GEMINI_API_KEY: Optional[str] = None
-    ENVIRONMENT: str = "development"
-    BEHIND_PROXY: bool = False
-    TRUSTED_PROXY_IPS: str = "127.0.0.1,::1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
-    PREVIOUS_SECRET_KEY: Optional[str] = None  # For key rotation: set old key here temporarily
-    JWT_ISSUER: str = "nutrieyeq"
-    JWT_AUDIENCE: str = "nutrieyeq-api"
     
-    @field_validator('SECRET_KEY', mode='before')
-    @classmethod
-    def validate_secret_key(cls, v):
-        if not v or len(str(v)) < 32:
-            print("\n[FATAL] SECRET_KEY environment variable is missing or too short (min 32 chars).")
-            print("  Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\"")
-            sys.exit(1)
-        return v
-
-    @field_validator('ALGORITHM', mode='before')
-    @classmethod
-    def validate_algorithm(cls, v):
-        allowed = {"HS256", "HS384", "HS512"}
-        if v not in allowed:
-            raise ValueError(f"ALGORITHM must be one of {allowed}")
-        return v
-
     @field_validator('DEBUG', mode='before')
     @classmethod
     def parse_debug(cls, v):
@@ -63,6 +63,32 @@ class Settings(BaseSettings):
             elif v.lower() in ('false', '0', 'no', 'off', 'warn', 'info', 'error'):
                 return False
         return bool(v)
+    
+    @model_validator(mode='after')
+    def _validate_secret_key(self):
+        # Fail fast when SECRET_KEY is missing in production. In DEBUG we
+        # substitute an ephemeral key (sessions invalidate on every restart)
+        # and warn loudly.
+        if not self.SECRET_KEY or self.SECRET_KEY.startswith("your-super-secret"):
+            if self.DEBUG:
+                object.__setattr__(self, 'SECRET_KEY', secrets.token_hex(32))
+                print(
+                    "[WARNING] SECRET_KEY not set; using ephemeral key. "
+                    "All JWTs will be invalidated on restart. "
+                    "Set SECRET_KEY in your environment for persistent sessions."
+                )
+            else:
+                raise RuntimeError(
+                    "SECRET_KEY is required when DEBUG=False. "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\" "
+                    "and set it via the SECRET_KEY environment variable."
+                )
+        return self
+
+    def get_allowed_domains(self) -> list:
+        if not self.ALLOWED_EMAIL_DOMAINS:
+            return []
+        return [d.strip() for d in self.ALLOWED_EMAIL_DOMAINS.split(',') if d.strip()]
     
     def get_super_admin_emails(self) -> list:
         if not self.SUPER_ADMIN_EMAILS:

@@ -43,7 +43,6 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
   const nutritionTable = d.nutrition_table || []
   const nutritionNotes = d.nutrition_notes || []
   const claims = d.claims || []
-  const warnings = d.medical_information?.warnings || []
   const directionsToUse = d.usage_instructions?.directions_to_use || []
   const preparationMethod = d.usage_instructions?.preparation_method || []
   const storageInstructions = d.storage_instructions || []
@@ -52,6 +51,7 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
   const barcodes = d.barcodes || []
   const certifications = d.certifications || []
   const regulatoryText = d.regulatory_text || []
+  const otherImportantText = d.other_important_text || []
   const customerCare = d.customer_care || {}
   const batchInfo = d.batch_information || {}
   const packagingInfo = d.packaging_information || {}
@@ -217,19 +217,13 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
               </Section>
             )}
 
-            {/* Warnings */}
-            {warnings.length > 0 && (
-              <Section title="Warnings">
-                <ul className="text-sm font-ibm-plex text-[#0f1729] space-y-1">
-                  {warnings.map((w, i) => <li key={i}>• {w}</li>)}
-                </ul>
-              </Section>
-            )}
-
             {/* Manufacturer & FSSAI */}
-            {(manufacturers.length > 0 || fssaiNumbers.length > 0) && (
+            {(manufacturers.length > 0 || fssaiNumbers.length > 0 || d.brand_owner) && (
               <Section title="Manufacturer & FSSAI">
                 <div className="space-y-4">
+                  {d.brand_owner && (
+                    <Field label="Brand Owner" value={d.brand_owner} />
+                  )}
                   {manufacturers.map((m, i) => (
                     <div key={i} className="grid grid-cols-2 gap-x-8 gap-y-3">
                       <Field label={m.type || 'Manufacturer'} value={m.name} />
@@ -268,12 +262,15 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
             )}
 
             {/* Customer Care */}
-            {(customerCare.phone?.length > 0 || customerCare.email || customerCare.website) && (
+            {(customerCare.phone?.length > 0 || customerCare.email || customerCare.website || customerCare.address) && (
               <Section title="Customer Care" defaultOpen={false}>
                 <div className="grid grid-cols-2 gap-x-8 gap-y-4">
                   <Field label="Phone" value={customerCare.phone} />
                   <Field label="Email" value={customerCare.email} />
                   <Field label="Website" value={customerCare.website} />
+                  {customerCare.address && (
+                    <div className="col-span-2"><Field label="Address" value={customerCare.address} /></div>
+                  )}
                 </div>
               </Section>
             )}
@@ -283,6 +280,15 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
               <Section title="Regulatory Text" defaultOpen={false}>
                 <ul className="text-sm font-ibm-plex text-[#0f1729] space-y-1">
                   {regulatoryText.map((r, i) => <li key={i}>• {r}</li>)}
+                </ul>
+              </Section>
+            )}
+
+            {/* Other Important Text */}
+            {otherImportantText.length > 0 && (
+              <Section title="Other Important Text" defaultOpen={false}>
+                <ul className="text-sm font-ibm-plex text-[#0f1729] space-y-1">
+                  {otherImportantText.map((t, i) => <li key={i}>• {t}</li>)}
                 </ul>
               </Section>
             )}

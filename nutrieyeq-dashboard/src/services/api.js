@@ -1,200 +1,190 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL
-if (!API_BASE_URL) throw new Error('VITE_API_URL environment variable is not set')
+import { authStorage } from './authStorage'
 
-const getToken = () => sessionStorage.getItem('access_token')
-
-// The refresh token now lives in an httpOnly + Secure + SameSite=Strict cookie
-// set by the backend on /verify-otp and /refresh. It is never stored in or read
-// from JavaScript-accessible storage, eliminating the XSS-theft vector.
-export function clearAuthData() {
-  sessionStorage.removeItem('access_token')
-  sessionStorage.removeItem('user')
+// VITE_API_URL is inlined at build time. A missing value in a production
+// bundle would silently fall back to HTTP localhost and leak real traffic to
+// any developer who tunnels port 8000 — fail loud instead so the misbuild is
+// caught before users hit it. The dev-only fallback is tree-shaken from the
+// prod bundle by Vite's `import.meta.env.PROD` substitution.
+const RAW_API_URL = import.meta.env.VITE_API_URL
+if (import.meta.env.PROD && !RAW_API_URL) {
+  throw new Error('VITE_API_URL must be set at build time for production bundles')
 }
+const API_BASE_URL = RAW_API_URL || 'http://localhost:8000/api'
 
-function storeAuthData(data) {
-  sessionStorage.setItem('access_token', data.access_token)
-  if (data.user) sessionStorage.setItem('user', JSON.stringify(data.user))
-}
+const getToken = () => authStorage.getAccessToken()
 
-function safeParseUser() {
-  try {
-    const raw = sessionStorage.getItem('user')
-    return raw ? JSON.parse(raw) : null
-  } catch {
-    sessionStorage.removeItem('user')
-    return null
-  }
-}
+// Thin alias used by pages that pre-date the `authStorage` refactor. Keep it
+// delegating so tokens, user object, and any future fields stay centralised
+// in one place (never reach into sessionStorage directly from a component).
+export const clearAuthData = () => authStorage.clear()
 
-// Decode a `data:<mime>;base64,<payload>` URL to a Blob without using fetch().
-// fetch() on data: URIs is blocked by CSP `connect-src` (would require allowing data:).
-function dataUrlToBlob(dataUrl) {
-  const match = /^data:([^;,]+)(?:;base64)?,(.*)$/.exec(dataUrl)
-  if (!match) throw new Error('Invalid data URL')
-  const mime = match[1] || 'application/octet-stream'
-  const isBase64 = /;base64,/i.test(dataUrl)
-  const payload = isBase64 ? atob(match[2]) : decodeURIComponent(match[2])
-  const bytes = new Uint8Array(payload.length)
-  for (let i = 0; i < payload.length; i++) bytes[i] = payload.charCodeAt(i)
-  return new Blob([bytes], { type: mime })
-}
-
-function sanitizeError(detail, fallback = 'Request failed') {
-  if (!detail) return fallback
-  if (typeof detail === 'string') {
-    if (/traceback|stack|exception|internal server/i.test(detail)) return fallback
-    return detail
-  }
+/**
+ * FastAPI serves two incompatible shapes under `detail`:
+ *   - HTTPException(...)            -> detail: "some string"
+ *   - Pydantic ValidationError      -> detail: [{type, loc, msg, input, ctx}, ...]
+ *
+ * Rendering the array form directly into JSX crashes React with
+ *   "Objects are not valid as a React child"
+ * because `loc`/`ctx` are nested objects. Every error-surface in the app
+ * funnels through this helper so a 422 response can never blow up the UI;
+ * it always returns a plain string safe to `setError(...)` or interpolate.
+ */
+export function extractErrorMessage(body, fallback = 'Something went wrong') {
+  if (body == null) return fallback
+  if (typeof body === 'string') return body
+  const detail = body.detail ?? body.message ?? body
+  if (typeof detail === 'string') return detail
   if (Array.isArray(detail)) {
-    return detail.map(d => d?.msg || d?.message || fallback).join('; ')
+    const parts = detail
+      .map((item) => {
+        if (typeof item === 'string') return item
+        if (item && typeof item.msg === 'string') return item.msg
+        return null
+      })
+      .filter(Boolean)
+    return parts.length ? parts.join('; ') : fallback
   }
+  if (detail && typeof detail.msg === 'string') return detail.msg
   return fallback
 }
 
-const DEFAULT_TIMEOUT_MS = 30000
-
-function withTimeout(options, timeoutMs = DEFAULT_TIMEOUT_MS) {
-  if (options.signal) return options
-  const controller = new AbortController()
-  setTimeout(() => controller.abort(), timeoutMs)
-  return { ...options, signal: controller.signal }
+// Dev-only logger. Vite replaces `import.meta.env.DEV` at build time so the
+// prod branch is tree-shaken, ensuring tokens and response bodies never leak
+// to production consoles.
+const debugLog = (...args) => {
+  if (import.meta.env && import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.log(...args)
+  }
 }
 
-async function unauthenticatedRequest(endpoint, options = {}) {
-  return fetch(`${API_BASE_URL}${endpoint}`, withTimeout({
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  }))
+// Single in-flight refresh so concurrent 401s don't cause a burst of
+// /auth/refresh calls (each rotates the token and invalidates the others).
+let _refreshInFlight = null
+
+async function refreshAccessToken() {
+  if (_refreshInFlight) return _refreshInFlight
+  const refresh_token = authStorage.getRefreshToken()
+  if (!refresh_token) return null
+
+  _refreshInFlight = (async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refresh_token }),
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      authStorage.setTokens({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+      })
+      return data.access_token
+    } catch {
+      return null
+    } finally {
+      _refreshInFlight = null
+    }
+  })()
+
+  return _refreshInFlight
 }
 
+// Exported so page-level components (SettingsPage, TransferFormulationModal,
+// etc.) can hit ad-hoc endpoints through the same bearer-token + refresh
+// pipeline the dedicated services use. Do NOT inline `fetch` in those
+// components — that would bypass the single-flight /auth/refresh retry.
+//
+// Body handling:
+//   - FormData bodies leave Content-Type unset so the browser writes
+//     `multipart/form-data; boundary=...` itself.
+//   - Anything else defaults to `application/json` (callers can override
+//     via `options.headers`).
 export async function apiRequest(endpoint, options = {}) {
   const token = getToken()
-  
-  const config = {
+  const isFormData =
+    typeof FormData !== 'undefined' && options.body instanceof FormData
+
+  const buildConfig = (t) => ({
     ...options,
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...options.headers,
-      ...(token && { 'Authorization': `Bearer ${token}` })
-    }
-  }
-  
+      ...(t && { 'Authorization': `Bearer ${t}` }),
+    },
+  })
+
   try {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, withTimeout(config))
-    
+    let response = await fetch(`${API_BASE_URL}${endpoint}`, buildConfig(token))
+
     if (response.status === 401 && token) {
       const refreshed = await refreshAccessToken()
       if (refreshed) {
-        config.headers['Authorization'] = `Bearer ${getToken()}`
-        return fetch(`${API_BASE_URL}${endpoint}`, withTimeout(config))
-      } else {
-        clearAuthData()
-        window.location.href = '/login'
-        throw new Error('Session expired. Please login again.')
+        response = await fetch(`${API_BASE_URL}${endpoint}`, buildConfig(refreshed))
+        if (response.status !== 401) {
+          return response
+        }
       }
-    }
-    
-    return response
-  } catch (error) {
-    throw error
-  }
-}
 
-async function apiUpload(endpoint, formData) {
-  const token = getToken()
-  
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, withTimeout({
-    method: 'POST',
-    headers: {
-      ...(token && { 'Authorization': `Bearer ${token}` })
-    },
-    body: formData
-  }, 120000))
-
-  if (response.status === 401 && token) {
-    const refreshed = await refreshAccessToken()
-    if (refreshed) {
-      return fetch(`${API_BASE_URL}${endpoint}`, withTimeout({
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${getToken()}` },
-        body: formData
-      }, 120000))
-    } else {
-      clearAuthData()
-      window.location.href = '/login'
+      authStorage.clear()
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
       throw new Error('Session expired. Please login again.')
     }
-  }
 
-  return response
-}
-
-let _refreshPromise = null
-
-async function refreshAccessToken() {
-  if (_refreshPromise) return _refreshPromise
-
-  _refreshPromise = (async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest',
-        },
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        storeAuthData(data)
-        return true
-      }
-    } catch {
-      // refresh failed
-    }
-
-    return false
-  })()
-
-  try {
-    return await _refreshPromise
-  } finally {
-    _refreshPromise = null
+    return response
+  } catch (error) {
+    debugLog('API Request Error:', error)
+    throw error
   }
 }
 
 export const productService = {
   async extractFromImages(images) {
+    debugLog('[FRONTEND] Starting extraction with', images.length, 'images')
     try {
       const formData = new FormData()
       
       for (let i = 0; i < images.length; i++) {
         const image = images[i]
+        debugLog(`[FRONTEND] Processing image ${i + 1}/${images.length}`)
         
         if (typeof image === 'string' && image.startsWith('data:')) {
-          const blob = dataUrlToBlob(image)
+          const response = await fetch(image)
+          const blob = await response.blob()
+          debugLog(`[FRONTEND] Image ${i + 1} converted to blob: ${blob.size} bytes`)
           formData.append('images', blob, `image_${i}.jpg`)
         } else if (image instanceof File || image instanceof Blob) {
+          debugLog(`[FRONTEND] Image ${i + 1} is File/Blob: ${image.size} bytes`)
           formData.append('images', image, `image_${i}.jpg`)
         }
       }
       
-      const response = await apiUpload('/products/extract', formData)
+      debugLog('[FRONTEND] Calling API:', `${API_BASE_URL}/products/extract`)
+
+      const response = await apiRequest('/products/extract', {
+        method: 'POST',
+        body: formData,
+      })
+
+      debugLog('[FRONTEND] Response status:', response.status)
       const result = await response.json()
-      
+      debugLog('[FRONTEND] Response data:', result)
+
       if (response.ok) {
         return result
       } else {
         return {
           success: false,
-          error: sanitizeError(result.detail, 'Extraction failed'),
+          error: extractErrorMessage(result, 'Extraction failed')
         }
       }
     } catch (error) {
+      debugLog('[FRONTEND] Extraction error:', error)
       return {
         success: false,
         error: error.message || 'Network error during extraction'
@@ -202,9 +192,6 @@ export const productService = {
     }
   },
   
-  /**
-   * Create a new product
-   */
   async createProduct(productData) {
     try {
       const response = await apiRequest('/products', {
@@ -219,7 +206,7 @@ export const productService = {
       } else {
         return {
           success: false,
-          error: sanitizeError(result.detail, 'Failed to create product')
+          error: extractErrorMessage(result, 'Failed to create product')
         }
       }
     } catch (error) {
@@ -229,10 +216,14 @@ export const productService = {
       }
     }
   },
-  
-  /**
-   * Get all products
-   */
+
+  async getDashboardStats() {
+    const response = await apiRequest('/products/dashboard-stats', { method: 'GET' })
+    if (response.ok) return await response.json()
+    const errorData = await response.json().catch(() => ({}))
+    throw new Error(extractErrorMessage(errorData, 'Failed to fetch dashboard stats'))
+  },
+
   async getProducts(params = {}) {
     try {
       const queryParams = new URLSearchParams()
@@ -242,39 +233,22 @@ export const productService = {
       if (params.status) queryParams.append('status', params.status)
       if (params.search) queryParams.append('search', params.search)
 
-      const response = await apiRequest(`/products?${queryParams.toString()}`)
+      const response = await apiRequest(`/products?${queryParams.toString()}`, {
+        method: 'GET'
+      })
 
       if (response.ok) {
         return await response.json()
       } else {
-        console.error('API response not OK:', response.status, response.statusText)
-        const errorData = await response.json().catch(() => ({}))
-        console.error('Error details:', errorData)
+        debugLog('API response not OK:', response.status, response.statusText)
         throw new Error(`Failed to fetch products: ${response.statusText}`)
       }
     } catch (error) {
-      console.error('Failed to fetch products:', error)
+      debugLog('Failed to fetch products:', error)
       throw error
     }
   },
 
-  /**
-   * Get dashboard stats (counts + recent products + category breakdown)
-   */
-  async getDashboardStats() {
-    try {
-      const response = await apiRequest('/products/stats')
-      if (response.ok) return await response.json()
-      throw new Error(`Failed to fetch stats: ${response.statusText}`)
-    } catch (error) {
-      console.error('Failed to fetch dashboard stats:', error)
-      throw error
-    }
-  },
-
-  /**
-   * Get single product
-   */
   async getProduct(id) {
     try {
       const response = await apiRequest(`/products/${id}`)
@@ -284,14 +258,11 @@ export const productService = {
       }
       return null
     } catch (error) {
-      console.error('Failed to fetch product:', error)
+      debugLog('Failed to fetch product:', error)
       return null
     }
   },
   
-  /**
-   * Update product
-   */
   async updateProduct(id, productData) {
     try {
       const response = await apiRequest(`/products/${id}`, {
@@ -306,7 +277,7 @@ export const productService = {
       }
       return {
         success: false,
-        error: sanitizeError(result.detail, 'Failed to update product')
+        error: extractErrorMessage(result, 'Failed to update product')
       }
     } catch (error) {
       return {
@@ -316,23 +287,20 @@ export const productService = {
     }
   },
   
-  /**
-   * Delete product
-   */
   async deleteProduct(id) {
     try {
       const response = await apiRequest(`/products/${id}`, {
         method: 'DELETE'
       })
-      
+
       const result = await response.json()
-      
+
       if (response.ok) {
         return { success: true, ...result }
       }
       return {
         success: false,
-        error: sanitizeError(result.detail, 'Failed to delete product')
+        error: extractErrorMessage(result, 'Failed to delete product')
       }
     } catch (error) {
       return {
@@ -343,15 +311,14 @@ export const productService = {
   }
 }
 
-// Authentication Service
 export const authService = {
-  /**
-   * Register new user with email/password
-   */
   async register(name, email, password, department) {
     try {
-      const response = await unauthenticatedRequest('/auth/register', {
+      const response = await fetch(`${API_BASE_URL}/auth/register`, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({ name, email, password, department })
       })
       
@@ -360,20 +327,21 @@ export const authService = {
       if (response.ok) {
         return { success: true, message: result.message }
       } else {
-        return { success: false, error: sanitizeError(result.detail, 'Registration failed') }
+        return { success: false, error: extractErrorMessage(result, 'Registration failed') }
       }
     } catch (error) {
       return { success: false, error: 'Network error. Please try again.' }
     }
   },
 
-  /**
-   * Login with email/password (sends OTP)
-   */
+  /** Login with email/password (sends OTP). */
   async login(email, password) {
     try {
-      const response = await unauthenticatedRequest('/auth/login', {
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({ email, password })
       })
       
@@ -381,47 +349,51 @@ export const authService = {
       
       if (response.ok) {
         if (result.success === false) {
-          return { success: false, error: result.message || 'Login failed' }
+          return { success: false, error: extractErrorMessage(result, 'Login failed') }
         }
         return { success: true, message: result.message }
       } else {
-        return { success: false, error: sanitizeError(result.detail, 'Login failed') }
+        return { success: false, error: extractErrorMessage(result, 'Login failed') }
       }
     } catch (error) {
       return { success: false, error: 'Network error. Please try again.' }
     }
   },
 
-  /**
-   * Verify login OTP
-   */
   async verifyLoginOtp(email, otp) {
     try {
-      const response = await unauthenticatedRequest('/auth/verify-otp', {
+      const response = await fetch(`${API_BASE_URL}/auth/verify-otp`, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({ email, otp })
       })
       
       const result = await response.json()
       
       if (response.ok) {
-        storeAuthData(result)
+        authStorage.setTokens({
+          access_token: result.access_token,
+          refresh_token: result.refresh_token,
+          user: result.user,
+        })
         return { success: true, user: result.user }
       } else {
-        return { success: false, error: sanitizeError(result.detail, 'OTP verification failed') }
+        return { success: false, error: extractErrorMessage(result, 'OTP verification failed') }
       }
     } catch (error) {
       return { success: false, error: 'Network error. Please try again.' }
     }
   },
 
-  /**
-   * Request password reset OTP
-   */
   async forgotPassword(email) {
     try {
-      const response = await unauthenticatedRequest('/auth/forgot-password', {
+      const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({ email })
       })
       
@@ -430,20 +402,20 @@ export const authService = {
       if (response.ok) {
         return { success: true, message: result.message }
       } else {
-        return { success: false, error: sanitizeError(result.detail, 'Request failed') }
+        return { success: false, error: extractErrorMessage(result, 'Request failed') }
       }
     } catch (error) {
       return { success: false, error: 'Network error. Please try again.' }
     }
   },
 
-  /**
-   * Reset password with OTP
-   */
   async resetPassword(email, otp, newPassword) {
     try {
-      const response = await unauthenticatedRequest('/auth/reset-password', {
+      const response = await fetch(`${API_BASE_URL}/auth/reset-password`, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({ email, otp, new_password: newPassword })
       })
       
@@ -452,16 +424,13 @@ export const authService = {
       if (response.ok) {
         return { success: true, message: result.message }
       } else {
-        return { success: false, error: sanitizeError(result.detail, 'Password reset failed') }
+        return { success: false, error: extractErrorMessage(result, 'Password reset failed') }
       }
     } catch (error) {
       return { success: false, error: 'Network error. Please try again.' }
     }
   },
 
-  /**
-   * Change password (authenticated user)
-   */
   async changePassword(currentPassword, newPassword) {
     try {
       const response = await apiRequest('/auth/change-password', {
@@ -474,31 +443,28 @@ export const authService = {
       if (response.ok) {
         return { success: true, message: result.message }
       } else {
-        return { success: false, error: sanitizeError(result.detail, 'Password change failed') }
+        return { success: false, error: extractErrorMessage(result, 'Password change failed') }
       }
     } catch (error) {
       return { success: false, error: 'Network error. Please try again.' }
     }
   },
 
-  /**
-   * Get current user info
-   */
   async getCurrentUserInfo() {
-    try {
-      const response = await apiRequest('/auth/me', { method: 'GET' })
-      
-      if (response.ok) {
-        const user = await response.json()
-        sessionStorage.setItem('user', JSON.stringify(user))
-        return user
-      }
-    } catch {
-      // silently fail
+    const response = await apiRequest('/auth/me', {
+      method: 'GET'
+    })
+    
+    if (response.ok) {
+      const user = await response.json()
+      authStorage.setUser(user)
+      return user
     }
+    
     return null
   },
 
+  /** Refresh current user data and reload so new permissions take effect. */
   async refreshUserData() {
     try {
       if (!getToken()) return null
@@ -507,126 +473,92 @@ export const authService = {
 
       if (response.ok) {
         const user = await response.json()
-        sessionStorage.setItem('user', JSON.stringify(user))
+        authStorage.setUser(user)
         window.location.reload()
         return user
       }
-    } catch {
-      // silently fail
+    } catch (error) {
+      debugLog('Failed to refresh user data:', error)
     }
     return null
   },
   
-  /**
-   * Logout — revokes both tokens on backend, then clears local state
-   */
   async logout() {
+    // Best-effort server-side revocation (increments token_version).
     try {
       const token = getToken()
-      await fetch(`${API_BASE_URL}/auth/logout`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest',
-          ...(token && { 'Authorization': `Bearer ${token}` }),
-        },
-        body: JSON.stringify({}),
-      })
-    } catch {
-      // Best-effort — always clear local state and redirect
-    } finally {
-      clearAuthData()
+      if (token) {
+        await fetch(`${API_BASE_URL}/auth/logout`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        })
+      }
+    } catch (e) {
+      // Ignore — still clear local state and redirect.
+    }
+    authStorage.clear()
+    if (typeof window !== 'undefined') {
       window.location.href = '/login'
     }
   },
   
   getCurrentUser() {
-    return safeParseUser()
+    return authStorage.getUser()
   },
-  
-  /**
-   * Check if user is authenticated
-   */
+
   isAuthenticated() {
     return !!getToken()
   },
-  
-  /**
-   * Check if user has permission
-   */
+
   hasPermission(permission) {
     const user = this.getCurrentUser()
     return user?.permissions?.includes(permission) || false
   },
-  
-  /**
-   * Check if user has role
-   */
+
   hasRole(role) {
     const user = this.getCurrentUser()
     return user?.role === role
   },
 
-  // Product methods
-  /**
-   * Get products (server-side filtered + paginated)
-   */
-  async getProducts(params = {}) {
-    try {
-      const queryParams = new URLSearchParams()
-      if (params.skip  != null) queryParams.append('skip',     params.skip)
-      if (params.limit != null) queryParams.append('limit',    params.limit)
-      if (params.category)      queryParams.append('category', params.category)
-      if (params.status)        queryParams.append('status',   params.status)
-      if (params.brand)         queryParams.append('brand',    params.brand)
-      if (params.search)        queryParams.append('search',   params.search)
-
-      const response = await apiRequest(`/products?${queryParams.toString()}`)
-
-      if (response.ok) {
-        return await response.json()
-      } else {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.detail || `Failed to fetch products: ${response.statusText}`)
-      }
-    } catch (error) {
-      console.error('Failed to fetch products:', error)
-      throw error
-    }
-  },
-
-  /**
-   * Get all distinct brand names (for filter dropdown)
-   */
   async getBrands() {
     try {
-      const response = await apiRequest('/products/brands')
+      const response = await apiRequest('/products/brands', { method: 'GET' })
       if (response.ok) return await response.json()
-      throw new Error('Failed to fetch brands')
-    } catch (error) {
-      console.error('Failed to fetch brands:', error)
+      return { brands: [] }
+    } catch (err) {
+      debugLog('Failed to fetch brands:', err)
       return { brands: [] }
     }
   },
 
-  /**
-   * Get dashboard stats (counts + recent products + category breakdown)
-   */
-  async getDashboardStats() {
+  async getProducts(params = {}) {
     try {
-      const response = await apiRequest('/products/stats')
-      if (response.ok) return await response.json()
-      throw new Error(`Failed to fetch stats: ${response.statusText}`)
+      const queryParams = new URLSearchParams()
+      if (params.skip) queryParams.append('skip', params.skip)
+      if (params.limit) queryParams.append('limit', params.limit)
+      if (params.category) queryParams.append('category', params.category)
+      if (params.status) queryParams.append('status', params.status)
+      if (params.search) queryParams.append('search', params.search)
+
+      const response = await apiRequest(`/products?${queryParams.toString()}`, {
+        method: 'GET'
+      })
+
+      if (response.ok) {
+        return await response.json()
+      } else {
+        debugLog('API response not OK:', response.status, response.statusText)
+        throw new Error(`Failed to fetch products: ${response.statusText}`)
+      }
     } catch (error) {
-      console.error('Failed to fetch dashboard stats:', error)
+      debugLog('Failed to fetch products:', error)
       throw error
     }
   },
 
-  /**
-   * Delete product
-   */
   async deleteProduct(id) {
     try {
       const response = await apiRequest(`/products/${id}`, {
@@ -640,7 +572,7 @@ export const authService = {
       }
       return {
         success: false,
-        error: sanitizeError(result.detail, 'Failed to delete product')
+        error: extractErrorMessage(result, 'Failed to delete product')
       }
     } catch (error) {
       return {
@@ -651,26 +583,32 @@ export const authService = {
   }
 }
 
-// Nomenclature Service
 export const nomenclatureService = {
-  /**
-   * Get all nomenclature mappings
-   */
+  async getBuildMap() {
+    const response = await apiRequest('/nomenclature/map', { method: 'GET' })
+    if (response.ok) return await response.json()
+    const errorData = await response.json().catch(() => ({}))
+    throw new Error(extractErrorMessage(errorData, 'Failed to build nomenclature map'))
+  },
+
   async getNomenclature(params = {}) {
     try {
       const queryParams = new URLSearchParams()
       if (params.skip) queryParams.append('skip', params.skip)
       if (params.limit) queryParams.append('limit', params.limit)
 
-      const response = await apiRequest(`/nomenclature?${queryParams.toString()}`)
+      const response = await apiRequest(`/nomenclature?${queryParams.toString()}`, {
+        method: 'GET'
+      })
 
       if (response.ok) {
         return await response.json()
       } else {
+        debugLog('API response not OK:', response.status, response.statusText)
         throw new Error(`Failed to fetch nomenclature: ${response.statusText}`)
       }
     } catch (error) {
-      console.error('Failed to fetch nomenclature:', error)
+      debugLog('Failed to fetch nomenclature:', error)
       throw error
     }
   },
@@ -692,7 +630,7 @@ export const nomenclatureService = {
       } else {
         return {
           success: false,
-          error: sanitizeError(result.detail, 'Failed to create nomenclature mapping')
+          error: extractErrorMessage(result, 'Failed to create nomenclature mapping')
         }
       }
     } catch (error) {
@@ -703,9 +641,6 @@ export const nomenclatureService = {
     }
   },
 
-  /**
-   * Update a nomenclature mapping
-   */
   async updateNomenclature(id, nomenclatureData) {
     try {
       const response = await apiRequest(`/nomenclature/${id}`, {
@@ -720,7 +655,7 @@ export const nomenclatureService = {
       }
       return {
         success: false,
-        error: sanitizeError(result.detail, 'Failed to update nomenclature mapping')
+        error: extractErrorMessage(result, 'Failed to update nomenclature mapping')
       }
     } catch (error) {
       return {
@@ -730,9 +665,6 @@ export const nomenclatureService = {
     }
   },
 
-  /**
-   * Delete a nomenclature mapping
-   */
   async deleteNomenclature(id) {
     try {
       const response = await apiRequest(`/nomenclature/${id}`, {
@@ -746,7 +678,7 @@ export const nomenclatureService = {
       }
       return {
         success: false,
-        error: sanitizeError(result.detail, 'Failed to delete nomenclature mapping')
+        error: extractErrorMessage(result, 'Failed to delete nomenclature mapping')
       }
     } catch (error) {
       return {
@@ -756,12 +688,8 @@ export const nomenclatureService = {
     }
   },
 
-  /**
-   * Add synonyms to a nomenclature mapping
-   */
   async addSynonyms(id, rawNames) {
     try {
-      // Add multiple synonyms by updating the raw_names array
       const response = await apiRequest(`/nomenclature/${id}`, {
         method: 'PUT',
         body: JSON.stringify({ raw_names: rawNames })
@@ -774,7 +702,7 @@ export const nomenclatureService = {
       }
       return {
         success: false,
-        error: sanitizeError(result.detail, 'Failed to add synonyms')
+        error: extractErrorMessage(result, 'Failed to add synonyms')
       }
     } catch (error) {
       return {
@@ -784,9 +712,6 @@ export const nomenclatureService = {
     }
   },
 
-  /**
-   * Remove a synonym from a nomenclature mapping
-   */
   async removeSynonym(id, rawName) {
     try {
       const response = await apiRequest(`/nomenclature/${id}/synonyms/${encodeURIComponent(rawName)}`, {
@@ -800,7 +725,7 @@ export const nomenclatureService = {
       }
       return {
         success: false,
-        error: sanitizeError(result.detail, 'Failed to remove synonym')
+        error: extractErrorMessage(result, 'Failed to remove synonym')
       }
     } catch (error) {
       return {
@@ -808,230 +733,10 @@ export const nomenclatureService = {
         error: error.message || 'Network error'
       }
     }
-  },
-
-  /**
-   * Get the full reverse lookup map (raw_name -> standardized_name) from DB
-   */
-  async getBuildMap() {
-    try {
-      const response = await apiRequest('/nomenclature/map')
-      if (response.ok) {
-        return await response.json()
-      }
-      throw new Error('Failed to fetch nomenclature map')
-    } catch (error) {
-      console.error('Failed to fetch nomenclature map:', error)
-      throw error
-    }
-  },
-
-  /**
-   * Seed nomenclature from hardcoded map
-   */
-  async seedNomenclature() {
-    try {
-      const response = await apiRequest('/nomenclature/seed', {
-        method: 'POST'
-      })
-      const result = await response.json()
-      if (response.ok) {
-        return { success: true, ...result }
-      }
-      return { success: false, error: sanitizeError(result.detail, 'Failed to seed nomenclature') }
-    } catch (error) {
-      return { success: false, error: error.message || 'Network error' }
-    }
   }
 }
 
-// COA Nomenclature Service
-export const coaNomenclatureService = {
-  async getAll(params = {}) {
-    const qp = new URLSearchParams()
-    if (params.skip) qp.append('skip', params.skip)
-    if (params.limit) qp.append('limit', params.limit)
-    if (params.search) qp.append('search', params.search)
-    const response = await apiRequest(`/coa-nomenclature?${qp.toString()}`)
-    if (response.ok) return await response.json()
-    throw new Error('Failed to fetch COA nomenclature')
-  },
-
-  async getMap() {
-    const response = await apiRequest('/coa-nomenclature/map')
-    if (response.ok) return await response.json()
-    throw new Error('Failed to fetch COA nomenclature map')
-  },
-
-  async resolve(rawNames) {
-    try {
-      const response = await apiRequest('/coa-nomenclature/resolve', {
-        method: 'POST',
-        body: JSON.stringify({ raw_names: rawNames })
-      })
-      if (response.ok) return await response.json()
-      return { resolved: {} }
-    } catch {
-      return { resolved: {} }
-    }
-  },
-
-  async create(data) {
-    try {
-      const response = await apiRequest('/coa-nomenclature', {
-        method: 'POST',
-        body: JSON.stringify(data)
-      })
-      const result = await response.json()
-      if (response.ok) return { success: true, ...result }
-      return { success: false, error: sanitizeError(result.detail, 'Failed to create COA nomenclature') }
-    } catch (error) {
-      return { success: false, error: error.message || 'Network error' }
-    }
-  },
-
-  async update(id, data) {
-    try {
-      const response = await apiRequest(`/coa-nomenclature/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(data)
-      })
-      const result = await response.json()
-      if (response.ok) return { success: true, ...result }
-      return { success: false, error: sanitizeError(result.detail, 'Failed to update COA nomenclature') }
-    } catch (error) {
-      return { success: false, error: error.message || 'Network error' }
-    }
-  },
-
-  async delete(id) {
-    try {
-      const response = await apiRequest(`/coa-nomenclature/${id}`, {
-        method: 'DELETE'
-      })
-      const result = await response.json()
-      if (response.ok) return { success: true, ...result }
-      return { success: false, error: sanitizeError(result.detail, 'Failed to delete COA nomenclature') }
-    } catch (error) {
-      return { success: false, error: error.message || 'Network error' }
-    }
-  },
-
-  async addSynonym(id, rawName) {
-    try {
-      const response = await apiRequest(`/coa-nomenclature/${id}/synonyms`, {
-        method: 'POST',
-        body: JSON.stringify({ raw_name: rawName })
-      })
-      const result = await response.json()
-      if (response.ok) return { success: true, ...result }
-      return { success: false, error: sanitizeError(result.detail, 'Failed to add synonym') }
-    } catch (error) {
-      return { success: false, error: error.message || 'Network error' }
-    }
-  },
-
-  async removeSynonym(id, rawName) {
-    try {
-      const response = await apiRequest(`/coa-nomenclature/${id}/synonyms/${encodeURIComponent(rawName)}`, {
-        method: 'DELETE'
-      })
-      const result = await response.json()
-      if (response.ok) return { success: true, ...result }
-      return { success: false, error: sanitizeError(result.detail, 'Failed to remove synonym') }
-    } catch (error) {
-      return { success: false, error: error.message || 'Network error' }
-    }
-  },
-
-  async seed() {
-    try {
-      const response = await apiRequest('/coa-nomenclature/seed', {
-        method: 'POST'
-      })
-      const result = await response.json()
-      if (response.ok) return { success: true, ...result }
-      return { success: false, error: sanitizeError(result.detail, 'Failed to seed COA nomenclature') }
-    } catch (error) {
-      return { success: false, error: error.message || 'Network error' }
-    }
-  },
-}
-
-// Nutrient Hierarchy Service
-export const nutrientHierarchyService = {
-  async getAll() {
-    const response = await apiRequest('/nutrient-hierarchy')
-    if (response.ok) return await response.json()
-    throw new Error('Failed to fetch nutrient hierarchy')
-  },
-
-  async getTree() {
-    const response = await apiRequest('/nutrient-hierarchy/tree')
-    if (response.ok) return await response.json()
-    throw new Error('Failed to fetch nutrient hierarchy tree')
-  },
-
-  async create(data) {
-    try {
-      const response = await apiRequest('/nutrient-hierarchy', {
-        method: 'POST',
-        body: JSON.stringify(data)
-      })
-      const result = await response.json()
-      if (response.ok) return { success: true, ...result }
-      return { success: false, error: sanitizeError(result.detail, 'Failed to create hierarchy node') }
-    } catch (error) {
-      return { success: false, error: error.message || 'Network error' }
-    }
-  },
-
-  async update(id, data) {
-    try {
-      const response = await apiRequest(`/nutrient-hierarchy/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(data)
-      })
-      const result = await response.json()
-      if (response.ok) return { success: true, ...result }
-      return { success: false, error: sanitizeError(result.detail, 'Failed to update hierarchy node') }
-    } catch (error) {
-      return { success: false, error: error.message || 'Network error' }
-    }
-  },
-
-  async remove(id, cascade = false) {
-    try {
-      const response = await apiRequest(`/nutrient-hierarchy/${id}?cascade=${cascade}`, {
-        method: 'DELETE'
-      })
-      const result = await response.json()
-      if (response.ok) return { success: true, ...result }
-      return { success: false, error: sanitizeError(result.detail, 'Failed to delete hierarchy node') }
-    } catch (error) {
-      return { success: false, error: error.message || 'Network error' }
-    }
-  },
-
-  async seed() {
-    try {
-      const response = await apiRequest('/nutrient-hierarchy/seed', {
-        method: 'POST'
-      })
-      const result = await response.json()
-      if (response.ok) return { success: true, ...result }
-      return { success: false, error: sanitizeError(result.detail, 'Failed to seed hierarchy') }
-    } catch (error) {
-      return { success: false, error: error.message || 'Network error' }
-    }
-  },
-}
-
-// User Service
 export const userService = {
-  /**
-   * Get all users
-   */
   async getUsers(params = {}) {
     try {
       const queryParams = new URLSearchParams()
@@ -1045,45 +750,39 @@ export const userService = {
       if (response.ok) {
         return await response.json()
       } else {
-        console.error('API response not OK:', response.status, response.statusText)
-        const errorData = await response.json().catch(() => ({}))
-        console.error('Error details:', errorData)
+        debugLog('API response not OK:', response.status, response.statusText)
         throw new Error(`Failed to fetch users: ${response.statusText}`)
       }
     } catch (error) {
-      console.error('Failed to fetch users:', error)
+      debugLog('Failed to fetch users:', error)
       throw error
     }
   }
 }
 
-// Category Service
 export const categoryService = {
-  /**
-   * Get all categories
-   */
   async getCategories(params = {}) {
     try {
       const queryParams = new URLSearchParams()
       if (params.skip) queryParams.append('skip', params.skip)
       if (params.limit) queryParams.append('limit', params.limit)
 
-      const response = await apiRequest(`/categories?${queryParams.toString()}`)
+      const response = await apiRequest(`/categories?${queryParams.toString()}`, {
+        method: 'GET'
+      })
 
       if (response.ok) {
         return await response.json()
       } else {
+        debugLog('API response not OK:', response.status, response.statusText)
         throw new Error(`Failed to fetch categories: ${response.statusText}`)
       }
     } catch (error) {
-      console.error('Failed to fetch categories:', error)
+      debugLog('Failed to fetch categories:', error)
       throw error
     }
   },
 
-  /**
-   * Create a new category
-   */
   async createCategory(categoryData) {
     try {
       const response = await apiRequest('/categories', {
@@ -1098,7 +797,7 @@ export const categoryService = {
       } else {
         return {
           success: false,
-          error: sanitizeError(result.detail, 'Failed to create category')
+          error: extractErrorMessage(result, 'Failed to create category')
         }
       }
     } catch (error) {
@@ -1109,9 +808,6 @@ export const categoryService = {
     }
   },
 
-  /**
-   * Update a category
-   */
   async updateCategory(id, categoryData) {
     try {
       const response = await apiRequest(`/categories/${id}`, {
@@ -1126,7 +822,7 @@ export const categoryService = {
       }
       return {
         success: false,
-        error: sanitizeError(result.detail, 'Failed to update category')
+        error: extractErrorMessage(result, 'Failed to update category')
       }
     } catch (error) {
       return {
@@ -1136,9 +832,6 @@ export const categoryService = {
     }
   },
 
-  /**
-   * Delete a category
-   */
   async deleteCategory(id) {
     try {
       const response = await apiRequest(`/categories/${id}`, {
@@ -1152,7 +845,7 @@ export const categoryService = {
       }
       return {
         success: false,
-        error: sanitizeError(result.detail, 'Failed to delete category')
+        error: extractErrorMessage(result, 'Failed to delete category')
       }
     } catch (error) {
       return {
@@ -1163,38 +856,48 @@ export const categoryService = {
   }
 }
 
-// COA Service
 export const coaService = {
-  /**
-   * Extract COA data from images using AI
-   */
   async extractFromImages(images) {
+    debugLog('[FRONTEND] Starting COA extraction with', images.length, 'images')
     try {
       const formData = new FormData()
-      
+
       for (let i = 0; i < images.length; i++) {
         const image = images[i]
-        
+        debugLog(`[FRONTEND] Processing COA image ${i + 1}/${images.length}`)
+
         if (typeof image === 'string' && image.startsWith('data:')) {
-          const blob = dataUrlToBlob(image)
+          const response = await fetch(image)
+          const blob = await response.blob()
+          debugLog(`[FRONTEND] Image ${i + 1} converted to blob: ${blob.size} bytes`)
           formData.append('images', blob, `coa_image_${i}.jpg`)
         } else if (image instanceof File || image instanceof Blob) {
+          debugLog(`[FRONTEND] Image ${i + 1} is File/Blob: ${image.size} bytes`)
           formData.append('images', image, image.name || `coa_image_${i}.jpg`)
         }
       }
       
-      const response = await apiUpload('/coa/extract', formData)
+      debugLog('[FRONTEND] Calling API:', `${API_BASE_URL}/coa/extract`)
+
+      const response = await apiRequest('/coa/extract', {
+        method: 'POST',
+        body: formData,
+      })
+
+      debugLog('[FRONTEND] Response status:', response.status)
       const result = await response.json()
-      
+      debugLog('[FRONTEND] Response data:', result)
+
       if (response.ok) {
         return result
       } else {
         return {
           success: false,
-          error: sanitizeError(result.detail, 'COA extraction failed')
+          error: extractErrorMessage(result, 'COA extraction failed')
         }
       }
     } catch (error) {
+      debugLog('[FRONTEND] COA extraction error:', error)
       return {
         success: false,
         error: error.message || 'Network error during COA extraction'
@@ -1202,9 +905,6 @@ export const coaService = {
     }
   },
 
-  /**
-   * Create a new COA entry
-   */
   async createCOA(coaData) {
     try {
       const response = await apiRequest('/coa', {
@@ -1219,7 +919,7 @@ export const coaService = {
       } else {
         return {
           success: false,
-          error: sanitizeError(result.detail, 'Failed to create COA')
+          error: extractErrorMessage(result, 'Failed to create COA')
         }
       }
     } catch (error) {
@@ -1230,9 +930,6 @@ export const coaService = {
     }
   },
 
-  /**
-   * Get all COAs
-   */
   async getCOAs(params = {}) {
     try {
       const queryParams = new URLSearchParams()
@@ -1241,23 +938,22 @@ export const coaService = {
       if (params.search) queryParams.append('search', params.search)
       if (params.status) queryParams.append('status', params.status)
 
-      const response = await apiRequest(`/coa?${queryParams.toString()}`)
+      const response = await apiRequest(`/coa?${queryParams.toString()}`, {
+        method: 'GET'
+      })
 
       if (response.ok) {
         return await response.json()
       } else {
-        console.error('API response not OK:', response.status, response.statusText)
+        debugLog('API response not OK:', response.status, response.statusText)
         throw new Error(`Failed to fetch COAs: ${response.statusText}`)
       }
     } catch (error) {
-      console.error('Failed to fetch COAs:', error)
+      debugLog('Failed to fetch COAs:', error)
       throw error
     }
   },
 
-  /**
-   * Get single COA
-   */
   async getCOA(id) {
     try {
       const response = await apiRequest(`/coa/${id}`)
@@ -1267,14 +963,11 @@ export const coaService = {
       }
       return null
     } catch (error) {
-      console.error('Failed to fetch COA:', error)
+      debugLog('Failed to fetch COA:', error)
       return null
     }
   },
 
-  /**
-   * Update COA
-   */
   async updateCOA(id, coaData) {
     try {
       const response = await apiRequest(`/coa/${id}`, {
@@ -1289,7 +982,7 @@ export const coaService = {
       }
       return {
         success: false,
-        error: sanitizeError(result.detail, 'Failed to update COA')
+        error: extractErrorMessage(result, 'Failed to update COA')
       }
     } catch (error) {
       return {
@@ -1299,9 +992,6 @@ export const coaService = {
     }
   },
 
-  /**
-   * Delete COA
-   */
   async deleteCOA(id) {
     try {
       const response = await apiRequest(`/coa/${id}`, {
@@ -1315,7 +1005,7 @@ export const coaService = {
       }
       return {
         success: false,
-        error: sanitizeError(result.detail, 'Failed to delete COA')
+        error: extractErrorMessage(result, 'Failed to delete COA')
       }
     } catch (error) {
       return {
@@ -1326,11 +1016,7 @@ export const coaService = {
   }
 }
 
-// ==================== Formulation Service ====================
 export const formulationService = {
-  /**
-   * Save a formulation
-   */
   async saveFormulation(data) {
     try {
       const response = await apiRequest('/formulations/save', {
@@ -1341,35 +1027,28 @@ export const formulationService = {
       if (response.ok) {
         return { success: true, ...result }
       }
-      return { success: false, error: sanitizeError(result.detail, 'Failed to save formulation') }
+      return { success: false, error: extractErrorMessage(result, 'Failed to save formulation') }
     } catch (error) {
       return { success: false, error: error.message || 'Network error' }
     }
   },
 
-  /**
-   * List saved formulations
-   */
   async getFormulations(params = {}) {
     try {
       const queryParams = new URLSearchParams()
       if (params.skip) queryParams.append('skip', params.skip)
       if (params.limit) queryParams.append('limit', params.limit)
-      if (params.created_by) queryParams.append('created_by', params.created_by)
       const response = await apiRequest(`/formulations/list?${queryParams.toString()}`)
       if (response.ok) {
         return await response.json()
       }
       return { formulations: [], total: 0 }
     } catch (error) {
-      console.error('Failed to fetch formulations:', error)
+      debugLog('Failed to fetch formulations:', error)
       return { formulations: [], total: 0 }
     }
   },
 
-  /**
-   * Get a single formulation by ID
-   */
   async getFormulation(id) {
     try {
       const response = await apiRequest(`/formulations/${id}`)
@@ -1378,14 +1057,11 @@ export const formulationService = {
       }
       return null
     } catch (error) {
-      console.error('Failed to fetch formulation:', error)
+      debugLog('Failed to fetch formulation:', error)
       return null
     }
   },
 
-  /**
-   * Delete a formulation
-   */
   async deleteFormulation(id) {
     try {
       const response = await apiRequest(`/formulations/${id}`, {
@@ -1395,12 +1071,210 @@ export const formulationService = {
       if (response.ok) {
         return { success: true, ...result }
       }
-      return { success: false, error: sanitizeError(result.detail, 'Failed to delete formulation') }
+      return { success: false, error: extractErrorMessage(result, 'Failed to delete formulation') }
     } catch (error) {
       return { success: false, error: error.message || 'Network error' }
     }
   }
 }
 
+
+// COA Nomenclature Service
+// Backing endpoints live under /api/coa-nomenclature. All routes are auth-
+// gated server-side, so we route through apiRequest to reuse bearer-token
+// injection and the single-flight /auth/refresh retry.
+export const coaNomenclatureService = {
+  async getAll(params = {}) {
+    try {
+      const qs = new URLSearchParams()
+      if (params.skip != null) qs.append('skip', params.skip)
+      if (params.limit != null) qs.append('limit', params.limit)
+      if (params.search) qs.append('search', params.search)
+      const response = await apiRequest(`/coa-nomenclature?${qs.toString()}`, {
+        method: 'GET',
+      })
+      if (response.ok) return await response.json()
+      return { mappings: [], total: 0 }
+    } catch (error) {
+      debugLog('Failed to fetch COA nomenclature:', error)
+      return { mappings: [], total: 0 }
+    }
+  },
+
+  async getMap() {
+    try {
+      const response = await apiRequest('/coa-nomenclature/map', { method: 'GET' })
+      if (response.ok) return await response.json()
+      return { map: {}, unit_map: {}, total_mappings: 0, total_raw_names: 0 }
+    } catch (error) {
+      debugLog('Failed to fetch COA nomenclature map:', error)
+      return { map: {}, unit_map: {}, total_mappings: 0, total_raw_names: 0 }
+    }
+  },
+
+  async resolve(rawNames) {
+    try {
+      const response = await apiRequest('/coa-nomenclature/resolve', {
+        method: 'POST',
+        body: JSON.stringify({ raw_names: rawNames || [] }),
+      })
+      if (response.ok) return await response.json()
+      return { resolved: {} }
+    } catch (error) {
+      debugLog('Failed to resolve raw names:', error)
+      return { resolved: {} }
+    }
+  },
+
+  async create(data) {
+    try {
+      const response = await apiRequest('/coa-nomenclature', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: extractErrorMessage(result, 'Failed to create mapping') }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+
+  async update(id, data) {
+    try {
+      const response = await apiRequest(`/coa-nomenclature/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: extractErrorMessage(result, 'Failed to update mapping') }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+
+  async delete(id) {
+    try {
+      const response = await apiRequest(`/coa-nomenclature/${id}`, {
+        method: 'DELETE',
+      })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: extractErrorMessage(result, 'Failed to delete mapping') }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+
+  async removeSynonym(id, rawName) {
+    try {
+      const response = await apiRequest(
+        `/coa-nomenclature/${id}/synonyms/${encodeURIComponent(rawName)}`,
+        { method: 'DELETE' }
+      )
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: extractErrorMessage(result, 'Failed to remove synonym') }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+
+  async seed() {
+    try {
+      const response = await apiRequest('/coa-nomenclature/seed', { method: 'POST' })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: extractErrorMessage(result, 'Failed to seed mappings') }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+}
+
+
+// Nutrient Hierarchy Service
+// Backing endpoints live under /api/nutrient-hierarchy. `remove` mirrors the
+// backend's ?cascade=true|false toggle for deleting subtrees.
+export const nutrientHierarchyService = {
+  async getTree() {
+    try {
+      const response = await apiRequest('/nutrient-hierarchy/tree', { method: 'GET' })
+      if (response.ok) return await response.json()
+      return { tree: [], total: 0 }
+    } catch (error) {
+      debugLog('Failed to fetch hierarchy tree:', error)
+      return { tree: [], total: 0 }
+    }
+  },
+
+  async getAll() {
+    try {
+      const response = await apiRequest('/nutrient-hierarchy', { method: 'GET' })
+      if (response.ok) return await response.json()
+      return { nodes: [], total: 0 }
+    } catch (error) {
+      debugLog('Failed to fetch hierarchy nodes:', error)
+      return { nodes: [], total: 0 }
+    }
+  },
+
+  async create(data) {
+    try {
+      const response = await apiRequest('/nutrient-hierarchy', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: extractErrorMessage(result, 'Failed to create node') }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+
+  async update(id, data) {
+    try {
+      const response = await apiRequest(`/nutrient-hierarchy/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: extractErrorMessage(result, 'Failed to update node') }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+
+  async remove(id, cascade = false) {
+    try {
+      const qs = cascade ? '?cascade=true' : ''
+      const response = await apiRequest(`/nutrient-hierarchy/${id}${qs}`, {
+        method: 'DELETE',
+      })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: extractErrorMessage(result, 'Failed to delete node') }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+
+  async seed() {
+    try {
+      const response = await apiRequest('/nutrient-hierarchy/seed', { method: 'POST' })
+      const result = await response.json()
+      if (response.ok) return { success: true, ...result }
+      return { success: false, error: extractErrorMessage(result, 'Failed to seed hierarchy') }
+    } catch (error) {
+      return { success: false, error: error.message || 'Network error' }
+    }
+  },
+}
+
+
 export default authService
+
 

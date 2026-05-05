@@ -23,6 +23,41 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
+# Pre-computed bcrypt hash of an unguessable random string. Used by login
+# flows to spend the same wall-clock time on a missing-user path as a
+# real-user path, removing the user-enumeration timing oracle. The hash
+# value itself is never compared against any real password – only the
+# bcrypt CPU cost matters here.
+_DUMMY_VERIFY_HASH = pwd_context.hash(secrets.token_urlsafe(32))
+
+
+def verify_dummy_password(plain_password: str) -> None:
+    """Spend a bcrypt verify against a fixed dummy hash to mask timing.
+
+    Call this on the missing-user branch of authentication so the response
+    time matches the wrong-password branch. Always returns ``None``; the
+    boolean result is discarded on purpose.
+    """
+    try:
+        pwd_context.verify(plain_password or "", _DUMMY_VERIFY_HASH)
+    except (ValueError, TypeError):
+        pass
+
+
+def verify_dummy_otp(plain_otp: str) -> None:
+    """Same shape as ``verify_dummy_password`` but named for the OTP paths.
+
+    OTP verify and password verify share a bcrypt context, so the wall-clock
+    cost is identical. Use this on the missing-user / no-active-OTP / expired-
+    OTP branches of ``/verify-otp`` and ``/reset-password`` so an attacker
+    can't tell from response time whether the target email has an active OTP.
+    """
+    try:
+        pwd_context.verify(plain_otp or "", _DUMMY_VERIFY_HASH)
+    except (ValueError, TypeError):
+        pass
+
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
     now = datetime.now(timezone.utc)
@@ -114,7 +149,14 @@ def hash_otp(otp: str) -> str:
 
 
 def verify_otp(plain_otp: str, hashed_otp: str) -> bool:
-    return pwd_context.verify(plain_otp, hashed_otp)
+    # Guard against legacy plaintext rows or otherwise malformed values
+    # so callers always get a clean boolean instead of a passlib exception.
+    if not plain_otp or not hashed_otp:
+        return False
+    try:
+        return pwd_context.verify(plain_otp, hashed_otp)
+    except (ValueError, TypeError):
+        return False
 
 
 def validate_password_strength(password: str) -> tuple[bool, str]:

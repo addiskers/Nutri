@@ -1,5 +1,3 @@
-import ipaddress
-import logging
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,93 +6,100 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from config.settings import settings
-
-logger = logging.getLogger(__name__)
-
-
-def _parse_trusted_networks():
-    """Parse TRUSTED_PROXY_IPS into a list of ipaddress networks."""
-    networks = []
-    for entry in settings.TRUSTED_PROXY_IPS.split(","):
-        entry = entry.strip()
-        if not entry:
-            continue
-        try:
-            networks.append(ipaddress.ip_network(entry, strict=False))
-        except ValueError:
-            try:
-                networks.append(ipaddress.ip_network(f"{entry}/32", strict=False))
-            except ValueError:
-                logger.warning("Invalid trusted proxy IP/network: %s", entry)
-    return networks
+from app.utils.audit import audit_event
 
 
-_trusted_networks = _parse_trusted_networks()
-
-
-def _is_trusted_proxy(ip_str: str) -> bool:
-    """Check if an IP belongs to a trusted proxy network."""
-    try:
-        addr = ipaddress.ip_address(ip_str)
-        return any(addr in net for net in _trusted_networks)
-    except ValueError:
-        return False
-
-
-def _get_real_ip(request: Request) -> str:
-    """Extract client IP, trusting proxy headers only from verified proxy IPs."""
-    if settings.BEHIND_PROXY:
-        remote_ip = get_remote_address(request) or ""
-        if _is_trusted_proxy(remote_ip):
-            # Prefer X-Real-IP (set by Nginx to $remote_addr, harder to spoof)
-            real_ip = request.headers.get("X-Real-IP")
-            if real_ip and real_ip.strip():
-                return real_ip.strip()
-            # Fall back to rightmost non-trusted IP in X-Forwarded-For
-            forwarded = request.headers.get("X-Forwarded-For")
-            if forwarded:
-                # Walk from right to left; the rightmost entry added by our proxy
-                # is the actual client IP. Skip trusted proxy IPs.
-                parts = [p.strip() for p in forwarded.split(",")]
-                for ip in reversed(parts):
-                    if ip and not _is_trusted_proxy(ip):
-                        return ip
-                # All IPs are trusted proxies; use the leftmost
-                if parts:
-                    return parts[0]
-    return get_remote_address(request)
-
-
+# Per-IP throttle. `default_limits` apply to any route that doesn't declare
+# its own `@limiter.limit(...)`, so even a forgotten endpoint can't be hit
+# faster than `RATE_LIMIT_PER_MINUTE`. Sensitive routes (auth, extract)
+# layer their own tighter `@limiter.limit(...)` on top.
 limiter = Limiter(
-    key_func=_get_real_ip,
+    key_func=get_remote_address,
     default_limits=[f"{settings.RATE_LIMIT_PER_MINUTE}/minute"],
 )
 
 
+# Browsers reject wildcard + credentials combinations, and tightening these
+# also reduces the exposed attack surface for header smuggling.
+_ALLOWED_REQUEST_HEADERS = [
+    "Authorization",
+    "Content-Type",
+    "Accept",
+    "X-Requested-With",
+]
+_EXPOSED_RESPONSE_HEADERS = [
+    "Content-Disposition",
+]
+
+
 def configure_cors(app):
     if settings.DEBUG:
+        # `allow_origins=["*"]` combined with `allow_credentials=True` is
+        # invalid per the CORS spec and rejected by modern browsers.
         allowed_origins = [
             "http://localhost:5173",
             "http://localhost:3000",
             "http://127.0.0.1:5173",
-            "http://127.0.0.1:3000",
+            settings.FRONTEND_URL.rstrip("/"),
         ]
-        logger.warning("CORS DEBUG MODE ACTIVE — localhost origins allowed. Do NOT use in production!")
+        seen = set()
+        allowed_origins = [o for o in allowed_origins if o and not (o in seen or seen.add(o))]
+        print(f"[WARNING] DEBUG mode CORS origins: {allowed_origins}")
     else:
-        frontend = settings.FRONTEND_URL.rstrip("/")
-        allowed_origins = [frontend]
-        logger.info("CORS restricted to: %s", allowed_origins)
-    
+        production_origin = settings.FRONTEND_URL.rstrip("/")
+        # Credentialed CORS to an http:// origin silently downgrades the
+        # whole session; fail fast at boot rather than ship it.
+        if not production_origin.startswith("https://"):
+            raise RuntimeError(
+                "FRONTEND_URL must be an https:// origin when DEBUG=False. "
+                f"Got: {production_origin!r}"
+            )
+        allowed_origins = [production_origin]
+        print(f"[OK] CORS restricted to: {allowed_origins}")
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
-        expose_headers=["Content-Disposition"]
+        allow_headers=_ALLOWED_REQUEST_HEADERS,
+        expose_headers=_EXPOSED_RESPONSE_HEADERS,
+        max_age=600,
     )
-    
-    logger.info("CORS configured")
+
+    print("[OK] CORS configured")
+
+
+def configure_body_size_limit(app):
+    """Reject oversize request bodies up front.
+
+    Starlette / FastAPI do not enforce a body-size cap by default. We look at
+    `Content-Length` only — streaming uploads with no length fall through to
+    per-endpoint size checks (`/products/extract`, `/coa/extract`).
+    """
+
+    max_bytes = settings.MAX_REQUEST_BODY_SIZE_MB * 1024 * 1024
+
+    @app.middleware("http")
+    async def enforce_body_size(request: Request, call_next):
+        if request.method in {"POST", "PUT", "PATCH"}:
+            length = request.headers.get("content-length")
+            if length is not None:
+                try:
+                    if int(length) > max_bytes:
+                        return JSONResponse(
+                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            content={
+                                "detail": (
+                                    f"Request body exceeds {settings.MAX_REQUEST_BODY_SIZE_MB}MB limit"
+                                )
+                            },
+                        )
+                except ValueError:
+                    pass
+        return await call_next(request)
+
+    print(f"[OK] Body size limit: {settings.MAX_REQUEST_BODY_SIZE_MB}MB")
 
 
 def configure_rate_limiting(app):
@@ -103,9 +108,30 @@ def configure_rate_limiting(app):
     
     @app.exception_handler(RateLimitExceeded)
     async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+        # 429s are the canonical brute-force / scraping signal — audit them
+        # so abuse patterns show up alongside the auth.denied events.
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", None) or request.url.path
+        fwd = request.headers.get("x-forwarded-for")
+        ip = (fwd.split(",")[0].strip() if fwd else None) or (
+            request.client.host if request.client else None
+        )
+        audit_event(
+            "rate_limit.exceeded",
+            outcome="failure",
+            path=route_path,
+            method=request.method,
+            status=429,
+            ip=ip,
+        )
         return JSONResponse(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            content={"detail": "Rate limit exceeded. Please try again later."}
+            content={"detail": "Rate limit exceeded. Please try again later."},
         )
     
-    logger.info("Rate limiting configured")
+    print("[OK] Rate limiting configured")
+
+
+def rate_limit(times: int = 5, seconds: int = 60):
+    return limiter.limit(f"{times}/{seconds}seconds")
+

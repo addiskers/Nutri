@@ -1,14 +1,14 @@
 """
 COA Nomenclature Mapping Routes - CRUD for COA-specific nutrient name standardization
 """
-import re
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 from app.models.coa_nomenclature import COANomenclatureMapping
 from app.models.user import User
-from app.dependencies.auth import get_current_user, require_permission
+from app.dependencies.auth import require_permission
+from app.utils.queries import parse_object_id, safe_regex, normalize_pagination
 
 router = APIRouter(prefix="/coa-nomenclature", tags=["COA Nomenclature"])
 
@@ -69,16 +69,17 @@ async def list_coa_nomenclature(
     skip: int = 0,
     limit: int = 200,
     search: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("view_nomenclature")),
 ):
-    limit = min(limit, 200)
+    skip, limit = normalize_pagination(skip, limit, max_limit=200)
     query = {}
     if search:
-        escaped = re.escape(search)
-        query["$or"] = [
-            {"standardized_name": {"$regex": escaped, "$options": "i"}},
-            {"raw_names": {"$regex": escaped, "$options": "i"}},
-        ]
+        escaped = safe_regex(search)
+        if escaped:
+            query["$or"] = [
+                {"standardized_name": {"$regex": escaped, "$options": "i"}},
+                {"raw_names": {"$regex": escaped, "$options": "i"}},
+            ]
 
     mappings = await COANomenclatureMapping.find(query).skip(skip).limit(limit).to_list()
     total = await COANomenclatureMapping.find(query).count()
@@ -101,7 +102,9 @@ async def list_coa_nomenclature(
 
 
 @router.get("/map", response_model=dict)
-async def get_coa_nomenclature_map(current_user: User = Depends(get_current_user)):
+async def get_coa_nomenclature_map(
+    current_user: User = Depends(require_permission("view_nomenclature"))
+):
     """Reverse lookup map: raw_name (lower) -> standardized_name"""
     mappings = await COANomenclatureMapping.find_all().to_list()
 
@@ -127,7 +130,10 @@ class ResolveRequest(BaseModel):
 
 
 @router.post("/resolve", response_model=dict)
-async def resolve_raw_names(data: ResolveRequest, current_user: User = Depends(get_current_user)):
+async def resolve_raw_names(
+    data: ResolveRequest,
+    current_user: User = Depends(require_permission("view_nomenclature")),
+):
     """Fuzzy-resolve a list of raw nutrient names to standardized names
     using the same canonicalize logic as COA extraction."""
     from app.routes.coa import canonicalize, NOMENCLATURE_MAP, CANONICAL_NOMENCLATURE
@@ -173,9 +179,11 @@ async def resolve_raw_names(data: ResolveRequest, current_user: User = Depends(g
 
 
 @router.get("/{mapping_id}", response_model=dict)
-async def get_coa_nomenclature(mapping_id: str, current_user: User = Depends(get_current_user)):
-    from bson import ObjectId
-    mapping = await COANomenclatureMapping.get(ObjectId(mapping_id))
+async def get_coa_nomenclature(
+    mapping_id: str,
+    current_user: User = Depends(require_permission("view_nomenclature")),
+):
+    mapping = await COANomenclatureMapping.get(parse_object_id(mapping_id, field="mapping_id"))
     if not mapping:
         raise HTTPException(status_code=404, detail="COA nomenclature mapping not found")
 
@@ -196,8 +204,7 @@ async def update_coa_nomenclature(
     update: COANomenclatureUpdate,
     current_user: User = Depends(require_permission("edit_nomenclature"))
 ):
-    from bson import ObjectId
-    mapping = await COANomenclatureMapping.get(ObjectId(mapping_id))
+    mapping = await COANomenclatureMapping.get(parse_object_id(mapping_id, field="mapping_id"))
     if not mapping:
         raise HTTPException(status_code=404, detail="COA nomenclature mapping not found")
 
@@ -277,8 +284,7 @@ async def add_synonym(
     synonym_data: SynonymAdd,
     current_user: User = Depends(require_permission("edit_nomenclature"))
 ):
-    from bson import ObjectId
-    mapping = await COANomenclatureMapping.get(ObjectId(mapping_id))
+    mapping = await COANomenclatureMapping.get(parse_object_id(mapping_id, field="mapping_id"))
     if not mapping:
         raise HTTPException(status_code=404, detail="COA nomenclature mapping not found")
 
@@ -303,8 +309,7 @@ async def remove_synonym(
     raw_name: str,
     current_user: User = Depends(require_permission("edit_nomenclature"))
 ):
-    from bson import ObjectId
-    mapping = await COANomenclatureMapping.get(ObjectId(mapping_id))
+    mapping = await COANomenclatureMapping.get(parse_object_id(mapping_id, field="mapping_id"))
     if not mapping:
         raise HTTPException(status_code=404, detail="COA nomenclature mapping not found")
 
@@ -328,8 +333,7 @@ async def delete_coa_nomenclature(
     mapping_id: str,
     current_user: User = Depends(require_permission("edit_nomenclature"))
 ):
-    from bson import ObjectId
-    mapping = await COANomenclatureMapping.get(ObjectId(mapping_id))
+    mapping = await COANomenclatureMapping.get(parse_object_id(mapping_id, field="mapping_id"))
     if not mapping:
         raise HTTPException(status_code=404, detail="COA nomenclature mapping not found")
 

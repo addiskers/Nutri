@@ -4,7 +4,7 @@ import AddUserModal from '../components/Modals/AddUserModal'
 import PermissionsPanel from '../components/Modals/PermissionsPanel'
 import NoPermissionContent from '../components/NoPermissionContent'
 import { Search, ChevronDown, MoreVertical, UserPlus, Bell, User, CheckCircle, AlertCircle } from 'lucide-react'
-import authService, { apiRequest } from '../services/api'
+import authService, { apiRequest, extractErrorMessage } from '../services/api'
 
 const Users = () => {
   const hasPermission = authService.hasPermission('view_users')
@@ -20,7 +20,6 @@ const Users = () => {
   const [successMessage, setSuccessMessage] = useState('')
   const roleDropdownRef = useRef(null)
 
-  // Get current user from localStorage
   const currentUser = authService.getCurrentUser()
   const currentUserRole = currentUser?.role || 'Researcher'
 
@@ -30,20 +29,21 @@ const Users = () => {
 
   const roles = ['All roles', 'Super Admin', 'Admin', 'Researcher']
 
-  // Fetch users from API
   const fetchUsers = async () => {
     try {
       setLoading(true)
       setError('')
-      const response = await apiRequest('/users?page=1&page_size=100')
+
+      // apiRequest handles token injection, single-flight refresh and the
+      // 401 -> /login redirect, so we only need to surface non-OK statuses.
+      const response = await apiRequest('/users?page=1&page_size=100', { method: 'GET' })
 
       if (!response.ok) {
         throw new Error('Failed to fetch users')
       }
 
       const data = await response.json()
-      
-      // Transform API data to match frontend format
+
       const transformedUsers = data.users.map(user => ({
         id: user.id,
         name: user.name,
@@ -66,10 +66,9 @@ const Users = () => {
     }
   }
 
-  // Fetch pending users
   const fetchPendingUsers = async () => {
     try {
-      const response = await apiRequest('/users/pending')
+      const response = await apiRequest('/users/pending', { method: 'GET' })
 
       if (response.ok) {
         const data = await response.json()
@@ -99,7 +98,6 @@ const Users = () => {
     }
   }, [])
 
-  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (roleDropdownRef.current && !roleDropdownRef.current.contains(event.target)) {
@@ -111,7 +109,6 @@ const Users = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Filter users based on search and role
   const displayUsers = showPendingTab ? pendingUsers : users
   const filteredUsers = displayUsers.filter(user => {
     const matchesSearch = user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -120,7 +117,6 @@ const Users = () => {
     return matchesSearch && matchesRole
   })
 
-  // Role badge colors
   const getRoleBadgeStyle = (role) => {
     switch (role) {
       case 'Super Admin':
@@ -134,7 +130,6 @@ const Users = () => {
     }
   }
 
-  // Status badge colors
   const getStatusBadgeStyle = (status) => {
     switch (status) {
       case 'Active':
@@ -146,18 +141,14 @@ const Users = () => {
     }
   }
 
-  // Show success message temporarily
   const showSuccess = (message) => {
     setSuccessMessage(message)
     setTimeout(() => setSuccessMessage(''), 3000)
   }
 
-  // Handle approve user
   const handleApproveUser = async (userId) => {
     try {
-      const response = await apiRequest(`/users/${userId}/approve`, {
-        method: 'PATCH'
-      })
+      const response = await apiRequest(`/users/${userId}/approve`, { method: 'PATCH' })
 
       if (response.ok) {
         showSuccess('User approved successfully!')
@@ -166,51 +157,44 @@ const Users = () => {
         setActiveDropdown(null)
       } else {
         const error = await response.json()
-        setError(error.detail || 'Failed to approve user')
+        setError(extractErrorMessage(error, 'Failed to approve user'))
       }
     } catch (err) {
       setError('Failed to approve user. Please try again.')
     }
   }
 
-  // Handle toggle user status
   const handleToggleStatus = async (userId) => {
-    // Permission check: Only Super Admin and Admin can toggle status
     if (currentUserRole === 'Researcher') {
       setError('You do not have permission to change user status')
       return
     }
 
     try {
-      const response = await apiRequest(`/users/${userId}/toggle`, {
-        method: 'PATCH'
-      })
+      const response = await apiRequest(`/users/${userId}/toggle`, { method: 'PATCH' })
 
       if (response.ok) {
         showSuccess('User status updated successfully!')
         fetchUsers()
       } else {
         const error = await response.json()
-        setError(error.detail || 'Failed to update user status')
+        setError(extractErrorMessage(error, 'Failed to update user status'))
       }
     } catch (err) {
       setError('Failed to update user status. Please try again.')
     }
   }
 
-  // Handle view permissions
   const handleViewPermissions = (user) => {
     setSelectedUser(user)
     setShowPermissionsPanel(true)
     setActiveDropdown(null)
   }
 
-  // Update selected user after permissions change
   const handlePermissionsUpdate = async () => {
     await fetchUsers()
-    // Find and update the selected user with fresh data
     if (selectedUser) {
-      const response = await apiRequest(`/users/${selectedUser.id}`)
+      const response = await apiRequest(`/users/${selectedUser.id}`, { method: 'GET' })
       if (response.ok) {
         const userData = await response.json()
         const updatedUser = {
@@ -230,18 +214,14 @@ const Users = () => {
     }
   }
 
-  // Handle deactivate user
   const handleDeactivateUser = async (userId) => {
-    // Permission check: Only Super Admin and Admin can deactivate
     if (currentUserRole === 'Researcher') {
       setError('You do not have permission to deactivate users')
       return
     }
 
     try {
-      const response = await apiRequest(`/users/${userId}/toggle`, {
-        method: 'PATCH'
-      })
+      const response = await apiRequest(`/users/${userId}/toggle`, { method: 'PATCH' })
 
       if (response.ok) {
         showSuccess('User deactivated successfully!')
@@ -249,16 +229,14 @@ const Users = () => {
         setActiveDropdown(null)
       } else {
         const error = await response.json()
-        setError(error.detail || 'Failed to deactivate user')
+        setError(extractErrorMessage(error, 'Failed to deactivate user'))
       }
     } catch (err) {
       setError('Failed to deactivate user. Please try again.')
     }
   }
 
-  // Handle remove user
   const handleRemoveUser = async (userId) => {
-    // Permission check: Only Super Admin can delete users
     if (currentUserRole !== 'Super Admin') {
       setError('Only Super Admins can remove users')
       return
@@ -266,9 +244,7 @@ const Users = () => {
 
     if (confirm('Are you sure you want to remove this user? This action cannot be undone.')) {
       try {
-        const response = await apiRequest(`/users/${userId}`, {
-          method: 'DELETE'
-        })
+        const response = await apiRequest(`/users/${userId}`, { method: 'DELETE' })
 
         if (response.ok) {
           showSuccess('User removed successfully!')
@@ -276,7 +252,7 @@ const Users = () => {
           setActiveDropdown(null)
         } else {
           const error = await response.json()
-          setError(error.detail || 'Failed to remove user')
+          setError(extractErrorMessage(error, 'Failed to remove user'))
         }
       } catch (err) {
         setError('Failed to remove user. Please try again.')
@@ -284,9 +260,7 @@ const Users = () => {
     }
   }
 
-  // Handle add user
   const handleAddUser = () => {
-    // Permission check: Only Super Admin and Admin can add users
     if (currentUserRole === 'Researcher') {
       setError('You do not have permission to add users')
       return
@@ -299,7 +273,7 @@ const Users = () => {
     try {
       const response = await apiRequest('/users', {
         method: 'POST',
-        body: JSON.stringify(newUser)
+        body: JSON.stringify(newUser),
       })
 
       if (response.ok) {
@@ -308,7 +282,7 @@ const Users = () => {
         setShowAddUserModal(false)
       } else {
         const error = await response.json()
-        setError(error.detail || 'Failed to create user')
+        setError(extractErrorMessage(error, 'Failed to create user'))
       }
     } catch (err) {
       setError('Failed to create user. Please try again.')

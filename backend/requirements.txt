@@ -17,6 +17,7 @@ python-dotenv==1.2.2
 
 # Security & Rate Limiting
 slowapi==0.1.9
+
 # Utilities
 pydantic-settings==2.6.1
 

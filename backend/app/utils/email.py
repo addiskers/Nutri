@@ -1,26 +1,24 @@
-import logging
 import aiosmtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from jinja2 import Environment, BaseLoader, select_autoescape
+from jinja2 import Template
 from config.settings import settings
 
-_jinja_env = Environment(
-    loader=BaseLoader(),
-    autoescape=select_autoescape(default_for_string=True, default=True),
-)
 
-logger = logging.getLogger(__name__)
+def _mask_email(value: str) -> str:
+    """Log only the email domain, never the local-part."""
+    if not value or "@" not in value:
+        return "<invalid>"
+    local, _, domain = value.partition("@")
+    return f"***@{domain}"
 
 
 async def send_email(to_email: str, subject: str, html_content: str) -> bool:
     if not settings.SMTP_USER or not settings.SMTP_PASSWORD:
-        logger.warning("Email configuration not set. Email not sent.")
+        print("[WARNING] Email configuration not set. Email not sent.")
         return False
 
     try:
-        logger.info("Sending email (subject=%s)", subject)
-
         message = MIMEMultipart("alternative")
         message["From"] = f"{settings.FROM_NAME} <{settings.FROM_EMAIL}>"
         message["To"] = to_email
@@ -35,20 +33,21 @@ async def send_email(to_email: str, subject: str, html_content: str) -> bool:
             port=settings.SMTP_PORT,
             username=settings.SMTP_USER,
             password=settings.SMTP_PASSWORD,
-            start_tls=True
+            start_tls=True,
         )
 
-        logger.info("Email sent successfully")
+        print(f"[INFO] Email sent to {_mask_email(to_email)}")
         return True
     except Exception as e:
-        logger.error("Failed to send email: %s", type(e).__name__, exc_info=True)
+        # Avoid logging SMTP error detail — may contain addresses or banners.
+        print(f"[ERROR] Failed to send email to {_mask_email(to_email)}: {type(e).__name__}")
         return False
 
 
 async def send_password_reset_email(to_email: str, reset_token: str, user_name: str) -> bool:
-    otp_code = reset_token  # Now this is a 5-digit OTP
+    otp_code = reset_token 
     
-    html_template = _jinja_env.from_string("""
+    html_template = Template("""
     <!DOCTYPE html>
     <html>
     <head>
@@ -86,7 +85,7 @@ async def send_password_reset_email(to_email: str, reset_token: str, user_name: 
                 <div class="warning">
                     <strong>Security Notice:</strong>
                     <ul style="margin: 5px 0; padding-left: 20px;">
-                        <li>This OTP will expire in {{ expire_hours }} hours</li>
+                        <li>This OTP will expire in {{ expire_minutes }} minutes</li>
                         <li>If you didn't request this, please ignore this email</li>
                         <li>Never share this OTP with anyone</li>
                     </ul>
@@ -98,7 +97,7 @@ async def send_password_reset_email(to_email: str, reset_token: str, user_name: 
                 </p>
             </div>
             <div class="footer">
-                <p>&copy; 2026 Zydus Wellness - NutriEyeQ Dashboard</p>
+                <p>© 2026 Zydus Wellness - NutriEyeQ Dashboard</p>
                 <p>This is an automated email. Please do not reply.</p>
             </div>
         </div>
@@ -109,9 +108,9 @@ async def send_password_reset_email(to_email: str, reset_token: str, user_name: 
     html_content = html_template.render(
         user_name=user_name,
         otp_code=otp_code,
-        expire_hours=settings.PASSWORD_RESET_TOKEN_EXPIRE_HOURS
+        expire_minutes=settings.PASSWORD_RESET_OTP_EXPIRE_MINUTES,
     )
-    
+
     subject = "Your NutriEyeQ Password Reset OTP"
     
     return await send_email(to_email, subject, html_content)
@@ -120,7 +119,7 @@ async def send_password_reset_email(to_email: str, reset_token: str, user_name: 
 async def send_welcome_email(to_email: str, user_name: str, temp_password: str) -> bool:
     login_link = f"{settings.FRONTEND_URL}/login"
     
-    html_template = _jinja_env.from_string("""
+    html_template = Template("""
     <!DOCTYPE html>
     <html>
     <head>
@@ -138,7 +137,7 @@ async def send_welcome_email(to_email: str, user_name: str, temp_password: str) 
     <body>
         <div class="container">
             <div class="header">
-                <h1>Welcome to NutriEyeQ!</h1>
+                <h1>🎉 Welcome to NutriEyeQ!</h1>
             </div>
             <div class="content">
                 <h2>Hello {{ user_name }},</h2>
@@ -146,11 +145,11 @@ async def send_welcome_email(to_email: str, user_name: str, temp_password: str) 
                 
                 <div class="credentials">
                     <p><strong>Your Login Credentials:</strong></p>
-                    <p><strong>Email:</strong> {{ email }}</p>
-                    <p><strong>Temporary Password:</strong> <code style="background: white; padding: 4px 8px; border-radius: 4px;">{{ temp_password }}</code></p>
+                    <p>📧 <strong>Email:</strong> {{ email }}</p>
+                    <p>🔑 <strong>Temporary Password:</strong> <code style="background: white; padding: 4px 8px; border-radius: 4px;">{{ temp_password }}</code></p>
                 </div>
                 
-                <p><strong>Important:</strong> Please change your password after your first login for security.</p>
+                <p>⚠️ <strong>Important:</strong> Please change your password after your first login for security.</p>
                 
                 <div style="text-align: center;">
                     <a href="{{ login_link }}" class="button">Login to Dashboard</a>
@@ -162,7 +161,7 @@ async def send_welcome_email(to_email: str, user_name: str, temp_password: str) 
                 </p>
             </div>
             <div class="footer">
-                <p>&copy; 2026 Zydus Wellness - NutriEyeQ Dashboard</p>
+                <p>© 2026 Zydus Wellness - NutriEyeQ Dashboard</p>
                 <p>This is an automated email. Please do not reply.</p>
             </div>
         </div>
@@ -186,7 +185,7 @@ async def send_user_approval_email(admin_email: str, admin_name: str, new_user_n
                                    new_user_email: str, new_user_id: str, department: str) -> bool:
     approval_link = f"{settings.FRONTEND_URL}/users?approve={new_user_id}"
     
-    html_template = _jinja_env.from_string("""
+    html_template = Template("""
     <!DOCTYPE html>
     <html>
     <head>
@@ -220,7 +219,7 @@ async def send_user_approval_email(admin_email: str, admin_name: str, new_user_n
                 <p>Please review and approve this user in the NutriEyeQ Dashboard.</p>
                 
                 <div style="text-align: center;">
-                    <a href="{{ approval_link }}" class="button">Review &amp; Approve User</a>
+                    <a href="{{ approval_link }}" class="button">Review & Approve User</a>
                 </div>
                 
                 <p style="color: #65758b; font-size: 14px; margin-top: 20px;">
@@ -230,7 +229,7 @@ async def send_user_approval_email(admin_email: str, admin_name: str, new_user_n
                 </p>
             </div>
             <div class="footer">
-                <p>&copy; 2026 Zydus Wellness - NutriEyeQ Dashboard</p>
+                <p>© 2026 Zydus Wellness - NutriEyeQ Dashboard</p>
                 <p>This is an automated email. Please do not reply.</p>
             </div>
         </div>
@@ -252,7 +251,7 @@ async def send_user_approval_email(admin_email: str, admin_name: str, new_user_n
 
 
 async def send_login_otp_email(to_email: str, otp_code: str, user_name: str) -> bool:
-    html_template = _jinja_env.from_string("""
+    html_template = Template("""
     <!DOCTYPE html>
     <html>
     <head>
@@ -290,7 +289,7 @@ async def send_login_otp_email(to_email: str, otp_code: str, user_name: str) -> 
                 <div class="warning">
                     <strong>Security Notice:</strong>
                     <ul style="margin: 5px 0; padding-left: 20px;">
-                        <li>This OTP will expire in 10 minutes</li>
+                        <li>This OTP will expire in {{ expire_minutes }} minutes</li>
                         <li>If you didn't attempt to login, please change your password immediately</li>
                         <li>Never share this OTP with anyone</li>
                     </ul>
@@ -312,9 +311,10 @@ async def send_login_otp_email(to_email: str, otp_code: str, user_name: str) -> 
     
     html_content = html_template.render(
         user_name=user_name,
-        otp_code=otp_code
+        otp_code=otp_code,
+        expire_minutes=settings.LOGIN_OTP_EXPIRE_MINUTES,
     )
-    
+
     subject = "Your NutriEyeQ Login Verification OTP"
     
     return await send_email(to_email, subject, html_content)

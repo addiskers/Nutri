@@ -8,6 +8,29 @@ import ProductPreviewModal from '../components/Modals/ProductPreviewModal'
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts'
 import authService, { productService } from '../services/api'
 
+// Hosts we are willing to fetch product images from when building the
+// Excel export. Anything else (arbitrary `https://...` URLs from product
+// data) is skipped — otherwise an attacker who can write to product image
+// fields could coerce a privileged user's browser into making cross-origin
+// GETs against internal/third-party hosts when they click "Export".
+const _ALLOWED_IMAGE_ORIGINS = (() => {
+  const origins = new Set()
+  try { if (typeof window !== 'undefined') origins.add(window.location.origin) } catch {}
+  try {
+    const apiUrl = import.meta.env && import.meta.env.VITE_API_URL
+    if (apiUrl) origins.add(new URL(apiUrl, window.location.origin).origin)
+  } catch {}
+  return origins
+})()
+
+const isAllowedImageUrl = (url) => {
+  try {
+    return _ALLOWED_IMAGE_ORIGINS.has(new URL(url, window.location.origin).origin)
+  } catch {
+    return false
+  }
+}
+
 const Compare = () => {
   const hasPermission = authService.hasPermission('run_comparisons')
   const [selectedProducts, setSelectedProducts] = useState([])
@@ -135,10 +158,6 @@ const Compare = () => {
     const directionsToUse = Array.isArray(usage.directions_to_use) ? usage.directions_to_use.join('\n') : ''
     const preparationMethod = Array.isArray(usage.preparation_method) ? usage.preparation_method.join('\n') : ''
 
-    // Medical information
-    const medical = p.medical_information || {}
-    const warnings = Array.isArray(medical.warnings) ? medical.warnings.join('\n') : ''
-
     // Storage
     const storageArr = Array.isArray(p.storage_instructions) ? p.storage_instructions : (typeof p.storage_instructions === 'string' ? [p.storage_instructions] : [])
 
@@ -182,8 +201,6 @@ const Compare = () => {
       storageCondition: storageArr.join('\n'),
       directionsToUse,
       preparationMethod,
-      // Medical
-      warnings,
       // Company
       brandOwner: p.brand_owner || '',
       marketedBy: marketed.join('\n\n'),
@@ -283,7 +300,6 @@ const Compare = () => {
       { label: 'Storage Condition', key: 'storageCondition', section: 'Storage & Usage' },
       { label: 'Directions to Use', key: 'directionsToUse' },
       { label: 'Preparation Method', key: 'preparationMethod' },
-      { label: 'Warnings', key: 'warnings', section: 'Medical Information' },
       { label: 'Brand Owner', key: 'brandOwner', section: 'Company Information' },
       { label: 'Marketed By', key: 'marketedBy' },
       { label: 'Manufactured By', key: 'manufacturedBy' },
@@ -366,7 +382,7 @@ const Compare = () => {
           if (dataUrlMatch) {
             ext = dataUrlMatch[1] === 'jpg' ? 'jpeg' : dataUrlMatch[1]
             base64Data = dataUrlMatch[2]
-          } else if (/^https?:\/\//i.test(imgUrl) && (imgUrl.startsWith(window.location.origin) || imgUrl.startsWith('https://'))) {
+          } else if (isAllowedImageUrl(imgUrl)) {
             const resp = await fetch(imgUrl)
             const blob = await resp.blob()
             if (!blob.type.startsWith('image/')) continue
@@ -1021,17 +1037,6 @@ const Compare = () => {
                                 ))}
                               </tr>
                             ))}
-                            <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Medical Information</span></td></tr>
-                            <tr>
-                              <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
-                                Warnings
-                              </td>
-                              {selectedProducts.map((product, index) => (
-                                <td key={product.id} className={`px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex ${getProductColumnColor(index)}`}>
-                                  <div className="whitespace-pre-line">{product.warnings || 'Not specified'}</div>
-                                </td>
-                              ))}
-                            </tr>
                           </>
                         )}
 
