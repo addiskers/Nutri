@@ -10,16 +10,15 @@ const DeleteConfirmModal = ({ isOpen, onClose, onConfirm, itemName = 'item' }) =
 
   return (
     <>
-      {/* Overlay */}
+
       <div 
         className="fixed inset-0 bg-black/80 z-50"
         onClick={onClose}
       />
 
-      {/* Modal */}
       <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-lg p-6 z-50 w-full max-w-md">
         <div className="flex flex-col items-end">
-          {/* Close Button */}
+
           <button
             onClick={onClose}
             className="w-6 h-6 flex items-center justify-center rounded hover:bg-gray-100 transition-colors opacity-70 mb-4"
@@ -27,14 +26,12 @@ const DeleteConfirmModal = ({ isOpen, onClose, onConfirm, itemName = 'item' }) =
             <X className="w-5 h-5 text-[#0f1729]" />
           </button>
 
-          {/* Content */}
           <div className="flex flex-col items-center justify-center w-full">
-            {/* Red Trash Icon */}
+
             <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-6">
               <Trash2 className="w-8 h-8 text-[#e01c48]" />
             </div>
 
-            {/* Text */}
             <div className="text-center mb-6">
               <h3 className="text-2xl font-ibm-plex font-bold text-[#0f1729] mb-2">
                 Are you sure?
@@ -44,7 +41,6 @@ const DeleteConfirmModal = ({ isOpen, onClose, onConfirm, itemName = 'item' }) =
               </p>
             </div>
 
-            {/* Buttons */}
             <div className="flex gap-2 w-full">
               <button
                 onClick={onClose}
@@ -69,12 +65,4 @@ const DeleteConfirmModal = ({ isOpen, onClose, onConfirm, itemName = 'item' }) =
 }
 
 export default DeleteConfirmModal
-
-
-
-
-
-
-
-
 

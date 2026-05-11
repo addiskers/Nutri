@@ -10,12 +10,9 @@ from app.utils.queries import safe_regex, parse_object_id, normalize_page
 from app.utils.audit import audit_event
 from app.utils.email import _mask_email
 
-
 router = APIRouter(prefix="/users", tags=["User Management"])
 
-
 _VALID_PERMISSIONS = {p.value for p in UserPermissions}
-
 
 class UserCreateRequest(BaseModel):
     name: str
@@ -23,7 +20,6 @@ class UserCreateRequest(BaseModel):
     password: str
     department: Optional[str] = None
     role: UserRole = UserRole.RESEARCHER
-
 
 class UserUpdateRequest(BaseModel):
     name: Optional[str] = None
@@ -34,9 +30,7 @@ class UserUpdateRequest(BaseModel):
     @field_validator("permissions")
     @classmethod
     def _validate_permissions(cls, v):
-        # Reject anything not in UserPermissions so callers with
-        # manage_permissions can't invent permissions ROLE_PERMISSIONS
-        # doesn't know about.
+
         if v is None:
             return v
         invalid = [p for p in v if p not in _VALID_PERMISSIONS]
@@ -45,13 +39,11 @@ class UserUpdateRequest(BaseModel):
         seen = set()
         return [p for p in v if not (p in seen or seen.add(p))]
 
-
 class UserListResponse(BaseModel):
     users: List[UserResponse]
     total: int
     page: int
     page_size: int
-
 
 def require_permission(user: User, permission: str):
     if not user.has_permission(permission):
@@ -59,7 +51,6 @@ def require_permission(user: User, permission: str):
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"You don't have permission to {permission}"
         )
-
 
 @router.get("", response_model=UserListResponse)
 async def list_users(
@@ -111,7 +102,6 @@ async def list_users(
         page_size=page_size
     )
 
-
 @router.get("/pending", response_model=List[UserResponse])
 async def get_pending_users(
     current_user: User = Depends(get_current_user)
@@ -120,9 +110,6 @@ async def get_pending_users(
     pending_users = await User.find(User.is_approved == False).to_list()
     return [UserResponse.from_user(u) for u in pending_users]
 
-
-# NOTE: must be declared before `GET /{user_id}` — otherwise FastAPI matches
-# "stats" as a user_id and the ObjectId parser 400s.
 @router.get("/stats/summary")
 async def get_user_stats(
     current_user: User = Depends(get_current_user)
@@ -149,7 +136,6 @@ async def get_user_stats(
         }
     }
 
-
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
     user_id: str,
@@ -165,7 +151,6 @@ async def get_user(
         )
 
     return UserResponse.from_user(user)
-
 
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(
@@ -211,7 +196,6 @@ async def create_user(
     new_user.update_permissions_by_role()
     await new_user.insert()
 
-    # Mask email in logs; full email retrievable via user_id if needed.
     print(f"[INFO] User created by actor={current_user.id} target={_mask_email(new_user.email)} role={new_user.role}")
 
     audit_event(
@@ -224,7 +208,6 @@ async def create_user(
     )
 
     return UserResponse.from_user(new_user)
-
 
 @router.put("/{user_id}", response_model=UserResponse)
 async def update_user(
@@ -271,7 +254,7 @@ async def update_user(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have permission to manage permissions"
             )
-        # Validator already ensured entries are valid UserPermissions values.
+
         user.permissions = user_data.permissions
         changed_fields.append("permissions")
 
@@ -290,7 +273,6 @@ async def update_user(
     )
 
     return UserResponse.from_user(user)
-
 
 @router.patch("/{user_id}/approve", response_model=UserResponse)
 async def approve_user(
@@ -332,7 +314,6 @@ async def approve_user(
 
     return UserResponse.from_user(user)
 
-
 @router.patch("/{user_id}/toggle", response_model=UserResponse)
 async def toggle_user_status(
     user_id: str,
@@ -361,9 +342,7 @@ async def toggle_user_status(
 
     user.is_active = not user.is_active
     user.updated_at = datetime.utcnow()
-    # Deactivating a user should immediately invalidate any live sessions.
-    # Re-activating is harmless: the bumped version rolls forward so callers
-    # must re-authenticate.
+
     if not user.is_active:
         user.token_version = (user.token_version or 0) + 1
     await user.save()
@@ -381,7 +360,6 @@ async def toggle_user_status(
     )
 
     return UserResponse.from_user(user)
-
 
 @router.delete("/{user_id}", response_model=MessageResponse)
 async def delete_user(

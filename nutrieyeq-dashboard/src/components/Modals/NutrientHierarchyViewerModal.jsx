@@ -30,16 +30,12 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-/** Deep-clone a hierarchy tree */
 const cloneTree = (nodes) =>
   nodes.map((n) => ({
     ...n,
     children: n.children ? cloneTree(n.children) : [],
   }))
 
-/** Persistable tree (no runtime ids) for formulation column layout + reopen */
 const stripTreeForPersist = (nodes) => {
   if (!nodes?.length) return []
   return nodes.map((n) => ({
@@ -63,7 +59,6 @@ const collectExpandedNutrientNames = (nodes, expanded) => {
   return names
 }
 
-/** Generate a unique id for each node in the local tree */
 let _uid = 0
 const assignIds = (nodes, parentId = null) => {
   for (const node of nodes) {
@@ -73,7 +68,6 @@ const assignIds = (nodes, parentId = null) => {
   }
 }
 
-/** Flatten tree into a display-order array with depth info */
 const flattenTree = (nodes, depth = 0, expanded) => {
   const result = []
   for (const node of nodes) {
@@ -85,7 +79,6 @@ const flattenTree = (nodes, depth = 0, expanded) => {
   return result
 }
 
-/** Find a node by _uid across the tree */
 const findNode = (nodes, uid) => {
   for (const n of nodes) {
     if (n._uid === uid) return n
@@ -97,7 +90,6 @@ const findNode = (nodes, uid) => {
   return null
 }
 
-/** Remove a node by _uid and return it */
 const removeNode = (nodes, uid) => {
   for (let i = 0; i < nodes.length; i++) {
     if (nodes[i]._uid === uid) {
@@ -111,7 +103,6 @@ const removeNode = (nodes, uid) => {
   return null
 }
 
-/** Insert a node after a sibling in a flat siblings list */
 const insertAfter = (siblings, afterUid, node) => {
   const idx = siblings.findIndex((n) => n._uid === afterUid)
   if (idx === -1) {
@@ -121,7 +112,6 @@ const insertAfter = (siblings, afterUid, node) => {
   }
 }
 
-/** Get the parent's children array that contains a given uid */
 const getParentList = (tree, uid) => {
   for (const n of tree) {
     if (n._uid === uid) return tree
@@ -133,7 +123,6 @@ const getParentList = (tree, uid) => {
   return null
 }
 
-/** Compute roll-up sums bottom-up */
 const computeSums = (nodes, nutritionalData) => {
   const sums = {}
 
@@ -189,14 +178,12 @@ const computeSums = (nodes, nutritionalData) => {
   return sums
 }
 
-/** True if this node or any descendant has a computed value (for "hide empty" filter) */
 const subtreeHasValue = (node, sums) => {
   if (sums[node._uid]?.value != null) return true
   if (!node.children?.length) return false
   return node.children.some((c) => subtreeHasValue(c, sums))
 }
 
-/** Display number for a mapped nutrient object (COA cell shape) */
 const previewNutrientNumber = (cell) => {
   if (!cell || typeof cell !== 'object') return null
   const v = cell.actual ?? cell.average ?? cell.min ?? cell.max
@@ -204,8 +191,6 @@ const previewNutrientNumber = (cell) => {
   const n = Number(v)
   return Number.isFinite(n) ? n : null
 }
-
-// ── Draggable Row ──────────────────────────────────────────────────────────
 
 const DraggableRow = ({
   node,
@@ -226,8 +211,6 @@ const DraggableRow = ({
     isDragging,
   } = useSortable({ id: node._uid })
 
-  // Apply dnd-kit's drag transform via the Element.style API to avoid CSP
-  // `style-src 'unsafe-inline'`. Combined ref keeps useSortable wired up.
   const rowRef = useRef(null)
   const setRefs = useCallback((node) => {
     rowRef.current = node
@@ -242,7 +225,6 @@ const DraggableRow = ({
     el.style.opacity = isDragging ? '0.4' : '1'
   }, [transformStr, transition, isDragging])
 
-  // Apply depth-based indentation on the drag handle via the Element.style API.
   const handleRef = useRef(null)
   useEffect(() => {
     if (handleRef.current) handleRef.current.style.marginLeft = `${depth * 20}px`
@@ -277,7 +259,7 @@ const DraggableRow = ({
         isDragging ? 'bg-blue-50' : ''
       }`}
     >
-      {/* Drag handle */}
+
       <button
         ref={handleRef}
         {...attributes}
@@ -287,7 +269,6 @@ const DraggableRow = ({
         <GripVertical className="w-4 h-4" />
       </button>
 
-      {/* Expand/collapse */}
       <button
         onClick={() => hasChildren && onToggle(node._uid)}
         className="flex-shrink-0 w-5 h-5 flex items-center justify-center"
@@ -303,7 +284,6 @@ const DraggableRow = ({
         )}
       </button>
 
-      {/* Name + badges */}
       <div className="flex-1 min-w-0 flex items-center gap-2">
         {depth > 0 && (
           <span className="flex-shrink-0 text-[10px] font-ibm-plex font-bold tabular-nums text-[#009da5] bg-[#e1f4f5] px-1.5 py-0.5 rounded">
@@ -343,7 +323,6 @@ const DraggableRow = ({
         )}
       </div>
 
-      {/* Value */}
       <div className="flex-shrink-0 w-24 text-right">
         {value != null ? (
           <span
@@ -361,7 +340,6 @@ const DraggableRow = ({
         )}
       </div>
 
-      {/* Unit */}
       <div className="flex-shrink-0 w-10 text-right">
         <span className="text-xs font-ibm-plex text-[#65758b]">g</span>
       </div>
@@ -394,8 +372,6 @@ const DraggableRow = ({
   )
 }
 
-// ── Overlay row (shown while dragging) ─────────────────────────────────────
-
 const DragOverlayRow = ({ node, rawNameMap }) => {
   const rawName = rawNameMap[node?.nutrient_name]
   const showRawName = rawName && rawName !== node?.nutrient_name
@@ -416,8 +392,6 @@ const DragOverlayRow = ({ node, rawNameMap }) => {
     </div>
   )
 }
-
-// ── Main Modal ─────────────────────────────────────────────────────────────
 
 const NutrientHierarchyViewerModal = ({
   isOpen,
@@ -440,7 +414,6 @@ const NutrientHierarchyViewerModal = ({
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   )
 
-  // Build local tree when modal opens
   useEffect(() => {
     if (!isOpen) return
     _uid = 0
@@ -448,12 +421,11 @@ const NutrientHierarchyViewerModal = ({
     const tree = globalTree ? cloneTree(globalTree) : []
     assignIds(tree)
 
-    // Collect all nutrient names already in the hierarchy
     const hierarchyNames = new Set()
     const collectNames = (nodes) => {
       for (const n of nodes) {
         hierarchyNames.add(n.nutrient_name)
-        // Also add variants
+
         if (n.variants?.length > 0) {
           n.variants.forEach((v) => hierarchyNames.add(v))
         }
@@ -462,7 +434,6 @@ const NutrientHierarchyViewerModal = ({
     }
     collectNames(tree)
 
-    // Add unmapped nutrients as root-level items
     if (nutritionalData) {
       for (const key of Object.keys(nutritionalData)) {
         if (!hierarchyNames.has(key)) {
@@ -530,10 +501,6 @@ const NutrientHierarchyViewerModal = ({
     })
   }, [localTree, expanded, onClose])
 
-  // Build raw-name reverse map: mapped_name → original key in nutritionalData
-  // Since the nutritionalData keys ARE the mapped names, we need to find cases
-  // where the mapped name differs from the hierarchy node name
-  // For collapse_variants nodes, check if a variant name exists in nutritionalData
   const rawNameMap = useMemo(() => {
     if (!nutritionalData || !localTree.length) return {}
     const map = {}
@@ -541,11 +508,11 @@ const NutrientHierarchyViewerModal = ({
 
     const process = (nodes) => {
       for (const node of nodes) {
-        // Direct match
+
         if (dataKeys.includes(node.nutrient_name)) {
-          // The key IS the mapped name, it matches directly — no "raw name" to show
+
         }
-        // Check variants
+
         if (node.variants?.length > 0) {
           for (const variant of node.variants) {
             if (dataKeys.includes(variant)) {
@@ -561,7 +528,6 @@ const NutrientHierarchyViewerModal = ({
     return map
   }, [localTree, nutritionalData])
 
-  // Compute effective nutritional data (merge variants into canonical names)
   const effectiveData = useMemo(() => {
     if (!nutritionalData) return {}
     const data = { ...nutritionalData }
@@ -575,7 +541,7 @@ const NutrientHierarchyViewerModal = ({
               if (!data[canonical]) {
                 data[canonical] = { ...data[variant] }
               } else {
-                // Sum values
+
                 const existing = data[canonical]
                 const adding = data[variant]
                 data[canonical] = {
@@ -718,8 +684,6 @@ const NutrientHierarchyViewerModal = ({
     setExpanded((prev) => ({ ...prev, [uid]: !prev[uid] }))
   }, [])
 
-  // ── DnD handlers ──
-
   const handleDragStart = (event) => {
     setActiveId(event.active.id)
   }
@@ -730,10 +694,9 @@ const NutrientHierarchyViewerModal = ({
 
     if (!over || active.id === over.id) return
 
-    // Perform the move: take active node, place it after over node in the same parent
     setLocalTree((prev) => {
       const treeCopy = JSON.parse(JSON.stringify(prev))
-      // Re-assign _uids by walking in same order
+
       const reassign = (orig, copy) => {
         for (let i = 0; i < orig.length; i++) {
           copy[i]._uid = orig[i]._uid
@@ -748,10 +711,9 @@ const NutrientHierarchyViewerModal = ({
       const movedNode = removeNode(treeCopy, active.id)
       if (!movedNode) return prev
 
-      // Find target's parent list
       const targetList = getParentList(treeCopy, over.id)
       if (!targetList) {
-        // Target is root level, add after
+
         insertAfter(treeCopy, over.id, movedNode)
       } else {
         insertAfter(targetList, over.id, movedNode)
@@ -770,7 +732,7 @@ const NutrientHierarchyViewerModal = ({
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
-        {/* Header */}
+
         <div className="px-6 py-4 border-b border-[#e1e7ef] flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <GitBranch className="w-5 h-5 text-[#009da5] flex-shrink-0" />
@@ -792,7 +754,6 @@ const NutrientHierarchyViewerModal = ({
           </button>
         </div>
 
-        {/* Toolbar */}
         <div className="px-4 py-2 border-b border-[#e1e7ef] flex items-center gap-3 flex-wrap bg-white flex-shrink-0">
           <label className="flex items-center gap-2 cursor-pointer select-none">
             <input
@@ -870,7 +831,6 @@ const NutrientHierarchyViewerModal = ({
           </div>
         )}
 
-        {/* Column header */}
         <div className="px-3 py-2 bg-[#f1f5f9] border-b border-[#e1e7ef] flex items-center gap-2 flex-shrink-0">
           <div className="w-5" />
           <div className="w-5" />
@@ -892,7 +852,6 @@ const NutrientHierarchyViewerModal = ({
           <div className="w-[72px] flex-shrink-0" aria-hidden />
         </div>
 
-        {/* Tree content */}
         <div ref={scrollAreaRef} className="flex-1 overflow-y-auto min-h-0">
           <DndContext
             sensors={sensors}
@@ -936,7 +895,6 @@ const NutrientHierarchyViewerModal = ({
           </DndContext>
         </div>
 
-        {/* Footer */}
         <div className="px-6 py-4 border-t border-[#e1e7ef] flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between flex-shrink-0">
           <div className="flex flex-col gap-2 min-w-0 flex-1">
             <p className="text-xs font-ibm-plex text-[#65758b]">

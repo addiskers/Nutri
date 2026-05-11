@@ -259,7 +259,7 @@ const IngredientMappingModal = ({ isOpen, onClose, coaName, nutrients, onConfirm
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col">
-        {/* Header */}
+
         <div className="px-6 py-4 border-b border-[#e1e7ef] flex items-center justify-between flex-shrink-0">
           <div>
             <h2 className="text-lg font-ibm-plex font-bold text-[#0f1729]">
@@ -274,7 +274,6 @@ const IngredientMappingModal = ({ isOpen, onClose, coaName, nutrients, onConfirm
           </button>
         </div>
 
-        {/* Toolbar */}
         <div className="px-6 py-3 border-b border-[#e1e7ef] flex items-center gap-3 flex-shrink-0">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#65758b]" />
@@ -300,7 +299,6 @@ const IngredientMappingModal = ({ isOpen, onClose, coaName, nutrients, onConfirm
           )}
         </div>
 
-        {/* Table */}
         <div className="flex-1 overflow-auto">
           <table className="w-full text-sm font-ibm-plex border-collapse">
             <thead className="sticky top-0 z-10">
@@ -375,7 +373,6 @@ const IngredientMappingModal = ({ isOpen, onClose, coaName, nutrients, onConfirm
           </table>
         </div>
 
-        {/* Footer */}
         <div className="px-6 py-4 border-t border-[#e1e7ef] flex items-center justify-between flex-shrink-0">
           <span className="text-sm font-ibm-plex text-[#65758b]">
             {selected.size} nutrient{selected.size !== 1 ? 's' : ''} selected

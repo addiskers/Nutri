@@ -8,11 +8,7 @@ never pull more than the configured limit into memory.
 
 from fastapi import HTTPException, UploadFile
 
-
-# 1 MiB chunks. Small enough that a hostile upload trips the cap quickly,
-# large enough to keep the await-loop overhead negligible for normal sizes.
 _CHUNK_SIZE = 1024 * 1024
-
 
 async def read_upload_capped(
     upload: UploadFile,
@@ -53,8 +49,7 @@ async def read_upload_capped(
             break
         read += len(chunk)
         if read > cap:
-            # Drop accumulated bytes immediately so we don't hold a hostile
-            # payload in memory while raising.
+
             parts.clear()
             raise HTTPException(
                 status_code=413,

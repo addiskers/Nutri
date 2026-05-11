@@ -27,8 +27,7 @@ const SettingsPage = () => {
   const fetchUserProfile = async () => {
     try {
       setLoading(true)
-      // Centralised auth check — never read sessionStorage directly so token
-      // storage policy (currently sessionStorage) can change in one place.
+
       if (!authService.isAuthenticated()) {
         navigate('/login')
         return
@@ -315,11 +314,4 @@ const SettingsPage = () => {
 }
 
 export default SettingsPage
-
-
-
-
-
-
-
 

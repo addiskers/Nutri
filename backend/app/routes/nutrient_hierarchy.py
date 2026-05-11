@@ -13,7 +13,6 @@ from app.utils.queries import parse_object_id
 
 router = APIRouter(prefix="/nutrient-hierarchy", tags=["Nutrient Hierarchy"])
 
-
 class NodeCreate(BaseModel):
     nutrient_name: str
     parent_nutrient: Optional[str] = None
@@ -22,7 +21,6 @@ class NodeCreate(BaseModel):
     variants: List[str] = []
     display_order: int = 0
 
-
 class NodeUpdate(BaseModel):
     nutrient_name: Optional[str] = None
     parent_nutrient: Optional[str] = None
@@ -30,7 +28,6 @@ class NodeUpdate(BaseModel):
     is_additive: Optional[bool] = None
     variants: Optional[List[str]] = None
     display_order: Optional[int] = None
-
 
 def _serialize(node: NutrientHierarchyNode) -> dict:
     return {
@@ -44,7 +41,6 @@ def _serialize(node: NutrientHierarchyNode) -> dict:
         "created_at": node.created_at.isoformat(),
         "updated_at": node.updated_at.isoformat(),
     }
-
 
 @router.post("", response_model=dict)
 async def create_node(
@@ -82,7 +78,6 @@ async def create_node(
     await node.insert()
     return _serialize(node)
 
-
 @router.get("", response_model=dict)
 async def list_nodes(
     current_user: User = Depends(require_permission("view_nomenclature")),
@@ -92,7 +87,6 @@ async def list_nodes(
         "nodes": [_serialize(n) for n in nodes],
         "total": len(nodes),
     }
-
 
 @router.get("/tree", response_model=dict)
 async def get_tree(
@@ -118,7 +112,6 @@ async def get_tree(
 
     return {"tree": roots, "total": len(nodes)}
 
-
 @router.get("/{node_id}", response_model=dict)
 async def get_node(
     node_id: str,
@@ -128,7 +121,6 @@ async def get_node(
     if not node:
         raise HTTPException(status_code=404, detail="Hierarchy node not found")
     return _serialize(node)
-
 
 @router.put("/{node_id}", response_model=dict)
 async def update_node(
@@ -151,7 +143,7 @@ async def update_node(
             )
         old_name = node.nutrient_name
         node.nutrient_name = update.nutrient_name
-        # Update children that reference the old name
+
         children = await NutrientHierarchyNode.find(
             NutrientHierarchyNode.parent_nutrient == old_name
         ).to_list()
@@ -188,7 +180,6 @@ async def update_node(
     await node.save()
     return _serialize(node)
 
-
 @router.delete("/{node_id}", response_model=dict)
 async def delete_node(
     node_id: str,
@@ -204,7 +195,7 @@ async def delete_node(
     ).to_list()
 
     if children and not cascade:
-        # Re-parent children to this node's parent
+
         for child in children:
             child.parent_nutrient = node.parent_nutrient
             child.updated_at = datetime.now(timezone.utc)
@@ -218,7 +209,6 @@ async def delete_node(
         "children_affected": len(children),
     }
 
-
 async def _delete_subtree(parent_name: str):
     """Recursively delete all descendants of a node."""
     children = await NutrientHierarchyNode.find(
@@ -228,11 +218,8 @@ async def _delete_subtree(parent_name: str):
         await _delete_subtree(child.nutrient_name)
         await child.delete()
 
-
-# ── Default seed data ──────────────────────────────────────────────────────
-
 DEFAULT_HIERARCHY = [
-    # Fats
+
     {"nutrient_name": "Total Fat", "parent_nutrient": None, "rule": "gte_sum", "is_additive": True, "display_order": 0},
     {"nutrient_name": "Saturated Fat", "parent_nutrient": "Total Fat", "rule": None, "is_additive": True, "display_order": 0},
     {"nutrient_name": "Monounsaturated Fat", "parent_nutrient": "Total Fat", "rule": None, "is_additive": True, "display_order": 1},
@@ -242,14 +229,14 @@ DEFAULT_HIERARCHY = [
     {"nutrient_name": "DHA", "parent_nutrient": "Polyunsaturated Fat", "rule": None, "is_additive": True, "display_order": 2},
     {"nutrient_name": "EPA", "parent_nutrient": "Polyunsaturated Fat", "rule": None, "is_additive": True, "display_order": 3},
     {"nutrient_name": "Trans Fat", "parent_nutrient": "Total Fat", "rule": None, "is_additive": True, "display_order": 3},
-    # Carbohydrates
+
     {"nutrient_name": "Total Carbohydrates", "parent_nutrient": None, "rule": "gte_sum", "is_additive": True, "display_order": 1},
     {"nutrient_name": "Total Sugars", "parent_nutrient": "Total Carbohydrates", "rule": None, "is_additive": True, "display_order": 0},
     {"nutrient_name": "Added Sugars", "parent_nutrient": "Total Sugars", "rule": None, "is_additive": False, "display_order": 0},
     {"nutrient_name": "Dietary Fiber", "parent_nutrient": "Total Carbohydrates", "rule": None, "is_additive": True, "display_order": 1},
     {"nutrient_name": "Polyol", "parent_nutrient": "Total Carbohydrates", "rule": None, "is_additive": True, "display_order": 2},
     {"nutrient_name": "Other Carbs", "parent_nutrient": "Total Carbohydrates", "rule": None, "is_additive": True, "display_order": 3},
-    # Protein
+
     {
         "nutrient_name": "Protein",
         "parent_nutrient": None,
@@ -266,7 +253,6 @@ DEFAULT_HIERARCHY = [
         ],
     },
 ]
-
 
 @router.post("/seed", response_model=dict)
 async def seed_hierarchy(

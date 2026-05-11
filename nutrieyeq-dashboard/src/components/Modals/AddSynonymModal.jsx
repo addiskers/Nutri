@@ -6,7 +6,6 @@ const AddSynonymModal = ({ isOpen, onClose, onSave, groupName, existingStandardN
   const [rawNames, setRawNames] = useState([{ id: 1, value: '', error: false }])
   const [standardError, setStandardError] = useState(false)
 
-  // Use existing standard name if available
   const hasExistingStandard = existingStandardName && existingStandardName.trim() !== ''
   const finalStandardName = hasExistingStandard ? existingStandardName : standardName
 
@@ -26,13 +25,11 @@ const AddSynonymModal = ({ isOpen, onClose, onSave, groupName, existingStandardN
   const handleSubmit = (e) => {
     e.preventDefault()
 
-    // Validate standardized name (only if not already existing)
     if (!hasExistingStandard && !standardName.trim()) {
       setStandardError(true)
       return
     }
 
-    // Validate all raw names
     let hasErrors = false
     const updatedRawNames = rawNames.map(raw => {
       if (!raw.value.trim()) {
@@ -48,11 +45,9 @@ const AddSynonymModal = ({ isOpen, onClose, onSave, groupName, existingStandardN
       return
     }
 
-    // Save all raw names with the standardized name
     const validRawNames = rawNames.filter(raw => raw.value.trim()).map(raw => raw.value.trim())
     onSave(validRawNames, finalStandardName.trim())
 
-    // Reset and close
     setStandardName('')
     setRawNames([{ id: 1, value: '', error: false }])
     setStandardError(false)
@@ -71,15 +66,14 @@ const AddSynonymModal = ({ isOpen, onClose, onSave, groupName, existingStandardN
 
   return (
     <>
-      {/* Overlay */}
+
       <div 
         className="fixed inset-0 bg-black/80 z-50"
         onClick={handleCancel}
       />
 
-      {/* Modal */}
       <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white border border-[#e1e7ef] rounded-lg shadow-xl z-50 w-full max-w-xl max-h-[80vh] overflow-y-auto">
-        {/* Header */}
+
         <div className="p-6 border-b border-[#e1e7ef] bg-white sticky top-0 z-10">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-lg font-ibm-plex font-semibold text-[#0f1729] tracking-tight">
@@ -97,9 +91,8 @@ const AddSynonymModal = ({ isOpen, onClose, onSave, groupName, existingStandardN
           </p>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4 bg-white">
-          {/* Standardized Name - Show ONLY if group has no existing mappings */}
+
           {!hasExistingStandard && (
             <>
               <div>
@@ -126,12 +119,11 @@ const AddSynonymModal = ({ isOpen, onClose, onSave, groupName, existingStandardN
                   </p>
                 )}
               </div>
-              {/* Divider */}
+
               <div className="h-px bg-[#e1e7ef]" />
             </>
           )}
 
-          {/* Show existing standard name if available */}
           {hasExistingStandard && (
             <div className="bg-[#b455a0]/10 border border-[#b455a0]/20 rounded-lg p-4 mb-4">
               <div className="text-xs font-ibm-plex font-medium text-[#65758b] mb-1">
@@ -143,7 +135,6 @@ const AddSynonymModal = ({ isOpen, onClose, onSave, groupName, existingStandardN
             </div>
           )}
 
-          {/* Raw / Source Names - MULTIPLE FIELDS (Teal Color) */}
           <div className="space-y-4">
             {rawNames.map((raw, index) => (
               <div key={raw.id}>
@@ -170,7 +161,6 @@ const AddSynonymModal = ({ isOpen, onClose, onSave, groupName, existingStandardN
             ))}
           </div>
 
-          {/* Buttons */}
           <div className="flex gap-3 pt-4">
             <button
               type="button"

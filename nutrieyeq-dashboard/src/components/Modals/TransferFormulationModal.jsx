@@ -205,7 +205,7 @@ const TransferFormulationModal = ({ isOpen, onClose, formulations = [], onTransf
               Select Users ({selectedUsers.length} selected)
             </label>
             
-            {/* Search Bar */}
+
             <div className="mb-3 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[#60758a]" />
               <input
@@ -217,7 +217,6 @@ const TransferFormulationModal = ({ isOpen, onClose, formulations = [], onTransf
               />
             </div>
 
-            {/* Role Filter */}
             <div className="mb-3 flex items-center gap-2">
               <Filter className="w-4 h-4 text-[#60758a]" />
               <select
@@ -232,7 +231,6 @@ const TransferFormulationModal = ({ isOpen, onClose, formulations = [], onTransf
               </select>
             </div>
 
-            {/* Select All / Deselect All */}
             <div className="mb-2 flex gap-2">
               <button
                 onClick={handleSelectAll}

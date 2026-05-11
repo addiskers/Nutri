@@ -8,19 +8,11 @@ from slowapi.middleware import SlowAPIMiddleware
 from config.settings import settings
 from app.utils.audit import audit_event
 
-
-# Per-IP throttle. `default_limits` apply to any route that doesn't declare
-# its own `@limiter.limit(...)`, so even a forgotten endpoint can't be hit
-# faster than `RATE_LIMIT_PER_MINUTE`. Sensitive routes (auth, extract)
-# layer their own tighter `@limiter.limit(...)` on top.
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=[f"{settings.RATE_LIMIT_PER_MINUTE}/minute"],
 )
 
-
-# Browsers reject wildcard + credentials combinations, and tightening these
-# also reduces the exposed attack surface for header smuggling.
 _ALLOWED_REQUEST_HEADERS = [
     "Authorization",
     "Content-Type",
@@ -31,11 +23,9 @@ _EXPOSED_RESPONSE_HEADERS = [
     "Content-Disposition",
 ]
 
-
 def configure_cors(app):
     if settings.DEBUG:
-        # `allow_origins=["*"]` combined with `allow_credentials=True` is
-        # invalid per the CORS spec and rejected by modern browsers.
+
         allowed_origins = [
             "http://localhost:5173",
             "http://localhost:3000",
@@ -47,8 +37,7 @@ def configure_cors(app):
         print(f"[WARNING] DEBUG mode CORS origins: {allowed_origins}")
     else:
         production_origin = settings.FRONTEND_URL.rstrip("/")
-        # Credentialed CORS to an http:// origin silently downgrades the
-        # whole session; fail fast at boot rather than ship it.
+
         if not production_origin.startswith("https://"):
             raise RuntimeError(
                 "FRONTEND_URL must be an https:// origin when DEBUG=False. "
@@ -68,7 +57,6 @@ def configure_cors(app):
     )
 
     print("[OK] CORS configured")
-
 
 def configure_body_size_limit(app):
     """Reject oversize request bodies up front.
@@ -101,15 +89,13 @@ def configure_body_size_limit(app):
 
     print(f"[OK] Body size limit: {settings.MAX_REQUEST_BODY_SIZE_MB}MB")
 
-
 def configure_rate_limiting(app):
     app.state.limiter = limiter
     app.add_middleware(SlowAPIMiddleware)
-    
+
     @app.exception_handler(RateLimitExceeded)
     async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
-        # 429s are the canonical brute-force / scraping signal — audit them
-        # so abuse patterns show up alongside the auth.denied events.
+
         route = request.scope.get("route")
         route_path = getattr(route, "path", None) or request.url.path
         fwd = request.headers.get("x-forwarded-for")
@@ -128,9 +114,8 @@ def configure_rate_limiting(app):
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             content={"detail": "Rate limit exceeded. Please try again later."},
         )
-    
-    print("[OK] Rate limiting configured")
 
+    print("[OK] Rate limiting configured")
 
 def rate_limit(times: int = 5, seconds: int = 60):
     return limiter.limit(f"{times}/{seconds}seconds")

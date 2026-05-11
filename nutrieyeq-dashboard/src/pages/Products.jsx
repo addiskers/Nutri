@@ -92,12 +92,10 @@ const Products = () => {
     }
   }, [])
 
-  // Load brands once on mount
   useEffect(() => {
     authService.getBrands().then(res => setBrands(res.brands || []))
   }, [])
 
-  // Load categories once on mount
   useEffect(() => {
     categoryService.getCategories({ limit: 100 })
       .then(res => {
@@ -111,7 +109,6 @@ const Products = () => {
       })
   }, [])
 
-  // Fetch whenever page or filters change
   useEffect(() => {
     fetchProducts(page, searchQuery, selectedCategory, selectedBrand)
   }, [page, selectedCategory, selectedBrand])
@@ -130,7 +127,6 @@ const Products = () => {
     return `${ordinal(day)} ${month} ${year}`
   }
 
-  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (categoryDropdownRef.current && !categoryDropdownRef.current.contains(event.target))
@@ -142,7 +138,6 @@ const Products = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Debounced search — waits 400ms before calling API
   const handleSearch = (query) => {
     setSearchQuery(query)
     clearTimeout(searchDebounceRef.current)
@@ -200,7 +195,7 @@ const Products = () => {
         <NoPermissionContent pageName="Products Page" />
       ) : (
         <div className="p-4 md:p-6 h-full flex flex-col">
-          {/* Page Header with Add Button */}
+
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
             <div className="flex-1">
               <h1 className="text-xl md:text-2xl font-ibm-plex font-bold text-[#0f1729] mb-1">
@@ -219,10 +214,9 @@ const Products = () => {
           </button>
         </div>
 
-        {/* Search and Filters */}
         <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 mb-6">
           <div className="flex flex-col sm:flex-row gap-4">
-            {/* Search Bar */}
+
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#65758b]" />
               <input
@@ -234,7 +228,6 @@ const Products = () => {
               />
             </div>
 
-            {/* Brand Filter */}
             <div className="relative w-full sm:w-auto" ref={brandDropdownRef}>
               <button
                 onClick={() => { setShowBrandDropdown(!showBrandDropdown); setShowCategoryDropdown(false) }}
@@ -256,7 +249,6 @@ const Products = () => {
               )}
             </div>
 
-            {/* Category Filter */}
             <div className="relative w-full sm:w-auto" ref={categoryDropdownRef}>
               <button
                 onClick={() => { setShowCategoryDropdown(!showCategoryDropdown); setShowBrandDropdown(false) }}
@@ -278,13 +270,11 @@ const Products = () => {
               )}
             </div>
 
-            {/* Placeholder to keep layout — date filter removed in favour of server-side pagination */}
             <div className="relative w-full sm:w-auto" ref={null}>
             </div>
           </div>
         </div>
 
-        {/* Products Table - Scrollable */}
         <div
           className="bg-white border border-[#e1e7ef] rounded-lg shadow-sm flex-1 overflow-hidden flex flex-col"
           onClick={() => { setShowCategoryDropdown(false); setShowBrandDropdown(false) }}
@@ -447,7 +437,6 @@ const Products = () => {
           </div>
         </div>
 
-        {/* Pagination Bar */}
         {!loading && total > 0 && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-[#e1e7ef] bg-white rounded-b-lg">
             <p className="text-sm font-ibm-plex text-[#65758b]">
@@ -484,7 +473,6 @@ const Products = () => {
       </div>
       )}
 
-      {/* Modals */}
       <ProductPreviewModal
         product={previewProduct}
         isOpen={!!previewProduct}

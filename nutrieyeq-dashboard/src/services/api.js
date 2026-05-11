@@ -1,10 +1,5 @@
 import { authStorage } from './authStorage'
 
-// VITE_API_URL is inlined at build time. A missing value in a production
-// bundle would silently fall back to HTTP localhost and leak real traffic to
-// any developer who tunnels port 8000 — fail loud instead so the misbuild is
-// caught before users hit it. The dev-only fallback is tree-shaken from the
-// prod bundle by Vite's `import.meta.env.PROD` substitution.
 const RAW_API_URL = import.meta.env.VITE_API_URL
 if (import.meta.env.PROD && !RAW_API_URL) {
   throw new Error('VITE_API_URL must be set at build time for production bundles')
@@ -13,22 +8,8 @@ const API_BASE_URL = RAW_API_URL || 'http://localhost:8000/api'
 
 const getToken = () => authStorage.getAccessToken()
 
-// Thin alias used by pages that pre-date the `authStorage` refactor. Keep it
-// delegating so tokens, user object, and any future fields stay centralised
-// in one place (never reach into sessionStorage directly from a component).
 export const clearAuthData = () => authStorage.clear()
 
-/**
- * FastAPI serves two incompatible shapes under `detail`:
- *   - HTTPException(...)            -> detail: "some string"
- *   - Pydantic ValidationError      -> detail: [{type, loc, msg, input, ctx}, ...]
- *
- * Rendering the array form directly into JSX crashes React with
- *   "Objects are not valid as a React child"
- * because `loc`/`ctx` are nested objects. Every error-surface in the app
- * funnels through this helper so a 422 response can never blow up the UI;
- * it always returns a plain string safe to `setError(...)` or interpolate.
- */
 export function extractErrorMessage(body, fallback = 'Something went wrong') {
   if (body == null) return fallback
   if (typeof body === 'string') return body
@@ -48,9 +29,6 @@ export function extractErrorMessage(body, fallback = 'Something went wrong') {
   return fallback
 }
 
-// Dev-only logger. Vite replaces `import.meta.env.DEV` at build time so the
-// prod branch is tree-shaken, ensuring tokens and response bodies never leak
-// to production consoles.
 const debugLog = (...args) => {
   if (import.meta.env && import.meta.env.DEV) {
     // eslint-disable-next-line no-console
@@ -58,8 +36,6 @@ const debugLog = (...args) => {
   }
 }
 
-// Single in-flight refresh so concurrent 401s don't cause a burst of
-// /auth/refresh calls (each rotates the token and invalidates the others).
 let _refreshInFlight = null
 
 async function refreshAccessToken() {
@@ -93,16 +69,6 @@ async function refreshAccessToken() {
   return _refreshInFlight
 }
 
-// Exported so page-level components (SettingsPage, TransferFormulationModal,
-// etc.) can hit ad-hoc endpoints through the same bearer-token + refresh
-// pipeline the dedicated services use. Do NOT inline `fetch` in those
-// components — that would bypass the single-flight /auth/refresh retry.
-//
-// Body handling:
-//   - FormData bodies leave Content-Type unset so the browser writes
-//     `multipart/form-data; boundary=...` itself.
-//   - Anything else defaults to `application/json` (callers can override
-//     via `options.headers`).
 export async function apiRequest(endpoint, options = {}) {
   const token = getToken()
   const isFormData =
@@ -334,7 +300,6 @@ export const authService = {
     }
   },
 
-  /** Login with email/password (sends OTP). */
   async login(email, password) {
     try {
       const response = await fetch(`${API_BASE_URL}/auth/login`, {
@@ -464,7 +429,6 @@ export const authService = {
     return null
   },
 
-  /** Refresh current user data and reload so new permissions take effect. */
   async refreshUserData() {
     try {
       if (!getToken()) return null
@@ -484,7 +448,6 @@ export const authService = {
   },
   
   async logout() {
-    // Best-effort server-side revocation (increments token_version).
     try {
       const token = getToken()
       if (token) {
@@ -497,7 +460,6 @@ export const authService = {
         })
       }
     } catch (e) {
-      // Ignore — still clear local state and redirect.
     }
     authStorage.clear()
     if (typeof window !== 'undefined') {
@@ -613,9 +575,6 @@ export const nomenclatureService = {
     }
   },
 
-  /**
-   * Create a new nomenclature mapping
-   */
   async createNomenclature(nomenclatureData) {
     try {
       const response = await apiRequest('/nomenclature', {
@@ -1078,11 +1037,6 @@ export const formulationService = {
   }
 }
 
-
-// COA Nomenclature Service
-// Backing endpoints live under /api/coa-nomenclature. All routes are auth-
-// gated server-side, so we route through apiRequest to reuse bearer-token
-// injection and the single-flight /auth/refresh retry.
 export const coaNomenclatureService = {
   async getAll(params = {}) {
     try {
@@ -1193,10 +1147,6 @@ export const coaNomenclatureService = {
   },
 }
 
-
-// Nutrient Hierarchy Service
-// Backing endpoints live under /api/nutrient-hierarchy. `remove` mirrors the
-// backend's ?cascade=true|false toggle for deleting subtrees.
 export const nutrientHierarchyService = {
   async getTree() {
     try {
@@ -1274,7 +1224,5 @@ export const nutrientHierarchyService = {
   },
 }
 
-
 export default authService
-
 

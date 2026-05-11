@@ -9,8 +9,6 @@ import authService from '../services/api'
 import TransferFormulationModal from '../components/Modals/TransferFormulationModal'
 import IngredientMappingModal from '../components/Modals/IngredientMappingModal'
 
-// Apply hierarchy-driven border / padding via the Element.style API to avoid
-// CSP `style-src 'unsafe-inline'`.
 const NutrientHeaderCell = ({ barColor, depth, isInHierarchy, level, nutrient, nameClasses }) => {
   const wrapperRef = useRef(null)
   useEffect(() => {
@@ -39,7 +37,6 @@ import NutrientHierarchyViewerModal from '../components/Modals/NutrientHierarchy
 import ExcelJS from 'exceljs'
 import { saveAs } from 'file-saver'
 
-/** Column order + header depth from hierarchy tree (DFS). Extras = alphabetical only. */
 function computeNutrientColumnLayout(ingredients, tree) {
   const usedKeys = new Set()
   for (const ing of ingredients || []) {
@@ -112,11 +109,8 @@ function computeNutrientColumnLayout(ingredients, tree) {
 
 const Formulation = () => {
 
-  // Get current user role
   const currentUser = authService.getCurrentUser()
   const isSuperAdmin = currentUser?.role === 'Super Admin'
-
-  // COA list for ingredient selection
 
   const [coaList, setCOAList] = useState([])
 
@@ -124,28 +118,21 @@ const Formulation = () => {
 
   
 
-  // Formulation ingredients
-
   const [ingredients, setIngredients] = useState([])
 
   const [nextId, setNextId] = useState(1)
 
   
 
-  // Per-cell value type selection: { 'ingredientId-nutrientName': 'actual'|'min'|'max'|'average'|'auto_cal'|'custom' }
   const [nutrientSelections, setNutrientSelections] = useState({})
-  // Custom values entered by user: { 'ingredientId-nutrientName': number }
-  const [customValues, setCustomValues] = useState({})
-  // Which dropdown is currently open: 'ingredientId-nutrientName' or null
-  const [openDropdown, setOpenDropdown] = useState(null)
 
-  // Search state
+  const [customValues, setCustomValues] = useState({})
+
+  const [openDropdown, setOpenDropdown] = useState(null)
 
   const [searchTerm, setSearchTerm] = useState('')
 
   
-
-  // RDA Export Modal
 
   const [showRDAModal, setShowRDAModal] = useState(false)
 
@@ -153,45 +140,36 @@ const Formulation = () => {
   const [serveSize, setServeSize] = useState(55)
   const [serveSizeUnit, setServeSizeUnit] = useState('g')
 
-  // Save Formulation Modal
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [formulationName, setFormulationName] = useState('')
   const [saveError, setSaveError] = useState('')
   const [isSaving, setIsSaving] = useState(false)
 
-  // Tab management
-  const [activeTab, setActiveTab] = useState('formula') // 'formula' | 'saved'
+  const [activeTab, setActiveTab] = useState('formula')
   const [savedFormulations, setSavedFormulations] = useState([])
   const [isLoadingSaved, setIsLoadingSaved] = useState(false)
 
-  // Saved formulations search and filter
   const [formulationSearch, setFormulationSearch] = useState('')
   const [userFilter, setUserFilter] = useState('All')
   const [availableUsers, setAvailableUsers] = useState([])
 
-  // Bulk selection for formulations
   const [selectedFormulations, setSelectedFormulations] = useState([])
 
-  // Transfer modal
   const [showTransferModal, setShowTransferModal] = useState(false)
   const [selectedFormulation, setSelectedFormulation] = useState(null)
 
-  // Ingredient mapping modal
   const [showMappingModal, setShowMappingModal] = useState(false)
   const [mappingModalData, setMappingModalData] = useState(null)
 
-  // Nutrient hierarchy for roll-up calculations
   const [hierarchyTree, setHierarchyTree] = useState(null)
   const [hierarchyFlat, setHierarchyFlat] = useState([])
 
-  // Nutrient hierarchy viewer modal (per ingredient)
   const [showHierarchyViewer, setShowHierarchyViewer] = useState(false)
   const [hierarchyViewerIngredient, setHierarchyViewerIngredient] = useState(null)
-  // Layout + expand/scroll restored after closing hierarchy modal (session)
+
   const [hierarchyTableLayout, setHierarchyTableLayout] = useState(null)
   const [hierarchyViewerUiByIngredientId, setHierarchyViewerUiByIngredientId] = useState({})
 
-  // Energy Calculation Breakdown
   const [showEnergyBreakdown, setShowEnergyBreakdown] = useState(false)
 
   const DEFAULT_ENERGY_ROWS = [
@@ -209,15 +187,12 @@ const Formulation = () => {
   const [newEnergyMultiplier, setNewEnergyMultiplier] = useState(4)
   const defaultRowIds = new Set(DEFAULT_ENERGY_ROWS.map(r => r.id))
 
-  // Auto-save draft (scoped to user to prevent cross-user leakage on shared devices)
   const currentUserId = (() => { try { return JSON.parse(sessionStorage.getItem('user'))?.id } catch { return 'anon' } })()
   const DRAFT_KEY = `formulation_draft_${currentUserId}`
   const AUTOSAVE_INTERVAL = 30000 
   const [showDraftBanner, setShowDraftBanner] = useState(false)
   const draftChecked = useRef(false)
   const isRestoringDraft = useRef(false)
-
-  // RDA Categories available
 
   const rdaCategories = [
 
@@ -255,7 +230,6 @@ const Formulation = () => {
 
   
 
-  // RDA 2020 - ICMR NIN (full table)
   const rdaData = {
     'Energy': {
       'Children [1-3 Yrs.]': 2000, 'Children [4-6 Yrs.]': 2000, 'Children [7-9 Yrs.]': 2000,
@@ -524,8 +498,6 @@ const Formulation = () => {
 
   
 
-  // Load COAs and nutrient hierarchy on mount
-
   useEffect(() => {
 
     loadCOAs()
@@ -546,21 +518,18 @@ const Formulation = () => {
 
   }, [])
 
-  // Load saved formulations when Saved tab is active or filters change
   useEffect(() => {
     if (activeTab === 'saved') {
       loadSavedFormulations()
     }
   }, [activeTab, userFilter])
 
-  // Load users for filter when component mounts (Super Admin only)
   useEffect(() => {
     if (isSuperAdmin) {
       loadUsersForFilter()
     }
   }, [])
 
-  // ── Auto-save draft helpers ──────────────────────────────────────────────
   const saveDraftToStorage = useCallback(() => {
     if (isRestoringDraft.current) return
     if (ingredients.length === 0) return
@@ -609,7 +578,6 @@ const Formulation = () => {
     setShowDraftBanner(false)
   }, [clearDraft])
 
-  // Check for existing draft on mount — auto-restore if formulation is empty
   useEffect(() => {
     if (draftChecked.current) return
     draftChecked.current = true
@@ -626,7 +594,6 @@ const Formulation = () => {
     }
   }, [])
 
-  // Periodic auto-save every 30 seconds
   useEffect(() => {
     const timer = setInterval(() => {
       saveDraftToStorage()
@@ -634,7 +601,6 @@ const Formulation = () => {
     return () => clearInterval(timer)
   }, [saveDraftToStorage])
 
-  // Auto-save on meaningful state changes
   useEffect(() => {
     if (isRestoringDraft.current) return
     if (ingredients.length > 0) {
@@ -642,8 +608,6 @@ const Formulation = () => {
     }
   }, [ingredients, nutrientSelections, customValues, serveSize, saveDraftToStorage])
 
-  // Session-only hierarchy layout must not carry across formulations: clear when the table is empty
-  // or when switching context (handled in load/save handlers below).
   useEffect(() => {
     if (ingredients.length === 0) {
       setHierarchyTableLayout(null)
@@ -651,7 +615,6 @@ const Formulation = () => {
     }
   }, [ingredients.length])
 
-  // beforeunload — save draft + warn user
   useEffect(() => {
     const handleBeforeUnload = (e) => {
       if (ingredients.length > 0) {
@@ -688,7 +651,6 @@ const Formulation = () => {
 
   
 
-  // Add ingredient row
   const addIngredient = () => {
     const newId = nextId
     setIngredients(prev => [
@@ -706,14 +668,12 @@ const Formulation = () => {
 
   
 
-  // Remove ingredient
   const removeIngredient = (id) => {
     setIngredients(prev => prev.filter(ing => ing.id !== id))
   }
 
   
 
-  // Update ingredient percentage
   const updatePercentage = (id, value) => {
     const numValue = parseFloat(value) || 0
     setIngredients(prev => prev.map(ing =>
@@ -723,7 +683,6 @@ const Formulation = () => {
 
   
 
-  // Select COA for ingredient — opens mapping modal so user picks nutrients
   const selectCOA = async (id, coaId) => {
     if (!coaId) return
     setIngredients(prev => prev.map(ing =>
@@ -745,7 +704,6 @@ const Formulation = () => {
     }
   }
 
-  // Called when user confirms nutrient selection in the mapping modal
   const handleMappingConfirm = (selectedNutrients) => {
     if (!mappingModalData) return
     const { ingredientId, coaName } = mappingModalData
@@ -768,7 +726,6 @@ const Formulation = () => {
     setMappingModalData(null)
   }
 
-  // Get the selected value for a specific ingredient-nutrient cell
   const getNutrientValue = (ingredientId, nutrientName, nutritionalData) => {
     const selectionKey = `${ingredientId}-${nutrientName}`
     const selectedType = nutrientSelections[selectionKey] || 'actual'
@@ -784,7 +741,6 @@ const Formulation = () => {
     return cellData[selectedType] ?? cellData.actual ?? cellData.average ?? 0
   }
 
-  // Get the raw value for a specific type (for display in dropdown)
   const getRawValue = (nutritionalData, nutrientName, valueType) => {
     const cellData = nutritionalData[nutrientName]
     if (!cellData || typeof cellData === 'number') {
@@ -793,7 +749,6 @@ const Formulation = () => {
     return cellData[valueType] ?? null
   }
 
-  // Update the value type selection for a specific cell
   const updateNutrientSelection = (ingredientId, nutrientName, valueType) => {
     setNutrientSelections(prev => ({
       ...prev,
@@ -802,7 +757,6 @@ const Formulation = () => {
     setOpenDropdown(null)
   }
 
-  // Update custom value for a cell
   const updateCustomValue = (ingredientId, nutrientName, value) => {
     setCustomValues(prev => ({
       ...prev,
@@ -810,7 +764,6 @@ const Formulation = () => {
     }))
   }
 
-  // Helper: find a nutrient total by checking match names against nutrientTotals
   const findNutrientTotal = (matchNames, totals) => {
     for (const name of matchNames) {
       if (totals[name] !== undefined) return totals[name]
@@ -818,7 +771,6 @@ const Formulation = () => {
     return 0
   }
 
-  // Calculate energy using the breakdown rows
   const calculateEnergyFromBreakdown = (totals) => {
     let totalEnergy = 0
     const rowDetails = []
@@ -859,7 +811,6 @@ const Formulation = () => {
     return { totalEnergy, rowDetails }
   }
 
-  // Per-column energy using pre-computed breakdown
   const getEnergyPerColumn = (nutrientName, total, breakdown) => {
     for (const row of breakdown.rowDetails) {
       if (!row.enabled) continue
@@ -906,8 +857,6 @@ const Formulation = () => {
     }))
   }
 
-  // Get total percentage
-
   const getTotalPercentage = () => {
 
     return ingredients.reduce((sum, ing) => sum + ing.percentage, 0)
@@ -915,8 +864,6 @@ const Formulation = () => {
   }
 
   
-
-  // ── Hierarchy roll-up logic ───────────────────────────────────────────────
 
   const applyHierarchyRollups = (rawTotals, tree) => {
     if (!tree || tree.length === 0) return { totals: rawTotals, warnings: [], inferred: new Set() }
@@ -935,7 +882,6 @@ const Formulation = () => {
       return name
     }
 
-    // 1. Collapse protein variants: merge alternate names into canonical name
     const processVariants = (nodes) => {
       for (const node of nodes) {
         if (node.rule === 'collapse_variants' && node.variants?.length > 0) {
@@ -953,7 +899,6 @@ const Formulation = () => {
     }
     processVariants(tree)
 
-    // 2. Bottom-up roll-up: process leaves first, then parents
     const processNode = (node) => {
       if (node.children?.length > 0) {
         for (const child of node.children) processNode(child)
@@ -974,8 +919,6 @@ const Formulation = () => {
         const parentVal = totals[pk]
         const parentExists = parentVal !== undefined && parentVal > 0
 
-        // Do not infer or overwrite parent totals from children — each column is only
-        // the weighted sum of mapped COA values (and custom overrides). Warn if inconsistent.
         if (parentExists && childrenSum > 0 && parentVal < childrenSum) {
           warnings.push({
             nutrient: node.nutrient_name,
@@ -1072,7 +1015,6 @@ const Formulation = () => {
   const hierarchyWarnings = hierarchyResult.warnings
   const hierarchyInferred = hierarchyResult.inferred
 
-  // Add any nutrients that were inferred but not in the original list
   const allNutrientNames = [...nutrientNames]
   for (const key of Object.keys(nutrientTotals)) {
     if (!allNutrientNames.includes(key) && nutrientTotals[key] > 0) {
@@ -1080,17 +1022,13 @@ const Formulation = () => {
     }
   }
 
-  // Energy breakdown using the corrected formula
   const energyBreakdown = calculateEnergyFromBreakdown(nutrientTotals)
   const totalEnergy = energyBreakdown.totalEnergy
 
-  // Per-column energy for the table row
   const nutrientEnergies = {}
   nutrientNames.forEach(nutrient => {
     nutrientEnergies[nutrient] = getEnergyPerColumn(nutrient, nutrientTotals[nutrient], energyBreakdown)
   })
-
-  // Calculate percentage energy
 
   const nutrientPercentageEnergies = {}
 
@@ -1106,8 +1044,6 @@ const Formulation = () => {
 
   
 
-  // Filter COAs based on search
-
   const filteredCOAs = coaList.filter(coa => 
 
     coa.ingredient_name?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -1115,8 +1051,6 @@ const Formulation = () => {
   )
 
   
-
-  // Toggle RDA category selection
 
   const toggleRDACategory = (category) => {
 
@@ -1132,7 +1066,6 @@ const Formulation = () => {
 
   }
 
-  // Load saved formulations
   const loadSavedFormulations = async () => {
     setIsLoadingSaved(true)
     try {
@@ -1151,7 +1084,6 @@ const Formulation = () => {
     }
   }
 
-  // Load users for filter (Super Admin only)
   const loadUsersForFilter = async () => {
     if (!isSuperAdmin) return
     
@@ -1167,7 +1099,6 @@ const Formulation = () => {
     }
   }
 
-  // Filter formulations by search query
   const getFilteredFormulations = () => {
     return savedFormulations.filter(formulation => {
       const matchesSearch = formulationSearch === '' ||
@@ -1178,7 +1109,6 @@ const Formulation = () => {
     })
   }
 
-  // Handle checkbox selection for formulations
   const handleFormulationSelect = (formulation) => {
     setSelectedFormulations(prev => {
       const isSelected = prev.find(f => f.id === formulation.id)
@@ -1190,18 +1120,15 @@ const Formulation = () => {
     })
   }
 
-  // Select all filtered formulations
   const handleSelectAllFormulations = () => {
     const filtered = getFilteredFormulations()
     setSelectedFormulations(filtered)
   }
 
-  // Deselect all formulations
   const handleDeselectAllFormulations = () => {
     setSelectedFormulations([])
   }
 
-  // Bulk transfer selected formulations
   const handleBulkTransfer = () => {
     if (selectedFormulations.length === 0) {
       alert('Please select at least one formulation to transfer')
@@ -1210,7 +1137,6 @@ const Formulation = () => {
     setShowTransferModal(true)
   }
 
-  // Save current formulation
   const handleSaveFormulation = async () => {
     setSaveError('')
     const name = formulationName.trim()
@@ -1254,7 +1180,7 @@ const Formulation = () => {
         alert(`Formulation "${name}" saved successfully!`)
         setFormulationName('')
         setShowSaveModal(false)
-        // Refresh saved list if on that tab
+
         if (activeTab === 'saved') {
           loadSavedFormulations()
         }
@@ -1268,7 +1194,6 @@ const Formulation = () => {
     }
   }
 
-  // Open/Load a saved formulation
   const handleOpenFormulation = async (formulationId) => {
     try {
       const formulation = await formulationService.getFormulation(formulationId)
@@ -1277,7 +1202,6 @@ const Formulation = () => {
         return
       }
 
-      // Load ingredients with IDs
       const loadedIngredients = formulation.ingredients.map((ing, index) => ({
         id: index + 1,
         coa_id: ing.coa_id,
@@ -1294,7 +1218,7 @@ const Formulation = () => {
       setCustomValues(formulation.custom_values || {})
       setServeSize(formulation.serve_size || 55)
       
-      // Switch to formula tab
+
       setActiveTab('formula')
       alert(`Loaded formulation: ${formulation.name}`)
     } catch (error) {
@@ -1303,7 +1227,6 @@ const Formulation = () => {
     }
   }
 
-  // Delete a saved formulation
   const handleDeleteFormulation = async (id, name) => {
     if (!confirm(`Are you sure you want to delete "${name}"?`)) {
       return
@@ -1324,9 +1247,6 @@ const Formulation = () => {
 
   
 
-  // Full nutrient list in regulatory order with indentation info
-  // indent: 0 = bold parent, 1 = indented child, 2 = double-indented
-  // section: used to add section headers like "Vitamins", "Minerals"
   const NUTRIENT_EXPORT_ORDER = [
     { name: 'Energy', unit: 'kcal', indent: 0 },
     { name: 'Protein', unit: 'g', indent: 0 },
@@ -1376,7 +1296,6 @@ const Formulation = () => {
     { name: 'chloride', unit: 'mg', indent: 0, aliases: ['Chloride'] },
   ]
 
-  // Export to Excel (vertical format) using ExcelJS
   const exportToExcel = async () => {
     if (ingredients.length === 0) {
       alert('Please add ingredients before exporting')
@@ -1385,13 +1304,12 @@ const Formulation = () => {
 
     const sv = serveSize || 55
 
-    // Helper: find the matching nutrient key in our totals for a given export entry
     const findNutrientKey = (entry) => {
       const candidates = [entry.name, ...(entry.aliases || [])]
       for (const candidate of candidates) {
         if (nutrientTotals[candidate] !== undefined) return candidate
       }
-      // Try case-insensitive match
+
       const allKeys = Object.keys(nutrientTotals)
       for (const candidate of candidates) {
         const lower = candidate.toLowerCase()
@@ -1401,7 +1319,6 @@ const Formulation = () => {
       return null
     }
 
-    // Helper: get RDA value for a nutrient
     const findRDAValue = (entry, category) => {
       const candidates = [entry.name, ...(entry.aliases || [])]
       for (const candidate of candidates) {
@@ -1410,25 +1327,21 @@ const Formulation = () => {
       return null
     }
 
-    // Create workbook and worksheet
     const workbook = new ExcelJS.Workbook()
     const worksheet = workbook.addWorksheet('Formulation')
 
     let currentRow = 1
 
-    // Add main title row
     const titleRow = worksheet.getRow(currentRow)
     titleRow.getCell(1).value = 'NUTRITIONAL INFORMATION'
     titleRow.getCell(1).font = { bold: true, size: 14 }
     currentRow++
 
-    // Add serve size row
     const serveSizeRow = worksheet.getRow(currentRow)
     serveSizeRow.getCell(1).value = `Serve Size: ${sv} ${serveSizeUnit}`
     serveSizeRow.getCell(1).font = { bold: true }
     currentRow++
 
-    // Build header row
     const headerRow = worksheet.getRow(currentRow)
     let colIndex = 1
     headerRow.getCell(colIndex++).value = 'Approximate Composition Per 100 g or 100 ml'
@@ -1441,7 +1354,7 @@ const Formulation = () => {
       headerRow.getCell(colIndex++).value = `%RDA ${cat} (per serve)`
     })
     
-    // Make header row bold
+
     headerRow.eachCell((cell) => {
       cell.font = { bold: true }
       cell.fill = {
@@ -1452,10 +1365,9 @@ const Formulation = () => {
     })
     currentRow++
 
-    // Build nutrient rows for standard nutrients
     let lastSection = null
     NUTRIENT_EXPORT_ORDER.forEach(entry => {
-      // Add section header if this is a new section
+
       if (entry.section && entry.section !== lastSection) {
         const sectionRow = worksheet.getRow(currentRow)
         sectionRow.getCell(1).value = entry.section
@@ -1491,19 +1403,18 @@ const Formulation = () => {
         valServeCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } }
       }
 
-      // For each RDA category, add: RDA value, %RDA per 100g, %RDA per serve
       selectedRDACategories.forEach(cat => {
         const rdaVal = findRDAValue(entry, cat)
         row.getCell(colIndex++).value = rdaVal || 0
         
-        // %RDA per 100g
+
         if (rdaVal && rdaVal > 0) {
           row.getCell(colIndex++).value = parseFloat(((per100g / rdaVal) * 100).toFixed(2))
         } else {
           row.getCell(colIndex++).value = 0
         }
         
-        // %RDA per serve
+
         if (rdaVal && rdaVal > 0) {
           row.getCell(colIndex++).value = parseFloat(((perServe / rdaVal) * 100).toFixed(2))
         } else {
@@ -1513,7 +1424,6 @@ const Formulation = () => {
       currentRow++
     })
 
-    // Collect nutrients not in the standard list for "Others" section
     const coveredNames = new Set()
     NUTRIENT_EXPORT_ORDER.forEach(entry => {
       coveredNames.add(entry.name.toLowerCase())
@@ -1527,18 +1437,18 @@ const Formulation = () => {
       }
     })
     
-    // Add "Others" section if there are any remaining nutrients
+
     if (otherNutrients.length > 0) {
-      // Add "Others" header row
+
       const othersHeaderRow = worksheet.getRow(currentRow)
       othersHeaderRow.getCell(1).value = 'Others'
       othersHeaderRow.getCell(1).font = { bold: true }
       currentRow++
       
-      // Sort other nutrients alphabetically
+
       otherNutrients.sort((a, b) => a.localeCompare(b))
       
-      // Add each other nutrient
+
       otherNutrients.forEach(nutrient => {
         const per100g = nutrientTotals[nutrient] || 0
         const perServe = per100g * sv / 100
@@ -1548,7 +1458,7 @@ const Formulation = () => {
         row.getCell(colIndex++).value = isNaN(per100g) ? 0 : parseFloat(per100g.toFixed(2))
         row.getCell(colIndex++).value = isNaN(perServe) ? 0 : parseFloat(perServe.toFixed(2))
         
-        // Add empty cells for RDA columns
+
         selectedRDACategories.forEach(() => {
           row.getCell(colIndex++).value = 0
           row.getCell(colIndex++).value = 0
@@ -1558,7 +1468,6 @@ const Formulation = () => {
       })
     }
 
-    // Set column widths
     worksheet.getColumn(1).width = 50
     worksheet.getColumn(2).width = 18
     worksheet.getColumn(3).width = 18
@@ -1569,7 +1478,6 @@ const Formulation = () => {
       worksheet.getColumn(col++).width = 24
     })
 
-    // Generate file and download
     const buffer = await workbook.xlsx.writeBuffer()
     const timestamp = new Date().toISOString().slice(0, 10)
     const filename = `Formulation_${timestamp}.xlsx`
@@ -1586,8 +1494,6 @@ const Formulation = () => {
     <Layout>
 
       <div className="p-4 md:p-6 h-full flex flex-col overflow-y-auto">
-
-        {/* Header */}
 
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
 
@@ -1650,7 +1556,6 @@ const Formulation = () => {
 
         </div>
 
-        {/* Tabs */}
         <div className="flex gap-4 border-b border-[#e1e7ef] mb-6">
           <button
             onClick={() => setActiveTab('formula')}
@@ -1674,7 +1579,6 @@ const Formulation = () => {
           </button>
         </div>
 
-        {/* Draft Restore Banner */}
         {showDraftBanner && (
           <div className="mb-4 p-4 rounded-lg border border-[#f0ad4e] bg-[#fef9e7] flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
@@ -1700,11 +1604,8 @@ const Formulation = () => {
           </div>
         )}
 
-        {/* Formula Tab Content */}
         {activeTab === 'formula' && (
         <>
-
-        {/* Total Percentage Warning */}
 
         {ingredients.length > 0 && (
 
@@ -1769,8 +1670,6 @@ const Formulation = () => {
         )}
 
         
-
-        {/* Formulation Table */}
 
         <div className="bg-white border border-[#e1e7ef] rounded-lg shadow-sm mb-6">
 
@@ -1895,8 +1794,6 @@ const Formulation = () => {
                 </thead>
 
                 <tbody>
-
-                  {/* Ingredient Rows */}
 
                   {ingredients.map((ingredient, index) => (
 
@@ -2194,8 +2091,6 @@ const Formulation = () => {
 
                   
 
-                  {/* Total Row */}
-
                   <tr className="bg-[#f1f5f9] border-b-2 border-[#0f1729] font-semibold">
 
                     <td className="px-3 py-3 sticky left-0 bg-[#f1f5f9]">
@@ -2247,8 +2142,6 @@ const Formulation = () => {
 
                   
 
-                  {/* Energy (kcal/g) Row */}
-
                   <tr className="bg-[#e1f4f5] border-b border-[#e1e7ef]">
 
                     <td className="px-3 py-3 sticky left-0 bg-[#e1f4f5]">
@@ -2278,8 +2171,6 @@ const Formulation = () => {
                   </tr>
 
                   
-
-                  {/* Percentage Energy Row */}
 
                   <tr className="bg-[#f9fafb] border-b border-[#e1e7ef]">
 
@@ -2314,8 +2205,6 @@ const Formulation = () => {
                   </tr>
 
                   
-
-                  {/* Total Energy Row */}
 
                   <tr className="bg-[#009da5] text-white">
 
@@ -2353,10 +2242,9 @@ const Formulation = () => {
 
         
 
-        {/* Energy Calculation Breakdown */}
         {ingredients.length > 0 && (
           <div className="bg-white border border-[#e1e7ef] rounded-lg shadow-sm">
-            {/* Toggle Header */}
+
             <button
               onClick={() => setShowEnergyBreakdown(prev => !prev)}
               className="w-full p-4 flex items-center justify-between hover:bg-[#f9fafb] transition-colors rounded-lg"
@@ -2518,7 +2406,6 @@ const Formulation = () => {
                         )
                       })}
 
-                      {/* Add Row Form */}
                       {showAddEnergyRow && (
                         <tr className="border-b border-[#e1e7ef] bg-[#f0fdf4]">
                           <td className="px-4 py-3 text-center">
@@ -2585,7 +2472,6 @@ const Formulation = () => {
                         </tr>
                       )}
 
-                      {/* Total Row */}
                       <tr className="bg-[#009da5] text-white">
                         <td colSpan={8} className="px-4 py-3 text-right">
                           <span className="font-bold">Total Energy</span>
@@ -2598,7 +2484,6 @@ const Formulation = () => {
                   </table>
                 </div>
 
-                {/* Action buttons */}
                 <div className="mt-3 flex justify-between">
                   <button
                     onClick={() => setShowAddEnergyRow(true)}
@@ -2619,7 +2504,6 @@ const Formulation = () => {
           </div>
         )}
 
-        {/* Quick Reference Footer */}
         {ingredients.length > 0 && (
           <div className="bg-white border border-[#e1e7ef] rounded-lg shadow-sm p-4">
             <h3 className="text-sm font-ibm-plex font-semibold text-[#0f1729] mb-3">
@@ -2642,13 +2526,12 @@ const Formulation = () => {
         </>
         )}
 
-        {/* Saved Formulations Tab Content */}
         {activeTab === 'saved' && (
           <div className="bg-white rounded-lg border border-[#e1e7ef] flex-1 min-h-0 flex flex-col overflow-hidden">
-            {/* Search and Filter Bar */}
+
             <div className="p-4 border-b border-[#e1e7ef] space-y-3">
               <div className="flex flex-col md:flex-row gap-3">
-                {/* Search */}
+
                 <div className="flex-1 relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[#60758a]" />
                   <input
@@ -2661,7 +2544,6 @@ const Formulation = () => {
                   />
                 </div>
 
-                {/* User Filter (Super Admin only) */}
                 {isSuperAdmin && (
                   <div className="w-full md:w-64">
                     <select
@@ -2678,7 +2560,6 @@ const Formulation = () => {
                 )}
               </div>
 
-              {/* Bulk Actions (Super Admin only) */}
               {isSuperAdmin && getFilteredFormulations().length > 0 && (
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3 pt-2">
                   <button
@@ -2710,7 +2591,6 @@ const Formulation = () => {
               )}
             </div>
 
-            {/* Table */}
             <div className="flex-1 min-h-0 overflow-y-auto">
             {isLoadingSaved ? (
               <div className="flex items-center justify-center py-12">
@@ -2724,7 +2604,7 @@ const Formulation = () => {
               </div>
             ) : (
               <>
-                {/* Mobile Card Layout */}
+
                 <div className="md:hidden divide-y divide-[#e1e7ef]">
                   {getFilteredFormulations().map((formulation) => {
                     const isSelected = selectedFormulations.find(f => f.id === formulation.id)
@@ -2774,7 +2654,6 @@ const Formulation = () => {
                   })}
                 </div>
 
-                {/* Desktop Table Layout */}
                 <div className="hidden md:block overflow-x-auto">
                   <table className="w-full min-w-[700px]">
                     <thead className="bg-[#f9fafb] border-b border-[#e1e7ef] sticky top-0 z-10">
@@ -2857,7 +2736,6 @@ const Formulation = () => {
           </div>
         )}
 
-        {/* Save Formulation Modal */}
         {showSaveModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
@@ -2910,13 +2788,10 @@ const Formulation = () => {
           </div>
         )}
 
-        {/* RDA Selection Modal */}
         {showRDAModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
 
             <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-
-              {/* Modal Header */}
 
               <div className="p-6 border-b border-[#e1e7ef] flex items-center justify-between">
 
@@ -2951,8 +2826,6 @@ const Formulation = () => {
               </div>
 
               
-
-              {/* Modal Body */}
 
               <div className="p-6 overflow-y-auto flex-1">
 
@@ -3064,8 +2937,6 @@ const Formulation = () => {
 
               
 
-              {/* Modal Footer */}
-
               <div className="p-6 border-t border-[#e1e7ef] flex justify-end gap-3">
 
                 <button
@@ -3108,7 +2979,6 @@ const Formulation = () => {
 
         )}
 
-        {/* Transfer Formulation Modal */}
         <TransferFormulationModal
           isOpen={showTransferModal}
           onClose={() => {
@@ -3123,7 +2993,6 @@ const Formulation = () => {
           }}
         />
 
-        {/* Ingredient Mapping Modal */}
         <IngredientMappingModal
           isOpen={showMappingModal}
           onClose={() => {
@@ -3143,7 +3012,6 @@ const Formulation = () => {
           onConfirm={handleMappingConfirm}
         />
 
-        {/* Nutrient Hierarchy Viewer Modal */}
         <NutrientHierarchyViewerModal
           isOpen={showHierarchyViewer}
           onClose={(payload) => {
@@ -3180,8 +3048,6 @@ const Formulation = () => {
   )
 
 }
-
-
 
 export default Formulation
 

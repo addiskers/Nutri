@@ -99,10 +99,3 @@ const EditCategoryModal = ({ isOpen, onClose, onSave, category }) => {
 
 export default EditCategoryModal
 
-
-
-
-
-
-
-

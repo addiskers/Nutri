@@ -1,7 +1,7 @@
 import os
 import re
 import json
-import fitz  # PyMuPDF for PDF handling
+import fitz
 from io import BytesIO
 from typing import List, Optional
 from datetime import datetime
@@ -20,8 +20,6 @@ from config.settings import settings
 
 router = APIRouter(prefix="/coa", tags=["COA"])
 
-
-# Whitelist of accepted COA upload MIME types (images + PDF).
 _ALLOWED_COA_CONTENT_TYPES = {
     "image/jpeg",
     "image/jpg",
@@ -30,7 +28,6 @@ _ALLOWED_COA_CONTENT_TYPES = {
     "image/gif",
     "application/pdf",
 }
-
 
 def _validate_coa_uploads(files, max_files):
     """Pre-flight upload validation shared by the COA extract route."""
@@ -72,7 +69,7 @@ PRICING = {
 }
 
 NOMENCLATURE_MAP = {
-    # Proteins
+
     "protein": "Protein",
     "proteins": "Protein",
     "crude protein": "Protein",
@@ -80,27 +77,27 @@ NOMENCLATURE_MAP = {
     "protein (n x 6.25)": "Protein",
     "protein (dry basis)": "Protein (Dry Basis)",
     "protein (wet basis)": "Protein (Wet Basis)",
-    # Fats
+
     "fat": "Total Fat",
     "fats": "Total Fat",
     "total fat": "Total Fat",
     "crude fat": "Total Fat",
     "lipids": "Total Fat",
     "total lipids": "Total Fat",
-    # Saturated Fat
+
     "saturated fat": "Saturated Fat",
     "saturated fatty acids": "Saturated Fat",
     "sfa": "Saturated Fat",
     "saturated fats": "Saturated Fat",
-    # Monounsaturated Fat
+
     "monounsaturated fat": "Monounsaturated Fat",
     "monounsaturated fatty acids": "Monounsaturated Fat",
     "mufa": "Monounsaturated Fat",
-    # Polyunsaturated Fat
+
     "polyunsaturated fat": "Polyunsaturated Fat",
     "polyunsaturated fatty acids": "Polyunsaturated Fat",
     "pufa": "Polyunsaturated Fat",
-    # Specific PUFAs
+
     "linoleic acid": "Linoleic Acid",
     "alpha linolenic acid": "Alpha-Linolenic Acid",
     "alpha-linolenic acid": "Alpha-Linolenic Acid",
@@ -109,17 +106,17 @@ NOMENCLATURE_MAP = {
     "docosahexaenoic acid": "DHA",
     "epa": "EPA",
     "eicosapentaenoic acid": "EPA",
-    # Trans Fat
+
     "trans fat": "Trans Fat",
     "trans fatty acids": "Trans Fat",
     "trans fats": "Trans Fat",
-    # Carbohydrates
+
     "carbohydrate": "Total Carbohydrates",
     "carbohydrates": "Total Carbohydrates",
     "total carbohydrate": "Total Carbohydrates",
     "total carbohydrates": "Total Carbohydrates",
     "carbs": "Total Carbohydrates",
-    # Sugars
+
     "sugar": "Total Sugars",
     "sugars": "Total Sugars",
     "total sugar": "Total Sugars",
@@ -128,7 +125,7 @@ NOMENCLATURE_MAP = {
     "added sugars": "Added Sugars",
     "sucrose": "Sucrose",
     "added sucrose": "Added Sucrose",
-    # Fiber
+
     "dietary fiber": "Dietary Fiber",
     "dietary fibre": "Dietary Fiber",
     "total dietary fiber": "Dietary Fiber",
@@ -140,19 +137,19 @@ NOMENCLATURE_MAP = {
     "insoluble fibre": "Insoluble Fiber",
     "fos": "FOS (Fructooligosaccharides)",
     "fructooligosaccharides": "FOS (Fructooligosaccharides)",
-    # Moisture/Ash
+
     "moisture": "Moisture",
     "moisture content": "Moisture",
     "ash": "Ash",
     "total ash": "Ash",
-    # Cholesterol
+
     "cholesterol": "Cholesterol",
-    # Energy
+
     "energy": "Energy",
     "calories": "Energy",
     "calorific value": "Energy",
     "energy value": "Energy",
-    # Minerals
+
     "sodium": "Sodium",
     "na": "Sodium",
     "potassium": "Potassium",
@@ -168,7 +165,7 @@ NOMENCLATURE_MAP = {
     "p": "Phosphorus",
     "chloride": "Chloride",
     "cl": "Chloride",
-    # Vitamins
+
     "vitamin a": "Vitamin A",
     "vit a": "Vitamin A",
     "retinol": "Vitamin A",
@@ -207,7 +204,7 @@ NOMENCLATURE_MAP = {
     "ergocalciferol": "Vitamin D2",
     "vitamin k": "Vitamin K",
     "phylloquinone": "Vitamin K",
-    # Omega Fatty Acids
+
     "omega 3": "Omega 3 Fatty Acid",
     "omega-3": "Omega 3 Fatty Acid",
     "omega 3 fatty acid": "Omega 3 Fatty Acid",
@@ -218,7 +215,7 @@ NOMENCLATURE_MAP = {
     "omega 6 fatty acid": "Omega 6 Fatty Acid",
     "omega 6 fatty acids": "Omega 6 Fatty Acid",
     "n-6 fatty acids": "Omega 6 Fatty Acid",
-    # Trace Minerals
+
     "iodine": "Iodine",
     "i": "Iodine",
     "copper": "Copper",
@@ -231,7 +228,7 @@ NOMENCLATURE_MAP = {
     "mo": "Molybdenum",
     "selenium": "Selenium",
     "se": "Selenium",
-    # Other Nutrients
+
     "carnitine": "Carnitine",
     "l-carnitine": "Carnitine",
     "choline": "Choline",
@@ -242,7 +239,6 @@ NOMENCLATURE_MAP = {
     "taurine": "Taurine",
 }
 
-# Target units for normalization
 TARGET_UNITS = {
     "Protein": "g", "Protein (Dry Basis)": "g", "Protein (Wet Basis)": "g",
     "Total Fat": "g", "Saturated Fat": "g", "Monounsaturated Fat": "g",
@@ -255,7 +251,7 @@ TARGET_UNITS = {
     "Cholesterol": "mg", "Energy": "kcal",
     "Sodium": "mg", "Potassium": "mg", "Calcium": "mg", "Iron": "mg",
     "Zinc": "mg", "Magnesium": "mg", "Phosphorus": "mg", "Chloride": "mg",
-    "Vitamin A": "mcg", "Vitamin D": "mcg", "Vitamin D2": "mcg", "Vitamin D3": "mcg", 
+    "Vitamin A": "mcg", "Vitamin D": "mcg", "Vitamin D2": "mcg", "Vitamin D3": "mcg",
     "Vitamin E": "mg", "Vitamin K": "mcg",
     "Vitamin C": "mg", "Vitamin B1": "mg", "Vitamin B2": "mg", "Vitamin B3": "mg",
     "Vitamin B6": "mg", "Vitamin B12": "mcg", "Folic Acid": "mcg",
@@ -273,9 +269,8 @@ UNIT_CONVERSIONS = {
     "microgram": 0.000001, "micrograms": 0.000001,
     "kcal": 1, "cal": 0.001, "kj": 0.239006,
     "kilojoule": 0.239006, "kilojoules": 0.239006,
-    "iu": 0.3,  # For Vitamin A: 1 IU = 0.3 mcg retinol
+    "iu": 0.3,
 }
-
 
 def calculate_cost(input_tokens: int, output_tokens: int) -> dict:
     input_cost = (input_tokens / 1_000_000) * PRICING["input"]
@@ -288,55 +283,51 @@ def calculate_cost(input_tokens: int, output_tokens: int) -> dict:
         "total_cost": input_cost + output_cost,
     }
 
-
 def standardize_nutrient_name(raw_name: str) -> str:
     cleaned = raw_name.lower().strip()
     cleaned = re.sub(r"\s*\(.*?\)\s*", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return NOMENCLATURE_MAP.get(cleaned, raw_name.title())
 
-
 def normalize_unit(value: float, from_unit: str, nutrient_name: str) -> tuple:
     from_unit_lower = from_unit.lower().strip()
     target_unit = TARGET_UNITS.get(nutrient_name, "g")
-    
+
     if from_unit_lower == target_unit.lower():
         return value, target_unit
-    
+
     from_factor = UNIT_CONVERSIONS.get(from_unit_lower, 1)
     to_factor = UNIT_CONVERSIONS.get(target_unit.lower(), 1)
-    
+
     if to_factor != 0:
         normalized_value = (value * from_factor) / to_factor
     else:
         normalized_value = value
-    
-    return round(normalized_value, 6), target_unit
 
+    return round(normalized_value, 6), target_unit
 
 def get_nutrient_category(nutrient_name: str) -> str:
     categories = {
         "Macronutrient": ["Protein", "Total Fat", "Total Carbohydrates", "Energy", "Moisture", "Ash"],
         "Fat - Saturated": ["Saturated Fat"],
-        "Fat - Unsaturated": ["Monounsaturated Fat", "Polyunsaturated Fat", "Linoleic Acid", 
+        "Fat - Unsaturated": ["Monounsaturated Fat", "Polyunsaturated Fat", "Linoleic Acid",
                              "Alpha-Linolenic Acid", "DHA", "EPA"],
         "Fat - Trans": ["Trans Fat"],
         "Carbohydrate - Sugar": ["Total Sugars", "Added Sugars", "Sucrose", "Added Sucrose"],
-        "Carbohydrate - Fiber": ["Dietary Fiber", "Soluble Fiber", "Insoluble Fiber", 
+        "Carbohydrate - Fiber": ["Dietary Fiber", "Soluble Fiber", "Insoluble Fiber",
                                   "FOS (Fructooligosaccharides)"],
-        "Mineral": ["Sodium", "Potassium", "Calcium", "Iron", "Zinc", "Magnesium", 
+        "Mineral": ["Sodium", "Potassium", "Calcium", "Iron", "Zinc", "Magnesium",
                    "Phosphorus", "Chloride", "Cholesterol"],
         "Vitamin - Fat Soluble": ["Vitamin A", "Vitamin D", "Vitamin D3", "Vitamin E"],
         "Vitamin - Water Soluble": ["Vitamin C", "Vitamin B1", "Vitamin B2", "Vitamin B3",
-                                     "Vitamin B6", "Vitamin B12", "Folic Acid", "Biotin", 
+                                     "Vitamin B6", "Vitamin B12", "Folic Acid", "Biotin",
                                      "Pantothenic Acid"],
     }
-    
+
     for category, nutrients in categories.items():
         if nutrient_name in nutrients:
             return category
     return "Other"
-
 
 def process_extracted_coa(raw_data: dict) -> dict:
     """Standardize nutrient names and normalize units to a consistent basis."""
@@ -385,12 +376,11 @@ def process_extracted_coa(raw_data: dict) -> dict:
                 normalized_nutrient[key] = nutrient[key]
 
         normalized_nutrients.append(normalized_nutrient)
-    
+
     processed["nutritional_data"] = normalized_nutrients
     processed["processing_status"] = "normalized"
-    
-    return processed
 
+    return processed
 
 COA_EXTRACTION_PROMPT = """Extract complete nutritional data from this Certificate of Analysis (COA) document.
 
@@ -412,16 +402,16 @@ EXTRACTION RULES:
 
 2. NUTRIENT VALUES - CRITICAL:
    For EACH nutrient found, extract THREE possible values:
-   
+
    a) RANGE VALUES (from specifications/limits):
       - "min_value": Lower limit (e.g., from "4-6%", min is 4)
       - "max_value": Upper limit (e.g., from "4-6%", max is 6)
       - Look for: "Specification", "Limits", "Range", "Min", "Max"
-   
+
    b) ACTUAL/ANALYZED VALUE:
       - "actual_value": The tested/analyzed result
       - Look for: "Result", "Actual", "Typical", "Nutritional Information", "Analysis"
-   
+
    c) UNIT:
       - Extract exact unit as printed (g, mg, mcg, %, kcal, kJ, IU)
       - Note: Values given as "%" are per 100g basis
@@ -434,16 +424,16 @@ EXTRACTION RULES:
    - Single value "34.5" → actual: 34.5
 
 4. NUTRIENTS TO EXTRACT (if present):
-   
+
    MACRONUTRIENTS:
    - Moisture, Protein, Total Fat, Saturated Fat, Trans Fat
    - Total Carbohydrates, Total Sugars, Dietary Fiber
    - Cholesterol, Ash, Energy
-   
+
    MINERALS:
    - Sodium, Potassium, Calcium, Iron, Zinc
    - Magnesium, Phosphorus, Chloride
-   
+
    VITAMINS:
    - Vitamin A, D, E, C
    - B-vitamins (B1, B2, B3, B6, B12)
@@ -453,7 +443,7 @@ JSON STRUCTURE:
 {
   "document_type": "COA",
   "extraction_date": "YYYY-MM-DD",
-  
+
   "ingredient_info": {
     "ingredient_name": "exact name from document",
     "product_code": "if present or null",
@@ -465,7 +455,7 @@ JSON STRUCTURE:
     "supplier_address": "if present or null",
     "storage_condition": "storage instructions if present or empty string"
   },
-  
+
   "nutritional_data": [
     {
       "nutrient_name": "Protein",
@@ -480,7 +470,7 @@ JSON STRUCTURE:
       "notes": "any relevant notes"
     }
   ],
-  
+
   "other_parameters": [
     {
       "parameter_name": "pH",
@@ -488,7 +478,7 @@ JSON STRUCTURE:
       "specification": "6.0-7.0"
     }
   ],
-  
+
   "certifications": [],
   "analysis_method": "if mentioned",
   "additional_notes": []
@@ -503,13 +493,11 @@ RULES:
 
 Return ONLY the JSON structure above."""
 
-
 class ExtractedCOAData(BaseModel):
     success: bool
     data: Optional[dict] = None
     error: Optional[str] = None
     cost: Optional[dict] = None
-
 
 class COACreate(BaseModel):
     ingredient_name: str
@@ -528,7 +516,6 @@ class COACreate(BaseModel):
     document_images: List[str] = []
     status: str = "active"
 
-
 class COAResponse(BaseModel):
     id: str
     ingredient_name: str
@@ -536,7 +523,6 @@ class COAResponse(BaseModel):
     lot_number: Optional[str]
     status: str
     created_at: datetime
-
 
 @router.post("/extract", response_model=ExtractedCOAData)
 @limiter.limit(settings.EXTRACT_RATE_LIMIT)
@@ -553,14 +539,13 @@ async def extract_coa_from_images(
                 print(msg.encode('ascii', 'replace').decode('ascii'))
             except:
                 print("[LOG] (message contains special characters)")
-    
+
     safe_print("\n" + "="*60)
     safe_print("[COA EXTRACTION] ===== NEW COA EXTRACTION REQUEST =====")
     safe_print("="*60)
-    
+
     try:
-        # Log only the actor id and aggregate counts – never the email or
-        # user-supplied filenames – so logs don't double as a PII channel.
+
         safe_print(
             f"[COA EXTRACTION] actor_id={current_user.id} files={len(images)}"
         )
@@ -582,16 +567,14 @@ async def extract_coa_from_images(
         pil_images = []
         for idx, img in enumerate(images):
             position_label = f"file at position {idx + 1}"
-            # Decide PDF vs image off the declared content-type, not the
-            # extension – `_validate_coa_uploads` already whitelists this.
+
             is_pdf = (img.content_type or "").lower() == "application/pdf"
             try:
                 safe_print(
                     f"[COA EXTRACTION] Loading file[{idx + 1}]/{len(images)} "
                     f"content_type={img.content_type}"
                 )
-                # Stream-read with hard caps so a hostile client that omits
-                # Content-Length / `size` can't exhaust memory.
+
                 content = await read_upload_capped(
                     img,
                     per_file_cap_bytes=per_file_cap,
@@ -607,7 +590,7 @@ async def extract_coa_from_images(
 
                     for page_num in range(total_pages):
                         page = pdf_document[page_num]
-                        mat = fitz.Matrix(300 / 72, 300 / 72)  # 300 DPI
+                        mat = fitz.Matrix(300 / 72, 300 / 72)
                         pix = page.get_pixmap(matrix=mat)
 
                         img_data = pix.tobytes("png")
@@ -625,7 +608,7 @@ async def extract_coa_from_images(
             except HTTPException:
                 raise
             except Exception as e:
-                # Echo the position, not the filename, to keep logs PII-clean.
+
                 safe_print(f"[ERROR] Failed to load file[{idx + 1}]: {type(e).__name__}")
                 raise HTTPException(
                     status_code=400,
@@ -634,12 +617,12 @@ async def extract_coa_from_images(
 
         safe_print("[COA EXTRACTION] Initializing Gemini client...")
         from google import genai
-        
+
         client = genai.Client(api_key=api_key)
         content = [COA_EXTRACTION_PROMPT] + pil_images
-        
+
         safe_print(f"[COA EXTRACTION] Calling Gemini API with model: {GEMINI_MODEL}")
-        
+
         response = client.models.generate_content(
             model=GEMINI_MODEL,
             contents=content,
@@ -650,7 +633,7 @@ async def extract_coa_from_images(
                 "response_mime_type": "application/json",
             },
         )
-        
+
         safe_print("[COA EXTRACTION] Response received from Gemini API")
 
         usage = response.usage_metadata
@@ -666,24 +649,24 @@ async def extract_coa_from_images(
             if "```" in raw_json:
                 last_fence = raw_json.rfind("```")
                 raw_json = raw_json[:last_fence].rstrip()
-        
+
         if not raw_json.startswith("{"):
             first_brace = raw_json.find("{")
             if first_brace != -1:
                 raw_json = raw_json[first_brace:]
-        
+
         if not raw_json.endswith("}"):
             last_brace = raw_json.rfind("}")
             if last_brace != -1:
                 raw_json = raw_json[:last_brace + 1]
-        
+
         coa_data = json.loads(raw_json)
         safe_print("[COA EXTRACTION] JSON parsed successfully")
 
         processed_data = process_extracted_coa(coa_data)
 
         ingredient_info = processed_data.get("ingredient_info", {})
-        
+
         transformed_data = {
             "ingredient_info": {
                 "ingredient_name": ingredient_info.get("ingredient_name", ""),
@@ -703,14 +686,14 @@ async def extract_coa_from_images(
             "additional_notes": processed_data.get("additional_notes", []),
             "raw": coa_data,
         }
-        
+
         safe_print("[COA EXTRACTION] SUCCESS - Extraction completed!")
         return ExtractedCOAData(
             success=True,
             data=transformed_data,
             cost=cost_info
         )
-        
+
     except json.JSONDecodeError as e:
         safe_print(f"[ERROR] JSON parsing failed: {type(e).__name__}")
         return ExtractedCOAData(
@@ -720,13 +703,12 @@ async def extract_coa_from_images(
     except HTTPException:
         raise
     except Exception as e:
-        # Generic client response; internal log retains type only.
+
         safe_print(f"[ERROR] COA extraction failed: {type(e).__name__}")
         return ExtractedCOAData(
             success=False,
             error="Extraction failed. Please try again or contact support."
         )
-
 
 @router.post("", response_model=dict)
 async def create_coa(
@@ -741,7 +723,7 @@ async def create_coa(
             "supplier": coa.supplier_name,
             "nutrients": {}
         }
-        
+
         for nutrient in coa.nutritional_data:
             name = nutrient.get("nutrient_name", "")
             if name:
@@ -753,7 +735,7 @@ async def create_coa(
                     "unit": nutrient.get("unit"),
                     "category": nutrient.get("category"),
                 }
-        
+
         new_coa = COA(
             ingredient_name=coa.ingredient_name,
             product_code=coa.product_code,
@@ -776,7 +758,7 @@ async def create_coa(
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )
-        
+
         await new_coa.insert()
 
         audit_event(
@@ -796,7 +778,6 @@ async def create_coa(
     except Exception as e:
         print(f"[ERROR] create_coa failed: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Failed to create COA")
-
 
 @router.get("", response_model=dict)
 async def list_coas(
@@ -824,7 +805,7 @@ async def list_coas(
 
         coas = await COA.find(query).skip(skip).limit(limit).to_list()
         total = await COA.find(query).count()
-        
+
         return {
             "coas": [
                 {
@@ -849,11 +830,10 @@ async def list_coas(
             "skip": skip,
             "limit": limit
         }
-        
+
     except Exception as e:
         print(f"[ERROR] list_coas failed: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Failed to fetch COAs")
-
 
 @router.get("/{coa_id}", response_model=dict)
 async def get_coa(
@@ -862,10 +842,10 @@ async def get_coa(
 ):
     try:
         coa = await COA.get(parse_object_id(coa_id, field="coa_id"))
-        
+
         if not coa:
             raise HTTPException(status_code=404, detail="COA not found")
-        
+
         return {
             "id": str(coa.id),
             "ingredient_name": coa.ingredient_name,
@@ -887,13 +867,12 @@ async def get_coa(
             "created_at": coa.created_at.isoformat(),
             "updated_at": coa.updated_at.isoformat()
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         print(f"[ERROR] get_coa failed: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Failed to fetch COA")
-
 
 @router.put("/{coa_id}", response_model=dict)
 async def update_coa(
@@ -917,7 +896,7 @@ async def update_coa(
             "supplier": coa_update.supplier_name,
             "nutrients": {}
         }
-        
+
         for nutrient in coa_update.nutritional_data:
             name = nutrient.get("nutrient_name", "")
             if name:
@@ -928,12 +907,12 @@ async def update_coa(
                     "average": nutrient.get("average_value"),
                     "unit": nutrient.get("unit"),
                 }
-        
+
         update_data["master_entry"] = master_entry
-        
+
         for field, value in update_data.items():
             setattr(coa, field, value)
-        
+
         await coa.save()
 
         audit_event(
@@ -957,7 +936,6 @@ async def update_coa(
         print(f"[ERROR] update_coa failed: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Failed to update COA")
 
-
 @router.delete("/{coa_id}", response_model=dict)
 async def delete_coa(
     coa_id: str,
@@ -965,10 +943,10 @@ async def delete_coa(
 ):
     try:
         coa = await COA.get(parse_object_id(coa_id, field="coa_id"))
-        
+
         if not coa:
             raise HTTPException(status_code=404, detail="COA not found")
-        
+
         await coa.delete()
 
         audit_event(

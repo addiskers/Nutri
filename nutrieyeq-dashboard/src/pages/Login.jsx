@@ -8,16 +8,12 @@ const Login = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [step, setStep] = useState('credentials') // 'credentials' or 'otp'
-  // Backend generates an 8-digit OTP (see `generate_otp` default in
-  // backend/app/utils/security.py) and the verify-otp endpoint enforces
-  // `Field(..., min_length=8, max_length=8)`. Any shorter value yields a 422
-  // and a render-time crash, so keep these 8-wide.
+  const [step, setStep] = useState('credentials')
+
   const OTP_LENGTH = 8
   const [otp, setOtp] = useState(Array(OTP_LENGTH).fill(''))
   const [resendTimer, setResendTimer] = useState(0)
-  // Allocate refs via explicit useRef calls (not a loop) so the rules-of-hooks
-  // lint rule stays happy. OTP_LENGTH is a compile-time constant.
+
   const otpRefs = [
     useRef(), useRef(), useRef(), useRef(),
     useRef(), useRef(), useRef(), useRef(),
@@ -178,13 +174,13 @@ const Login = () => {
 
   return (
     <div className="flex flex-col lg:flex-row min-h-screen w-full bg-gradient-to-r from-[#f9fafb] to-white">
-      {/* Left Side - Gradient Background with Features */}
+
       <div 
         className="hidden lg:flex lg:w-[55%] bg-gradient-to-br from-[#b455a0] to-[#0f2c2e] items-center justify-center p-6 xl:p-12"
       >
         <div className="w-full max-w-xl px-4">
           <div className="space-y-6 xl:space-y-8">
-            {/* Heading */}
+
             <div className="space-y-2">
               <h1 className="text-[36px] xl:text-[48px] font-ibm-plex font-bold text-white leading-[1.2]">
                 Your NutriEyeQ Kickoff
@@ -198,7 +194,6 @@ const Login = () => {
               </p>
             </div>
 
-            {/* Features */}
             <div className="space-y-4">
               {features.map((feature, index) => {
                 const Icon = feature.icon
@@ -223,10 +218,9 @@ const Login = () => {
         </div>
       </div>
 
-      {/* Right Side - Login Form */}
       <div className="flex-1 flex items-center justify-center bg-[#f3f3f3] p-4 sm:p-6 md:p-8 lg:p-12">
         <div className="w-full max-w-md space-y-6 md:space-y-8">
-          {/* Logo */}
+
           <div className="flex justify-center">
             <img
               src="/assets/zydus-logo.png"
@@ -235,9 +229,8 @@ const Login = () => {
             />
           </div>
 
-          {/* Form Card */}
           <div className="bg-white rounded-xl shadow-[0px_10px_15px_-3px_rgba(0,0,0,0.1),0px_4px_6px_-4px_rgba(0,0,0,0.1)] border border-[rgba(225,231,239,0.5)] p-6 sm:p-8">
-            {/* Header */}
+
             <div className="text-center mb-6 md:mb-8">
               <h2 className="text-xl sm:text-2xl font-poppins font-bold text-[#0f1729] mb-2">
                 Welcome Back
@@ -247,14 +240,12 @@ const Login = () => {
               </p>
             </div>
 
-            {/* Error Message */}
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm font-poppins mb-5">
                 {error}
               </div>
             )}
 
-            {/* Email/Password Login */}
             {step === 'credentials' && (
               <>
                 <form onSubmit={handleEmailLogin} className="space-y-4">
@@ -323,7 +314,6 @@ const Login = () => {
               </>
             )}
 
-            {/* OTP Verification */}
             {step === 'otp' && (
               <>
                 <div className="text-center mb-6">
@@ -385,7 +375,6 @@ const Login = () => {
               </>
             )}
 
-            {/* Terms */}
             <p className="text-[11px] sm:text-xs font-poppins text-[#65758b] text-center mt-5 md:mt-6 px-2">
               By continuing, you agree to our Terms of Service and Privacy Policy
             </p>

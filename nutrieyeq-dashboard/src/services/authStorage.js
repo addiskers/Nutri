@@ -1,13 +1,3 @@
-// Centralised auth token / user storage.
-//
-// Tokens live in sessionStorage (not localStorage) so they are scoped to a
-// single tab and cleared on tab close. Combined with the strict CSP served
-// by nginx this narrows the XSS blast radius — injected scripts can't
-// execute, and even if they could, tokens don't persist across tabs.
-//
-// On first page load we migrate any pre-existing localStorage tokens into
-// sessionStorage so active users aren't silently logged out.
-
 const KEYS = ['access_token', 'refresh_token', 'user']
 
 function migrateFromLocalStorage() {
@@ -22,8 +12,6 @@ function migrateFromLocalStorage() {
       }
     }
   } catch (e) {
-    // sessionStorage / localStorage can be unavailable (private mode in some
-    // browsers, disabled by policy, etc.). Auth will simply not persist.
     console.warn('[authStorage] migration skipped:', e)
   }
 }

@@ -8,8 +8,6 @@ import { Package, FolderKanban, Clock, Eye, Edit2, Trash2, Loader, ImageIcon } f
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 import { productService, categoryService, userService } from '../services/api'
 
-// Apply background-color via Element.style API (CSP-safe — script-set styles
-// are not blocked by `style-src` directives that omit 'unsafe-inline').
 const ColorSwatch = ({ color }) => {
   const ref = useRef(null)
   useEffect(() => {
@@ -48,7 +46,6 @@ const Dashboard = () => {
   const [categoryChartData, setCategoryChartData] = useState([])
   const [recentProducts, setRecentProducts] = useState([])
 
-  // Fetch data on component mount
   useEffect(() => {
     fetchDashboardData()
   }, [])
@@ -74,7 +71,6 @@ const Dashboard = () => {
 
       setRecentProducts(statsResult.recent_products || [])
 
-      // Percentage changes
       const recentCount  = statsResult.products_last_7_days
       const prevCount    = statsResult.products_prev_7_days
       const olderCount   = statsResult.total_products - recentCount
@@ -94,7 +90,6 @@ const Dashboard = () => {
         recentlyAddedChange:    recentlyAddedPercentage > 0 ? `${recentlyAddedPercentage}%` : null,
       })
 
-      // Pie chart from server-side category breakdown
       const categoryColors = ['#2463eb', '#16a249', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316']
       const breakdown = statsResult.category_breakdown || {}
       const chartData = Object.entries(breakdown)
@@ -123,7 +118,7 @@ const Dashboard = () => {
         const productName = deleteProduct.product_name || 'Product'
         alert(`Product "${productName}" deleted successfully!`)
         setDeleteProduct(null)
-        // Refresh dashboard data
+
         await fetchDashboardData()
       } else {
         alert(`Failed to delete product: ${result.error}`)
@@ -206,7 +201,7 @@ const Dashboard = () => {
 
   const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
     const RADIAN = Math.PI / 180
-    const radius = outerRadius + 25 // Position outside the circle
+    const radius = outerRadius + 25
     const x = cx + radius * Math.cos(-midAngle * RADIAN)
     const y = cy + radius * Math.sin(-midAngle * RADIAN)
 
@@ -242,7 +237,7 @@ const Dashboard = () => {
   return (
     <Layout>
       <div className="p-4 md:p-6">
-        {/* Page Header */}
+
         <div className="mb-6">
           <h1 className="text-xl md:text-2xl font-ibm-plex font-bold text-[#0f1729] mb-1">
             Dashboard
@@ -252,10 +247,9 @@ const Dashboard = () => {
           </p>
         </div>
 
-        {/* Stats Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
           {loading ? (
-            // Loading skeleton
+
             [1, 2, 3].map((i) => (
               <div key={i} className="bg-white border border-[#e1e7ef] rounded-lg p-6 shadow-sm">
                 <div className="flex items-start justify-between">
@@ -299,9 +293,8 @@ const Dashboard = () => {
           )}
         </div>
 
-        {/* Main Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Recent Products Table */}
+
           <div className="lg:col-span-2 bg-white border border-[#e1e7ef] rounded-lg shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-[#e1e7ef]">
               <h3 className="text-lg font-ibm-plex font-semibold text-[#0f1729]">Recent Products</h3>
@@ -427,7 +420,6 @@ const Dashboard = () => {
             </div>
           </div>
 
-          {/* Products by Category Chart */}
           <div className="bg-white border border-[#e1e7ef] rounded-lg p-6 shadow-sm flex flex-col">
             <h3 className="text-lg font-ibm-plex font-semibold text-[#0f1729] mb-4">
               Products by Category
@@ -474,7 +466,7 @@ const Dashboard = () => {
                   </PieChart>
                 </ResponsiveContainer>
                 
-                {/* Custom Legend */}
+
                 <div className="mt-4">
                   <CustomLegend payload={categoryChartData.map((entry) => ({
                     value: `${entry.name} (${entry.value})`,
@@ -487,7 +479,6 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Modals */}
       <ProductPreviewModal
         product={previewProduct}
         isOpen={!!previewProduct}

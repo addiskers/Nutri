@@ -9,7 +9,6 @@ const ProductPreviewModal = ({ product, isOpen, onClose }) => {
   const isDragging = useRef(false)
   const dragStart = useRef({ x: 0, y: 0 })
 
-  // Imperative style application to avoid CSP `style-src 'unsafe-inline'`.
   const viewerRef = useRef(null)
   const imgRef = useRef(null)
   useEffect(() => {
@@ -102,7 +101,7 @@ const ProductPreviewModal = ({ product, isOpen, onClose }) => {
         URL.revokeObjectURL(blobUrl)
       }, 'image/jpeg', 0.92)
     } catch {
-      // Fallback: direct download if CORS blocks canvas
+
       const link = document.createElement('a')
       link.href = url
       link.download = filename
@@ -115,13 +114,11 @@ const ProductPreviewModal = ({ product, isOpen, onClose }) => {
 
   return (
     <>
-      {/* Overlay */}
+
       <div className="fixed inset-0 bg-black/80 z-50" onClick={onClose} />
 
-      {/* Modal */}
       <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-lg p-6 z-50 w-full max-w-2xl">
 
-        {/* Header */}
         <div className="flex items-center justify-between mb-4 pb-2 border-b border-[#e1e7ef]">
           <div>
             <h3 className="text-lg font-ibm-plex font-semibold text-[#0f1729]">
@@ -177,16 +174,15 @@ const ProductPreviewModal = ({ product, isOpen, onClose }) => {
           </div>
         </div>
 
-        {/* Image Viewer */}
         {!hasImages ? (
-          /* No images state */
+
           <div className="flex flex-col items-center justify-center h-64 gap-3 bg-gray-50 rounded-lg">
             <ImageOff className="w-12 h-12 text-[#b455a0] opacity-30" />
             <p className="text-sm font-ibm-plex text-[#65758b]">No images available for this product</p>
           </div>
         ) : (
           <>
-            {/* Main image with navigation */}
+
             <div className="flex items-center justify-center gap-4 mb-4">
               <button
                 onClick={handlePrevious}
@@ -233,7 +229,6 @@ const ProductPreviewModal = ({ product, isOpen, onClose }) => {
               </button>
             </div>
 
-            {/* Thumbnails */}
             {productImages.length > 1 && (
               <div className="overflow-x-auto scrollbar-hide mb-3">
                 <div className="flex items-center justify-center gap-2 px-4">
@@ -254,7 +249,6 @@ const ProductPreviewModal = ({ product, isOpen, onClose }) => {
               </div>
             )}
 
-            {/* Counter + download hint */}
             <div className="flex items-center justify-center gap-4">
               <span className="text-sm font-ibm-plex text-[#65758b]">
                 {currentImageIndex + 1} / {productImages.length}

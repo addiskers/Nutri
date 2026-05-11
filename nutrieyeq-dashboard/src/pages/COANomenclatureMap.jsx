@@ -265,7 +265,7 @@ const COANomenclatureMap = () => {
   return (
     <Layout>
       <div className="p-6 h-full flex flex-col overflow-hidden">
-        {/* Page Header */}
+
         <div className="mb-6">
           <h1 className="text-2xl font-ibm-plex font-bold text-[#0f1729] mb-1">
             COA Nomenclature Map
@@ -275,7 +275,6 @@ const COANomenclatureMap = () => {
           </p>
         </div>
 
-        {/* Search Bar + Actions */}
         <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 mb-6">
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="relative flex-1">
@@ -306,7 +305,6 @@ const COANomenclatureMap = () => {
           </div>
         </div>
 
-        {/* Groups List */}
         <div className="flex-1 overflow-hidden min-h-0">
           <div className="bg-white border border-[#e1e7ef] rounded-lg overflow-hidden h-full overflow-y-auto">
             {loadingNutrients ? (
@@ -329,7 +327,7 @@ const COANomenclatureMap = () => {
             ) : (
               processedNutrientGroups.map((group) => (
                 <div key={group.id} className="border-b border-[#e1e7ef] last:border-b-0">
-                  {/* Group Header */}
+
                   <div className="flex items-center justify-between p-4 hover:bg-[#f9fafb] transition-colors">
                     <button
                       onClick={() => handleToggleGroup(group.id)}
@@ -376,7 +374,6 @@ const COANomenclatureMap = () => {
                     </div>
                   </div>
 
-                  {/* Expanded Table */}
                   {expandedGroups[group.id] && (
                     <div className="px-4 pb-4">
                       {group.filteredMappings.length > 0 ? (
@@ -451,7 +448,6 @@ const COANomenclatureMap = () => {
         </div>
       </div>
 
-      {/* Modals — reuse the same modals as NomenclatureMap */}
       <AddSynonymModal
         isOpen={showAddSynonymModal}
         onClose={() => { setShowAddSynonymModal(false); setSelectedGroup(null) }}

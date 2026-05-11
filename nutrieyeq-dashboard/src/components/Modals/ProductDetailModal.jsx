@@ -56,7 +56,6 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
   const batchInfo = d.batch_information || {}
   const packagingInfo = d.packaging_information || {}
 
-  // Get all nutrient value column keys
   const valueKeys = [...new Set(nutritionTable.flatMap(row => Object.keys(row.values || {})))]
 
   return (
@@ -65,7 +64,6 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
         <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
 
-          {/* Header — fixed at top */}
           <div className="border-b border-[#e1e7ef] rounded-t-xl px-6 py-4 flex items-center justify-between flex-shrink-0">
             <div className="min-w-0 flex-1">
               <h2 className="text-lg font-ibm-plex font-bold text-[#0f1729]">Product Details</h2>
@@ -79,10 +77,8 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
             </button>
           </div>
 
-          {/* Content — scrollable */}
           <div className="p-6 space-y-4 overflow-y-auto flex-1">
 
-            {/* Basic Information */}
             <Section title="Basic Information">
               <div className="grid grid-cols-2 gap-x-8 gap-y-4">
                 <Field label="Product Name" value={d.product_name} />
@@ -100,7 +96,6 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
               </div>
             </Section>
 
-            {/* Dates */}
             {(d.manufacturing_date || d.expiry_date || d.shelf_life) && (
               <Section title="Dates">
                 <div className="grid grid-cols-2 gap-x-8 gap-y-4">
@@ -111,7 +106,6 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
               </Section>
             )}
 
-            {/* Nutritional Data */}
             {nutritionTable.length > 0 && (
               <Section title={`Nutritional Data (${nutritionTable.length} nutrients)`}>
                 <div className="overflow-x-auto -mx-5">
@@ -155,7 +149,6 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
               </Section>
             )}
 
-            {/* Ingredients & Composition */}
             {(d.ingredients || d.allergen_information || claims.length > 0) && (
               <Section title="Composition">
                 <div className="space-y-4">
@@ -185,7 +178,6 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
               </Section>
             )}
 
-            {/* Usage & Storage */}
             {(directionsToUse.length > 0 || preparationMethod.length > 0 || storageInstructions.length > 0) && (
               <Section title="Usage & Storage">
                 <div className="space-y-4">
@@ -217,7 +209,6 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
               </Section>
             )}
 
-            {/* Manufacturer & FSSAI */}
             {(manufacturers.length > 0 || fssaiNumbers.length > 0 || d.brand_owner) && (
               <Section title="Manufacturer & FSSAI">
                 <div className="space-y-4">
@@ -238,7 +229,6 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
               </Section>
             )}
 
-            {/* Batch & Packaging */}
             {(batchInfo.lot_number || batchInfo.machine_code || (batchInfo.other_codes || []).length > 0 || packagingInfo.packaging_material_manufacturer) && (
               <Section title="Batch & Packaging" defaultOpen={false}>
                 <div className="grid grid-cols-2 gap-x-8 gap-y-4">
@@ -251,7 +241,6 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
               </Section>
             )}
 
-            {/* Barcodes & Certifications */}
             {(barcodes.length > 0 || certifications.length > 0) && (
               <Section title="Identifiers & Certifications" defaultOpen={false}>
                 <div className="space-y-4">
@@ -261,7 +250,6 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
               </Section>
             )}
 
-            {/* Customer Care */}
             {(customerCare.phone?.length > 0 || customerCare.email || customerCare.website || customerCare.address) && (
               <Section title="Customer Care" defaultOpen={false}>
                 <div className="grid grid-cols-2 gap-x-8 gap-y-4">
@@ -275,7 +263,6 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
               </Section>
             )}
 
-            {/* Regulatory Text */}
             {regulatoryText.length > 0 && (
               <Section title="Regulatory Text" defaultOpen={false}>
                 <ul className="text-sm font-ibm-plex text-[#0f1729] space-y-1">
@@ -284,7 +271,6 @@ const ProductDetailModal = ({ product, isOpen, onClose }) => {
               </Section>
             )}
 
-            {/* Other Important Text */}
             {otherImportantText.length > 0 && (
               <Section title="Other Important Text" defaultOpen={false}>
                 <ul className="text-sm font-ibm-plex text-[#0f1729] space-y-1">

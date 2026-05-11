@@ -4,16 +4,13 @@ from beanie import Document
 from pydantic import EmailStr, Field
 from enum import Enum
 
-
 class AuthProvider(str, Enum):
     LOCAL = "local"
-
 
 class UserRole(str, Enum):
     SUPER_ADMIN = "Super Admin"
     ADMIN = "Admin"
     RESEARCHER = "Researcher"
-
 
 class UserPermissions(str, Enum):
     VIEW_PRODUCTS = "view_products"
@@ -30,7 +27,6 @@ class UserPermissions(str, Enum):
     RUN_COMPARISONS = "run_comparisons"
     VIEW_ANALYTICS = "view_analytics"
     EXPORT_DATA = "export_data"
-
 
 ROLE_PERMISSIONS = {
     UserRole.SUPER_ADMIN: [perm.value for perm in UserPermissions],
@@ -57,26 +53,22 @@ ROLE_PERMISSIONS = {
     ]
 }
 
-
 class User(Document):
     name: str = Field(..., min_length=2, max_length=100)
     email: EmailStr = Field(..., unique=True, index=True)
     auth_provider: AuthProvider = Field(default=AuthProvider.LOCAL)
     hashed_password: Optional[str] = None
-    # Legacy single-OTP field. Retained for backward-compat on old records;
-    # new code uses login_otp / password_reset_otp.
+
     reset_token: Optional[str] = None
     reset_token_expires: Optional[datetime] = None
-    # Login and password-reset OTPs are stored in separate fields so that
-    # starting one flow cannot invalidate the other.
+
     login_otp: Optional[str] = None
     login_otp_expires: Optional[datetime] = None
     password_reset_otp: Optional[str] = None
     password_reset_otp_expires: Optional[datetime] = None
     otp_attempts: int = Field(default=0)
     otp_lockout_until: Optional[datetime] = None
-    # Bumped on password change / reset so previously issued JWTs are rejected
-    # even though JWT itself is stateless.
+
     token_version: int = Field(default=0)
     department: Optional[str] = None
     job_title: Optional[str] = None
@@ -88,7 +80,7 @@ class User(Document):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     last_login: Optional[datetime] = None
-    
+
     class Settings:
         name = "users"
         indexes = [
@@ -98,7 +90,7 @@ class User(Document):
             "is_approved",
             "auth_provider"
         ]
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -109,13 +101,13 @@ class User(Document):
                 "is_active": True
             }
         }
-    
+
     def get_initials(self) -> str:
         return ''.join([n[0].upper() for n in self.name.split()[:2]])
-    
+
     def has_permission(self, permission: str) -> bool:
         return permission in self.permissions
-    
+
     def update_permissions_by_role(self):
         self.permissions = ROLE_PERMISSIONS.get(self.role, [])
 

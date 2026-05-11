@@ -3,11 +3,10 @@ from datetime import datetime, timezone
 from beanie import Document
 from pydantic import Field
 
-
 class NutrientHierarchyNode(Document):
     nutrient_name: str = Field(..., min_length=1, max_length=100)
     parent_nutrient: Optional[str] = None
-    rule: Optional[str] = None  # "gte_sum" | "collapse_variants" | None
+    rule: Optional[str] = None
     is_additive: bool = True
     variants: List[str] = Field(default_factory=list)
     display_order: int = 0

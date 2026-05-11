@@ -13,20 +13,16 @@ router = APIRouter(prefix="/nomenclature", tags=["Nomenclature"])
 _edit_nomenclature = require_permission(UserPermissions.EDIT_NOMENCLATURE.value)
 _view_nomenclature = require_permission(UserPermissions.VIEW_NOMENCLATURE.value)
 
-
 class NomenclatureCreate(BaseModel):
     standardized_name: str
     raw_names: List[str] = []
-
 
 class NomenclatureUpdate(BaseModel):
     standardized_name: Optional[str] = None
     raw_names: Optional[List[str]] = None
 
-
 class SynonymAdd(BaseModel):
     raw_name: str
-
 
 @router.post("", response_model=dict)
 async def create_nomenclature(
@@ -74,7 +70,6 @@ async def create_nomenclature(
             detail="Failed to create nomenclature mapping"
         )
 
-
 @router.get("", response_model=dict)
 async def list_nomenclature(
     skip: int = 0,
@@ -108,7 +103,6 @@ async def list_nomenclature(
             detail="Failed to fetch nomenclature mappings"
         )
 
-
 @router.get("/map", response_model=dict)
 async def get_nomenclature_map(
     current_user: User = Depends(_view_nomenclature),
@@ -134,7 +128,6 @@ async def get_nomenclature_map(
             status_code=500,
             detail="Failed to build nomenclature map"
         )
-
 
 @router.get("/{mapping_id}", response_model=dict)
 async def get_nomenclature(
@@ -163,7 +156,6 @@ async def get_nomenclature(
             status_code=500,
             detail="Failed to fetch nomenclature mapping"
         )
-
 
 @router.put("/{mapping_id}", response_model=dict)
 async def update_nomenclature(
@@ -223,7 +215,6 @@ async def update_nomenclature(
             detail="Failed to update nomenclature mapping"
         )
 
-
 @router.post("/{mapping_id}/synonyms", response_model=dict)
 async def add_synonym(
     mapping_id: str,
@@ -270,7 +261,6 @@ async def add_synonym(
             detail="Failed to add synonym"
         )
 
-
 @router.delete("/{mapping_id}/synonyms/{raw_name}", response_model=dict)
 async def remove_synonym(
     mapping_id: str,
@@ -316,7 +306,6 @@ async def remove_synonym(
             status_code=500,
             detail="Failed to remove synonym"
         )
-
 
 @router.delete("/{mapping_id}", response_model=dict)
 async def delete_nomenclature(

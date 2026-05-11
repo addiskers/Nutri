@@ -96,13 +96,13 @@ const Register = () => {
 
   return (
     <div className="flex flex-col lg:flex-row min-h-screen w-full bg-gradient-to-r from-[#f9fafb] to-white">
-      {/* Left Side - Gradient Background with Features */}
+
       <div 
         className="hidden lg:flex lg:w-[55%] bg-gradient-to-br from-[#b455a0] to-[#0f2c2e] items-center justify-center p-6 xl:p-12"
       >
         <div className="w-full max-w-xl px-4">
           <div className="space-y-6 xl:space-y-8">
-            {/* Heading */}
+
             <div className="space-y-2">
               <h1 className="text-3xl xl:text-5xl font-['IBM_Plex_Sans'] font-bold text-white leading-tight">
                 Your NutriEyeQ Kickoff
@@ -116,7 +116,6 @@ const Register = () => {
               </p>
             </div>
 
-            {/* Features */}
             <div className="space-y-4">
               {features.map((feature, index) => {
                 const Icon = feature.icon
@@ -141,12 +140,11 @@ const Register = () => {
         </div>
       </div>
 
-      {/* Right Side - Form */}
       <div className="flex-1 flex items-center justify-center bg-[#f3f3f3] p-4 sm:p-6 md:p-8 lg:p-12">
         <div className="w-full max-w-md space-y-6 md:space-y-8">
-          {/* Form Card */}
+
           <div className="bg-white rounded-xl shadow-[0px_10px_15px_-3px_rgba(0,0,0,0.1),0px_4px_6px_-4px_rgba(0,0,0,0.1)] border border-[rgba(225,231,239,0.5)] p-6 sm:p-8">
-            {/* Header */}
+
             <div className="text-center mb-6 md:mb-8">
               <h2 className="text-xl sm:text-2xl font-poppins font-bold text-[#0f1729] mb-2">
                 Create Account
@@ -156,7 +154,6 @@ const Register = () => {
               </p>
             </div>
 
-            {/* Success Message */}
             {pendingApproval && (
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-5 mb-5">
                 <div className="flex items-start gap-3">
@@ -183,16 +180,14 @@ const Register = () => {
               </div>
             )}
 
-            {/* Error Message */}
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm font-poppins mb-5">
                 {error}
               </div>
             )}
 
-            {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-5">
-              {/* Name Input */}
+
               <div className="relative">
                 <div className="absolute left-4 top-1/2 transform -translate-y-1/2">
                   <svg className="w-5 h-5 text-[#9ca3af]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -211,7 +206,6 @@ const Register = () => {
                 />
               </div>
 
-              {/* Email Input */}
               <div className="relative">
                 <div className="absolute left-4 top-1/2 transform -translate-y-1/2">
                   <Mail className="w-5 h-5 text-[#9ca3af]" />
@@ -228,7 +222,6 @@ const Register = () => {
                 />
               </div>
 
-              {/* Password Input */}
               <div className="relative">
                 <div className="absolute left-4 top-1/2 transform -translate-y-1/2">
                   <Lock className="w-5 h-5 text-[#9ca3af]" />
@@ -252,7 +245,6 @@ const Register = () => {
                 </button>
               </div>
 
-              {/* Confirm Password Input */}
               <div className="relative">
                 <div className="absolute left-4 top-1/2 transform -translate-y-1/2">
                   <Lock className="w-5 h-5 text-[#9ca3af]" />
@@ -276,7 +268,6 @@ const Register = () => {
                 </button>
               </div>
 
-              {/* Submit Button */}
               <button
                 type="submit"
                 disabled={loading}
@@ -286,14 +277,12 @@ const Register = () => {
               </button>
             </form>
 
-            {/* Terms */}
             <p className="text-[11px] sm:text-xs font-poppins text-[#65758b] text-center mt-5 md:mt-6 px-2">
               By continuing, you agree to our{' '}
               <span className="text-[#3c83f6]">Terms of Service</span> and{' '}
               <span className="text-[#3c83f6]">Privacy Policy</span>
             </p>
 
-            {/* Login Link */}
             <div className="mt-4 text-center text-sm font-poppins text-[#65758b]">
               Already have an account?{' '}
               <Link to="/login" className="text-[#3c83f6] font-medium hover:underline">

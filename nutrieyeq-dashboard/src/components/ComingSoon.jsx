@@ -35,10 +35,3 @@ const ComingSoon = ({ title, description, icon: Icon }) => {
 
 export default ComingSoon
 
-
-
-
-
-
-
-

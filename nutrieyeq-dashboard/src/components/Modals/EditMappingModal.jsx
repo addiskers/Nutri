@@ -21,7 +21,6 @@ const EditMappingModal = ({ isOpen, onClose, onSave, mapping }) => {
       return
     }
 
-    // Standardized name stays the same, only raw name changes
     onSave(rawName.trim(), standardName.trim())
     setShowError(false)
     alert('Synonym updated successfully!')
@@ -103,11 +102,4 @@ const EditMappingModal = ({ isOpen, onClose, onSave, mapping }) => {
 }
 
 export default EditMappingModal
-
-
-
-
-
-
-
 

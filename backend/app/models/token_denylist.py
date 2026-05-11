@@ -3,7 +3,6 @@ from beanie import Document
 from pydantic import Field
 from pymongo import IndexModel, ASCENDING
 
-
 class DeniedToken(Document):
     """Stores JTI (JWT ID) of revoked tokens so they cannot be reused."""
     jti: str = Field(..., index=True)

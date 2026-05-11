@@ -34,8 +34,6 @@ const Users = () => {
       setLoading(true)
       setError('')
 
-      // apiRequest handles token injection, single-flight refresh and the
-      // 401 -> /login redirect, so we only need to surface non-OK statuses.
       const response = await apiRequest('/users?page=1&page_size=100', { method: 'GET' })
 
       if (!response.ok) {
@@ -295,7 +293,7 @@ const Users = () => {
         <NoPermissionContent pageName="User Management" />
       ) : (
         <div className="p-4 md:p-6 h-full flex flex-col">
-          {/* Success Message */}
+
         {successMessage && (
           <div className="mb-4 bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-lg flex items-center gap-2">
             <CheckCircle className="w-5 h-5" />
@@ -303,7 +301,6 @@ const Users = () => {
           </div>
         )}
 
-        {/* Error Message */}
         {error && (
           <div className="mb-4 bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg flex items-center gap-2">
             <AlertCircle className="w-5 h-5" />
@@ -312,7 +309,6 @@ const Users = () => {
           </div>
         )}
 
-        {/* Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
           <div className="flex-1">
             <h1 className="text-xl md:text-2xl font-ibm-plex font-bold text-[#0f1729] mb-1">
@@ -331,7 +327,6 @@ const Users = () => {
           </button>
         </div>
 
-        {/* Tabs for Pending Approval */}
         {currentUserRole === 'Super Admin' && pendingUsers.length > 0 && (
           <div className="flex gap-2 mb-4 border-b border-[#e1e7ef]">
             <button
@@ -362,10 +357,9 @@ const Users = () => {
           </div>
         )}
 
-        {/* Search and Filters */}
         <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 mb-6">
           <div className="flex flex-col sm:flex-row gap-4">
-            {/* Search Bar */}
+
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#65758b]" />
               <input
@@ -377,7 +371,6 @@ const Users = () => {
               />
             </div>
 
-            {/* Role Filter Dropdown */}
             <div className="relative w-full sm:w-56" ref={roleDropdownRef}>
               <button
                 onClick={() => setShowRoleDropdown(!showRoleDropdown)}
@@ -407,7 +400,6 @@ const Users = () => {
           </div>
         </div>
 
-        {/* Users Table */}
         <div className="bg-white border border-[#e1e7ef] rounded-lg shadow-sm overflow-hidden flex-1 flex flex-col">
           {loading ? (
             <div className="flex items-center justify-center h-64">
@@ -496,7 +488,7 @@ const Users = () => {
                         }`}>
                           {!user.isApproved ? 'Pending Approval' : user.status}
                         </span>
-                        {/* Toggle Switch - only show if approved */}
+
                         {user.isApproved && (
                           <button
                             onClick={() => handleToggleStatus(user.id)}
@@ -524,10 +516,9 @@ const Users = () => {
                           <MoreVertical className="w-4 h-4 text-[#65758b]" />
                         </button>
 
-                        {/* Actions Dropdown */}
                         {activeDropdown === user.id && (
                           <div className="absolute right-0 top-10 bg-white border border-[#e1e7ef] rounded-md shadow-lg z-50 min-w-[160px] py-1">
-                            {/* Approve button for pending users */}
+
                             {!user.isApproved && currentUserRole === 'Super Admin' && (
                               <>
                                 <button
@@ -578,7 +569,6 @@ const Users = () => {
                 </table>
               </div>
 
-              {/* Table Footer - Pagination */}
               <div className="border-t border-[#e1e7ef] px-4 py-3 bg-white">
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-ibm-plex text-[#65758b]">
@@ -604,7 +594,6 @@ const Users = () => {
           )}
         </div>
 
-        {/* Modals */}
         <AddUserModal
           isOpen={showAddUserModal}
           onClose={() => setShowAddUserModal(false)}

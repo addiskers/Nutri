@@ -7,30 +7,29 @@ import { coaService } from '../services/api'
 const COA = () => {
   const navigate = useNavigate()
   
-  // COA list state
+
   const [coaList, setCOAList] = useState([])
   const [isLoadingList, setIsLoadingList] = useState(true)
   
-  // Edit modal state
+
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingCOA, setEditingCOA] = useState(null)
   const [isSaving, setIsSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [saveError, setSaveError] = useState(null)
   
-  // View modal state
+
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
   const [viewingCOA, setViewingCOA] = useState(null)
   const [isLoadingView, setIsLoadingView] = useState(false)
   
-  // File preview modal state
+
   const [isFilePreviewOpen, setIsFilePreviewOpen] = useState(false)
   const [previewImages, setPreviewImages] = useState([])
   const [previewIsPdf, setPreviewIsPdf] = useState([])
   const [previewIndex, setPreviewIndex] = useState(0)
   const [previewZoom, setPreviewZoom] = useState(1)
-  // Imperative style application for the zoomable preview image — avoids CSP
-  // `style-src 'unsafe-inline'` while keeping the same zoom behaviour.
+
   const previewImgRef = useRef(null)
   useEffect(() => {
     const el = previewImgRef.current
@@ -41,8 +40,7 @@ const COA = () => {
   }, [previewZoom])
   const [isLoadingPreview, setIsLoadingPreview] = useState(false)
   const [previewIngredientName, setPreviewIngredientName] = useState('')
-  // Blob URLs created from PDF data URLs (Chrome blocks data:application/pdf in iframes).
-  // Tracked separately so we can revoke them to avoid memory leaks.
+
   const blobUrlsRef = useRef([])
 
   const revokePreviewBlobUrls = () => {
@@ -64,7 +62,7 @@ const COA = () => {
 
   useEffect(() => () => revokePreviewBlobUrls(), [])
   
-  // Edit form state
+
   const [ingredientName, setIngredientName] = useState('')
   const [productDescription, setProductDescription] = useState('')
   const [productCode, setProductCode] = useState('')
@@ -78,7 +76,6 @@ const COA = () => {
   const [analysisMethod, setAnalysisMethod] = useState('')
   const [nutrients, setNutrients] = useState([])
 
-  // Load COAs on mount
   useEffect(() => {
     loadCOAList()
   }, [])
@@ -95,7 +92,6 @@ const COA = () => {
     }
   }
 
-  // Open file preview modal
   const handleFilePreview = async (coa) => {
     try {
       setIsLoadingPreview(true)
@@ -140,7 +136,6 @@ const COA = () => {
     a.click()
   }
 
-  // Open view modal
   const handleViewCOA = async (coa) => {
     try {
       setIsLoadingView(true)
@@ -158,12 +153,11 @@ const COA = () => {
     }
   }
 
-  // Download COA as CSV
   const handleDownloadCOA = (coa) => {
     if (!coa) return
     const lines = []
     
-    // Basic info
+
     lines.push('=== COA Details ===')
     lines.push(`Ingredient Name,${coa.ingredient_name || ''}`)
     if (coa.product_code) lines.push(`Product Code,${coa.product_code}`)
@@ -177,17 +171,17 @@ const COA = () => {
     if (coa.analysis_method) lines.push(`Analysis Method,${coa.analysis_method}`)
     lines.push('')
     
-    // Nutritional data - dynamic columns based on what has data
+
     if (coa.nutritional_data && coa.nutritional_data.length > 0) {
       lines.push('=== Nutritional Data ===')
       
-      // Check which columns have data
+
       const hasActual = coa.nutritional_data.some(n => n.actual_value !== null && n.actual_value !== undefined)
       const hasMin = coa.nutritional_data.some(n => n.min_value !== null && n.min_value !== undefined)
       const hasMax = coa.nutritional_data.some(n => n.max_value !== null && n.max_value !== undefined)
       const hasAverage = coa.nutritional_data.some(n => n.average_value !== null && n.average_value !== undefined)
       
-      // Build header dynamically
+
       const headers = ['Nutrient']
       if (hasActual) headers.push('Actual')
       if (hasMin) headers.push('Min')
@@ -196,7 +190,7 @@ const COA = () => {
       headers.push('Unit')
       lines.push(headers.join(','))
       
-      // Build rows with only columns that have data
+
       coa.nutritional_data.forEach(n => {
         const row = [`"${n.nutrient_name || ''}"`]
         if (hasActual) row.push(n.actual_value ?? '')
@@ -217,10 +211,9 @@ const COA = () => {
     URL.revokeObjectURL(url)
   }
 
-  // Open edit modal and populate form
   const handleEditCOA = async (coa) => {
     try {
-      // Fetch full COA details
+
       const fullCOA = await coaService.getCOA(coa.id)
       
       if (fullCOA) {
@@ -237,7 +230,7 @@ const COA = () => {
         setStorageCondition(fullCOA.storage_condition || '')
         setAnalysisMethod(fullCOA.analysis_method || '')
         
-        // Convert nutritional data to form format
+
         const nutrientRows = (fullCOA.nutritional_data || []).map((item, index) => ({
           id: index + 1,
           name: item.nutrient_name || '',
@@ -260,7 +253,6 @@ const COA = () => {
     }
   }
 
-  // Close edit modal
   const handleCloseModal = () => {
     setIsEditModalOpen(false)
     setEditingCOA(null)
@@ -268,14 +260,12 @@ const COA = () => {
     setSaveError(null)
   }
 
-  // Update nutrient field
   const updateNutrient = (id, field, value) => {
     setNutrients(nutrients.map(nutrient =>
       nutrient.id === id ? { ...nutrient, [field]: value } : nutrient
     ))
   }
 
-  // Add nutrient row
   const addNutrient = () => {
     const newId = nutrients.length > 0 ? Math.max(...nutrients.map(n => n.id)) + 1 : 1
     setNutrients([
@@ -295,14 +285,12 @@ const COA = () => {
     ])
   }
 
-  // Remove nutrient row
   const removeNutrient = (id) => {
     if (nutrients.length > 0) {
       setNutrients(nutrients.filter(nutrient => nutrient.id !== id))
     }
   }
 
-  // Save edited COA
   const handleSaveCOA = async () => {
     if (!ingredientName.trim()) {
       setSaveError('Please enter Ingredient Name')
@@ -314,7 +302,7 @@ const COA = () => {
     setSaveError(null)
     
     try {
-      // Build nutritional_data array for API
+
       const nutritionalData = nutrients
         .filter(n => n.name.trim())
         .map(n => ({
@@ -354,9 +342,9 @@ const COA = () => {
       
       if (result.success) {
         setSaveSuccess(true)
-        // Reload list
+
         loadCOAList()
-        // Close modal after 1.5 seconds
+
         setTimeout(() => {
           handleCloseModal()
         }, 1500)
@@ -371,7 +359,6 @@ const COA = () => {
     }
   }
 
-  // Delete COA
   const handleDeleteCOA = async (coaId) => {
     if (!confirm('Are you sure you want to delete this COA?')) return
     
@@ -391,7 +378,7 @@ const COA = () => {
   return (
     <Layout>
       <div className="p-4 md:p-6 h-full flex flex-col overflow-y-auto">
-        {/* Header */}
+
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
           <div className="flex-1">
             <h1 className="text-xl md:text-2xl font-ibm-plex font-bold text-[#0f1729] mb-1">
@@ -420,7 +407,6 @@ const COA = () => {
           </div>
         </div>
 
-        {/* COA Table */}
         <div className="bg-white border border-[#e1e7ef] rounded-lg shadow-sm">
           {isLoadingList ? (
             <div className="p-8 text-center">
@@ -569,11 +555,10 @@ const COA = () => {
         </div>
       </div>
 
-      {/* File Preview Modal */}
       {isFilePreviewOpen && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[95vh] flex flex-col">
-            {/* Header */}
+
             <div className="flex items-center justify-between px-5 py-3 border-b border-[#e1e7ef] flex-shrink-0">
               <div className="flex items-center gap-3">
                 <FileText className="w-5 h-5 text-[#2463eb]" />
@@ -587,7 +572,7 @@ const COA = () => {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {/* Zoom Controls — only for images, PDFs have built-in zoom */}
+
                 {previewImages.length > 0 && !previewIsPdf[previewIndex] && (
                   <div className="flex items-center gap-1 bg-[#f1f5f9] rounded-md px-2 py-1">
                     <button
@@ -616,7 +601,7 @@ const COA = () => {
                     </button>
                   </div>
                 )}
-                {/* Download */}
+
                 <button
                   onClick={handlePreviewDownload}
                   disabled={previewImages.length === 0}
@@ -625,7 +610,7 @@ const COA = () => {
                   <Download className="w-3.5 h-3.5" />
                   Download
                 </button>
-                {/* Close */}
+
                 <button
                   onClick={() => { setIsFilePreviewOpen(false); setPreviewImages([]); setPreviewIsPdf([]); setPreviewZoom(1); revokePreviewBlobUrls() }}
                   className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-gray-100 transition-colors"
@@ -635,7 +620,6 @@ const COA = () => {
               </div>
             </div>
 
-            {/* Document Area */}
             <div className="flex-1 overflow-auto bg-[#f1f3f5] relative flex items-center justify-center min-h-0">
               {isLoadingPreview ? (
                 <div className="py-16 text-center">
@@ -678,7 +662,6 @@ const COA = () => {
               )}
             </div>
 
-            {/* Page Navigation */}
             {previewImages.length > 1 && (
               <div className="flex items-center justify-center gap-4 px-5 py-3 border-t border-[#e1e7ef] bg-white flex-shrink-0">
                 <button
@@ -714,11 +697,10 @@ const COA = () => {
         </div>
       )}
 
-      {/* View Modal */}
       {isViewModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl my-8 max-h-[90vh] overflow-y-auto">
-            {/* Modal Header */}
+
             <div className="sticky top-0 bg-white border-b border-[#e1e7ef] px-6 py-4 flex items-center justify-between z-10">
               <div>
                 <h2 className="text-xl font-ibm-plex font-bold text-[#0f1729]">
@@ -746,7 +728,6 @@ const COA = () => {
               </div>
             </div>
 
-            {/* Modal Content */}
             <div className="p-6">
               {isLoadingView ? (
                 <div className="py-12 text-center">
@@ -755,7 +736,7 @@ const COA = () => {
                 </div>
               ) : viewingCOA ? (
                 <div className="space-y-6">
-                  {/* Basic Information */}
+
                   <div className="bg-[#f9fafb] border border-[#e1e7ef] rounded-lg p-5">
                     <h3 className="text-base font-ibm-plex font-semibold text-[#0f1729] mb-4 pb-2 border-b border-[#e1e7ef]">
                       Basic Information
@@ -793,7 +774,6 @@ const COA = () => {
                     </div>
                   </div>
 
-                  {/* Nutritional Data */}
                   {viewingCOA.nutritional_data && viewingCOA.nutritional_data.length > 0 && (
                     <div className="bg-white border border-[#e1e7ef] rounded-lg overflow-hidden">
                       <div className="px-5 py-3 border-b border-[#e1e7ef] bg-[#f9fafb]">
@@ -830,7 +810,6 @@ const COA = () => {
                     </div>
                   )}
 
-                  {/* Other Parameters */}
                   {viewingCOA.other_parameters && viewingCOA.other_parameters.length > 0 && (
                     <div className="bg-[#f9fafb] border border-[#e1e7ef] rounded-lg p-5">
                       <h3 className="text-base font-ibm-plex font-semibold text-[#0f1729] mb-3">
@@ -854,11 +833,10 @@ const COA = () => {
         </div>
       )}
 
-      {/* Edit Modal */}
       {isEditModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl my-8 max-h-[90vh] overflow-y-auto">
-            {/* Modal Header */}
+
             <div className="sticky top-0 bg-white border-b border-[#e1e7ef] px-6 py-4 flex items-center justify-between z-10">
               <div>
                 <h2 className="text-xl font-ibm-plex font-bold text-[#0f1729]">
@@ -895,9 +873,8 @@ const COA = () => {
               </div>
             </div>
 
-            {/* Modal Content */}
             <div className="p-6 space-y-6">
-              {/* Status Messages */}
+
               {saveSuccess && (
                 <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-start gap-3">
                   <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
@@ -920,7 +897,6 @@ const COA = () => {
                 </div>
               )}
 
-              {/* Basic Information */}
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-6">
                 <h3 className="text-lg font-ibm-plex font-semibold text-[#0f1729] mb-4 pb-2 border-b border-[#e1e7ef]">
                   Basic Information
@@ -1056,7 +1032,6 @@ const COA = () => {
                 </div>
               </div>
 
-              {/* Nutritional Data Table */}
               <div className="bg-white border border-[#e1e7ef] rounded-lg">
                 <div className="px-6 py-4 border-b border-[#e1e7ef] flex items-center justify-between">
                   <h3 className="text-lg font-ibm-plex font-semibold text-[#0f1729]">

@@ -85,10 +85,3 @@ const EditNutrientGroupModal = ({ isOpen, onClose, onSave, group }) => {
 
 export default EditNutrientGroupModal
 
-
-
-
-
-
-
-

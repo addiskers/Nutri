@@ -47,7 +47,6 @@ const NomenclatureMap = () => {
   const [loadingCategories, setLoadingCategories] = useState(false)
   const [categoriesError, setCategoriesError] = useState(null)
 
-  // Fetch nomenclature and categories from database
   useEffect(() => {
     fetchNomenclature()
     fetchCategories()
@@ -59,7 +58,7 @@ const NomenclatureMap = () => {
     try {
       const result = await nomenclatureService.getNomenclature({ limit: 200 })
       
-      // Transform nomenclature data to match the UI structure
+
       const transformedGroups = (result.mappings || []).map(mapping => ({
         id: mapping.id,
         name: mapping.standardized_name,
@@ -109,11 +108,11 @@ const NomenclatureMap = () => {
   const handleAddSynonyms = async (rawNames, standardName) => {
     if (selectedGroup) {
       try {
-        // Combine existing raw_names with new ones
+
         const currentRawNames = selectedGroup.mappings.map(m => m.rawName)
         const updatedRawNames = [...currentRawNames, ...rawNames]
         
-        // Also update the standardized name if it changed
+
         const updateData = {
           standardized_name: standardName,
           raw_names: updatedRawNames
@@ -122,7 +121,7 @@ const NomenclatureMap = () => {
         const result = await nomenclatureService.updateNomenclature(selectedGroup.id, updateData)
         
         if (result.success) {
-          // Refresh nomenclature list
+
           await fetchNomenclature()
           alert('Synonyms added successfully!')
         } else {
@@ -139,11 +138,11 @@ const NomenclatureMap = () => {
     try {
       const result = await nomenclatureService.createNomenclature({
         standardized_name: groupName,
-        raw_names: [] // Start with empty raw_names
+        raw_names: []
       })
       
       if (result.success) {
-        // Refresh nomenclature list
+
         await fetchNomenclature()
         alert('Nutrient added successfully! You can now add synonyms to it.')
       } else {
@@ -167,7 +166,7 @@ const NomenclatureMap = () => {
   const confirmDeleteMapping = async () => {
     if (deleteItem && deleteItem.type === 'mapping') {
       try {
-        // Find the group and the raw name to delete
+
         const group = nutrientGroups.find(g => g.id === deleteItem.groupId)
         if (!group) return
         
@@ -177,7 +176,7 @@ const NomenclatureMap = () => {
         const result = await nomenclatureService.removeSynonym(group.id, mapping.rawName)
         
         if (result.success) {
-          // Refresh nomenclature list
+
           await fetchNomenclature()
           setDeleteItem(null)
           alert('Synonym deleted successfully!')
@@ -205,7 +204,7 @@ const NomenclatureMap = () => {
         const result = await nomenclatureService.deleteNomenclature(deleteItem.id)
         
         if (result.success) {
-          // Refresh nomenclature list
+
           await fetchNomenclature()
           setDeleteItem(null)
           alert('Nutrient group deleted successfully!')
@@ -230,7 +229,7 @@ const NomenclatureMap = () => {
       })
       
       if (result.success) {
-        // Refresh nomenclature list
+
         await fetchNomenclature()
         setEditGroup(null)
         alert('Nutrient group updated successfully!')
@@ -249,15 +248,15 @@ const NomenclatureMap = () => {
 
   const handleSaveMappingEdit = async (rawName, standardName) => {
     try {
-      // Find the group
+
       const group = nutrientGroups.find(g => g.id === editMapping.groupId)
       if (!group) return
       
-      // Find the old raw name to replace
+
       const oldMapping = group.mappings.find(m => m.id === editMapping.mapping.id)
       if (!oldMapping) return
       
-      // Update raw_names array - replace old with new
+
       const updatedRawNames = group.mappings.map(m => 
         m.id === editMapping.mapping.id ? rawName : m.rawName
       )
@@ -268,7 +267,7 @@ const NomenclatureMap = () => {
       })
       
       if (result.success) {
-        // Refresh nomenclature list
+
         await fetchNomenclature()
         setEditMapping(null)
         alert('Mapping updated successfully!')
@@ -289,7 +288,7 @@ const NomenclatureMap = () => {
       })
       
       if (result.success) {
-        // Refresh categories list
+
         await fetchCategories()
         alert('Category added successfully!')
       } else {
@@ -315,7 +314,7 @@ const NomenclatureMap = () => {
         const result = await categoryService.deleteCategory(deleteItem.id)
         
         if (result.success) {
-          // Refresh categories list
+
           await fetchCategories()
           setDeleteItem(null)
           alert('Category deleted successfully!')
@@ -341,7 +340,7 @@ const NomenclatureMap = () => {
       })
       
       if (result.success) {
-        // Refresh categories list
+
         await fetchCategories()
         setEditCategory(null)
         alert('Category updated successfully!')
@@ -366,25 +365,22 @@ const NomenclatureMap = () => {
     }
   }
 
-  // Filter groups and mappings based on search query
-  // Search in: 1) Group name (show all mappings if group matches), 2) Standardized names
   const getFilteredMappings = (group, query) => {
     if (!query) return group.mappings
     
     const lowerQuery = query.toLowerCase()
     
-    // If group name matches, return ALL mappings in that group
+
     if (group.name.toLowerCase().includes(lowerQuery)) {
       return group.mappings
     }
     
-    // Otherwise, filter by standardized names only
+
     return group.mappings.filter(mapping =>
       mapping.standardName.toLowerCase().includes(lowerQuery)
     )
   }
 
-  // Process nutrient groups with filtered mappings
   const processedNutrientGroups = nutrientGroups
     .map(group => ({
       ...group,
@@ -392,26 +388,25 @@ const NomenclatureMap = () => {
       hasMatchingMappings: searchQuery ? getFilteredMappings(group, searchQuery).length > 0 : false
     }))
     .filter(group => {
-      // If no search query, show all groups
+
       if (!searchQuery) return true
       
       const query = searchQuery.toLowerCase()
       
-      // Show group if its name matches OR if it has matching mappings
+
       const groupNameMatches = group.name.toLowerCase().includes(query)
       const hasMatchingMappings = group.filteredMappings.length > 0
       
       return groupNameMatches || hasMatchingMappings
     })
 
-  // Auto-expand groups with matching results when searching
   useEffect(() => {
     if (searchQuery) {
       const groupsToExpand = {}
       nutrientGroups.forEach(group => {
         const query = searchQuery.toLowerCase()
         
-        // Expand if group name matches OR if any mapping matches
+
         const groupNameMatches = group.name.toLowerCase().includes(query)
         const hasMatchingMapping = group.mappings.some(mapping =>
           mapping.standardName.toLowerCase().includes(query)
@@ -425,13 +420,12 @@ const NomenclatureMap = () => {
     }
   }, [searchQuery, nutrientGroups])
 
-  // Categories are NOT filtered by search (always show all)
   const filteredCategories = categories
 
   return (
     <Layout>
       <div className="p-6 h-full flex flex-col overflow-hidden">
-        {/* Page Header */}
+
         <div className="mb-6">
           <h1 className="text-2xl font-ibm-plex font-bold text-[#0f1729] mb-1">
             Nomenclature Map
@@ -441,7 +435,6 @@ const NomenclatureMap = () => {
           </p>
         </div>
 
-        {/* Search Bar with Add Nutrient Button */}
         <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 mb-6">
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="relative flex-1">
@@ -472,9 +465,8 @@ const NomenclatureMap = () => {
           </div>
         </div>
 
-        {/* Two Column Layout */}
         <div className="flex flex-col lg:flex-row gap-6 flex-1 overflow-hidden">
-          {/* Left Column - Nutrient Groups */}
+
           <div className="flex-1 flex flex-col overflow-hidden min-h-0">
             <div className="bg-white border border-[#e1e7ef] rounded-lg overflow-hidden flex-1 overflow-y-auto">
             {loadingNutrients ? (
@@ -501,7 +493,7 @@ const NomenclatureMap = () => {
             ) : (
               processedNutrientGroups.map((group) => (
               <div key={group.id} className="border-b border-[#e1e7ef] last:border-b-0">
-                {/* Group Header */}
+
                 <div className="flex items-center justify-between p-4 hover:bg-[#f9fafb] transition-colors">
                   <button
                     onClick={() => handleToggleGroup(group.id)}
@@ -547,7 +539,6 @@ const NomenclatureMap = () => {
                   </div>
                 </div>
 
-                {/* Expanded Group Table */}
                 {expandedGroups[group.id] && (
                   <div className="px-4 pb-4">
                     {group.filteredMappings.length > 0 ? (
@@ -625,10 +616,9 @@ const NomenclatureMap = () => {
             </div>
           </div>
 
-          {/* Right Column - Categories */}
           <div className="w-full lg:w-96 flex flex-col overflow-hidden min-h-0">
             <div className="bg-white border border-[#e1e7ef] rounded-lg shadow-sm flex flex-col flex-1 overflow-hidden">
-              {/* Categories Header */}
+
             <div className="p-4 border-b border-[#e1e7ef]">
               <div className="flex items-center justify-between mb-3">
                 <div>
@@ -649,7 +639,6 @@ const NomenclatureMap = () => {
               </button>
             </div>
 
-            {/* Categories List */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {loadingCategories ? (
                 <div className="text-center py-8">
@@ -711,7 +700,6 @@ const NomenclatureMap = () => {
         </div>
       </div>
 
-      {/* Modals */}
       <AddSynonymModal
         isOpen={showAddSynonymModal}
         onClose={() => {

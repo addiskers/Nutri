@@ -12,13 +12,11 @@ from app.utils.queries import parse_object_id, safe_regex, normalize_pagination
 
 router = APIRouter(prefix="/coa-nomenclature", tags=["COA Nomenclature"])
 
-
 class COANomenclatureCreate(BaseModel):
     standardized_name: str
     raw_names: List[str] = []
     target_unit: Optional[str] = None
     category: Optional[str] = None
-
 
 class COANomenclatureUpdate(BaseModel):
     standardized_name: Optional[str] = None
@@ -26,10 +24,8 @@ class COANomenclatureUpdate(BaseModel):
     target_unit: Optional[str] = None
     category: Optional[str] = None
 
-
 class SynonymAdd(BaseModel):
     raw_name: str
-
 
 @router.post("", response_model=dict)
 async def create_coa_nomenclature(
@@ -62,7 +58,6 @@ async def create_coa_nomenclature(
         "category": mapping.category,
         "created_at": mapping.created_at.isoformat()
     }
-
 
 @router.get("", response_model=dict)
 async def list_coa_nomenclature(
@@ -100,7 +95,6 @@ async def list_coa_nomenclature(
         "total": total,
     }
 
-
 @router.get("/map", response_model=dict)
 async def get_coa_nomenclature_map(
     current_user: User = Depends(require_permission("view_nomenclature"))
@@ -124,10 +118,8 @@ async def get_coa_nomenclature_map(
         "total_raw_names": len(nomenclature_map),
     }
 
-
 class ResolveRequest(BaseModel):
     raw_names: List[str] = Field(..., max_length=500)
-
 
 @router.post("/resolve", response_model=dict)
 async def resolve_raw_names(
@@ -177,7 +169,6 @@ async def resolve_raw_names(
 
     return {"resolved": resolved}
 
-
 @router.get("/{mapping_id}", response_model=dict)
 async def get_coa_nomenclature(
     mapping_id: str,
@@ -196,7 +187,6 @@ async def get_coa_nomenclature(
         "created_at": mapping.created_at.isoformat(),
         "updated_at": mapping.updated_at.isoformat(),
     }
-
 
 @router.put("/{mapping_id}", response_model=dict)
 async def update_coa_nomenclature(
@@ -232,12 +222,10 @@ async def update_coa_nomenclature(
     mapping.updated_at = datetime.now(timezone.utc)
     await mapping.save()
 
-    # Sync rename to nutrient hierarchy if the standardized name changed
     hierarchy_synced = 0
     if update.standardized_name and update.standardized_name != old_name:
         from app.models.nutrient_hierarchy import NutrientHierarchyNode
 
-        # Update node whose nutrient_name matches the old name
         node = await NutrientHierarchyNode.find_one(
             NutrientHierarchyNode.nutrient_name == old_name
         )
@@ -247,7 +235,6 @@ async def update_coa_nomenclature(
             await node.save()
             hierarchy_synced += 1
 
-        # Update children whose parent_nutrient matches the old name
         children = await NutrientHierarchyNode.find(
             NutrientHierarchyNode.parent_nutrient == old_name
         ).to_list()
@@ -257,7 +244,6 @@ async def update_coa_nomenclature(
             await child.save()
             hierarchy_synced += 1
 
-        # Update any variant lists that contain the old name
         all_nodes = await NutrientHierarchyNode.find(
             {"variants": old_name}
         ).to_list()
@@ -276,7 +262,6 @@ async def update_coa_nomenclature(
         "updated_at": mapping.updated_at.isoformat(),
         "hierarchy_synced": hierarchy_synced,
     }
-
 
 @router.post("/{mapping_id}/synonyms", response_model=dict)
 async def add_synonym(
@@ -302,7 +287,6 @@ async def add_synonym(
         "updated_at": mapping.updated_at.isoformat(),
     }
 
-
 @router.delete("/{mapping_id}/synonyms/{raw_name}", response_model=dict)
 async def remove_synonym(
     mapping_id: str,
@@ -327,7 +311,6 @@ async def remove_synonym(
         "updated_at": mapping.updated_at.isoformat(),
     }
 
-
 @router.delete("/{mapping_id}", response_model=dict)
 async def delete_coa_nomenclature(
     mapping_id: str,
@@ -339,7 +322,6 @@ async def delete_coa_nomenclature(
 
     await mapping.delete()
     return {"message": f"COA nomenclature mapping for '{mapping.standardized_name}' deleted successfully"}
-
 
 @router.post("/seed", response_model=dict)
 async def seed_coa_nomenclature(

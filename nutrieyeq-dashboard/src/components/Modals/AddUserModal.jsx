@@ -16,7 +16,6 @@ const AddUserModal = ({ isOpen, onClose, onSave, currentUserRole }) => {
   const handleSubmit = (e) => {
     e.preventDefault()
 
-    // Validation
     if (!formData.name || !formData.email || !formData.password) {
       alert('Please fill in all required fields')
       return
@@ -32,20 +31,17 @@ const AddUserModal = ({ isOpen, onClose, onSave, currentUserRole }) => {
       return
     }
 
-    // Email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(formData.email)) {
       alert('Please enter a valid email address')
       return
     }
 
-    // Permission check: Only Super Admin can create Super Admin users
     if (formData.role === 'Super Admin' && currentUserRole !== 'Super Admin') {
       alert('Only Super Admins can create Super Admin users')
       return
     }
 
-    // Save user
     onSave({
       name: formData.name,
       email: formData.email,
@@ -54,7 +50,6 @@ const AddUserModal = ({ isOpen, onClose, onSave, currentUserRole }) => {
       password: formData.password
     })
 
-    // Reset form and close
     setFormData({
       name: '',
       email: '',
@@ -83,7 +78,7 @@ const AddUserModal = ({ isOpen, onClose, onSave, currentUserRole }) => {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
-        {/* Header */}
+
         <div className="flex items-center justify-between p-6 border-b border-[#e1e7ef]">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-[#009da5]/10 rounded-full flex items-center justify-center">
@@ -106,9 +101,8 @@ const AddUserModal = ({ isOpen, onClose, onSave, currentUserRole }) => {
           </button>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {/* Full Name */}
+
           <div>
             <label className="text-sm font-ibm-plex font-medium text-[#0f1729] mb-2 block">
               Full Name *
@@ -123,7 +117,6 @@ const AddUserModal = ({ isOpen, onClose, onSave, currentUserRole }) => {
             />
           </div>
 
-          {/* Email */}
           <div>
             <label className="text-sm font-ibm-plex font-medium text-[#0f1729] mb-2 block">
               Email *
@@ -138,7 +131,6 @@ const AddUserModal = ({ isOpen, onClose, onSave, currentUserRole }) => {
             />
           </div>
 
-          {/* Department */}
           <div>
             <label className="text-sm font-ibm-plex font-medium text-[#0f1729] mb-2 block">
               Department
@@ -152,7 +144,6 @@ const AddUserModal = ({ isOpen, onClose, onSave, currentUserRole }) => {
             />
           </div>
 
-          {/* Role */}
           <div>
             <label className="text-sm font-ibm-plex font-medium text-[#0f1729] mb-2 block">
               Role *
@@ -180,7 +171,6 @@ const AddUserModal = ({ isOpen, onClose, onSave, currentUserRole }) => {
             )}
           </div>
 
-          {/* Password */}
           <div>
             <label className="text-sm font-ibm-plex font-medium text-[#0f1729] mb-2 block">
               Password *
@@ -195,7 +185,6 @@ const AddUserModal = ({ isOpen, onClose, onSave, currentUserRole }) => {
             />
           </div>
 
-          {/* Confirm Password */}
           <div>
             <label className="text-sm font-ibm-plex font-medium text-[#0f1729] mb-2 block">
               Confirm Password *
@@ -210,7 +199,6 @@ const AddUserModal = ({ isOpen, onClose, onSave, currentUserRole }) => {
             />
           </div>
 
-          {/* Buttons */}
           <div className="flex gap-3 pt-2">
             <button
               type="button"

@@ -4,9 +4,7 @@ from app.models.user import User, UserRole
 from app.utils.security import decode_token, is_token_denied
 from typing import Optional
 
-
 security = HTTPBearer()
-
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security)
@@ -41,7 +39,7 @@ async def get_current_user(
             detail="Invalid token payload",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     user = await User.get(user_id)
     if not user:
         raise HTTPException(
@@ -71,12 +69,10 @@ async def get_current_user(
 
     return user
 
-
 async def get_current_active_user(
     current_user: User = Depends(get_current_user)
 ) -> User:
     return current_user
-
 
 def require_role(required_role: UserRole):
     async def check_role(current_user: User = Depends(get_current_user)):
@@ -85,20 +81,19 @@ def require_role(required_role: UserRole):
             UserRole.ADMIN: 2,
             UserRole.SUPER_ADMIN: 3
         }
-        
+
         user_level = role_hierarchy.get(current_user.role, 0)
         required_level = role_hierarchy.get(required_role, 999)
-        
+
         if user_level < required_level:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Insufficient permissions"
             )
-        
-        return current_user
-    
-    return check_role
 
+        return current_user
+
+    return check_role
 
 def require_permission(permission: str):
     async def check_permission(current_user: User = Depends(get_current_user)):
@@ -107,18 +102,17 @@ def require_permission(permission: str):
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Permission denied"
             )
-        
-        return current_user
-    
-    return check_permission
 
+        return current_user
+
+    return check_permission
 
 async def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False))
 ) -> Optional[User]:
     if not credentials:
         return None
-    
+
     try:
         return await get_current_user(credentials)
     except HTTPException:

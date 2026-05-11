@@ -13,7 +13,6 @@ const AddProduct = () => {
   const hasPermission = authService.hasPermission('add_products')
   const [activeTab, setActiveTab] = useState('basic')
 
-  // ── Image states ───────────────────────────────────────────────────────────
   const [images, setImages] = useState([
     { id: 1, label: 'Front',   file: null, dataUrl: null },
     { id: 2, label: 'Back',    file: null, dataUrl: null },
@@ -22,7 +21,6 @@ const AddProduct = () => {
     { id: 5, label: 'Add Image', file: null, dataUrl: null }
   ])
 
-  // ── Extraction states ──────────────────────────────────────────────────────
   const [isExtracting, setIsExtracting]         = useState(false)
   const [extractionComplete, setExtractionComplete] = useState(false)
   const [extractionError, setExtractionError]   = useState(null)
@@ -31,7 +29,6 @@ const AddProduct = () => {
   const [showDuplicateModal, setShowDuplicateModal] = useState(false)
   const [duplicateMatchName, setDuplicateMatchName] = useState('')
 
-  // ── Basic form data ────────────────────────────────────────────────────────
   const [formData, setFormData] = useState({
     productName: '', brand: '', subBrand: '', variant: '',
     packSize: '', servingsPerPack: '', mrp: '', uspf: '',
@@ -39,18 +36,15 @@ const AddProduct = () => {
     serveSize: '', category: '', vegNonVeg: '', packingFormat: ''
   })
 
-  // ── Claims ─────────────────────────────────────────────────────────────────
   const [claims, setClaims]             = useState([])
   const [newClaim, setNewClaim]         = useState('')
 
-  // ── Nutrition ──────────────────────────────────────────────────────────────
   const [nutritionRows, setNutritionRows]       = useState([])
   const nutritionRowsRef = useRef(nutritionRows)
   useEffect(() => { nutritionRowsRef.current = nutritionRows }, [nutritionRows])
   const [nutritionNotes, setNutritionNotes]     = useState([])
   const [newNutritionNote, setNewNutritionNote] = useState('')
 
-  // ── Nomenclature state ──────────────────────────────────────────────────
   const [standardizedNames, setStandardizedNames] = useState([])
   const [nomenclatureMap, setNomenclatureMap] = useState({})
   const [categories, setCategories] = useState([])
@@ -97,7 +91,6 @@ const AddProduct = () => {
     }
   }
 
-  // Compute dynamic value column headers from all nutrition rows
   const valueColumns = (() => {
     const colSet = new Set()
     nutritionRows.forEach(r => {
@@ -106,7 +99,6 @@ const AddProduct = () => {
     return Array.from(colSet)
   })()
 
-  // ── Composition ───────────────────────────────────────────────────────────
   const [ingredients, setIngredients]   = useState([])
   const [newIngredient, setNewIngredient] = useState('')
   const [allergens, setAllergens]       = useState([])
@@ -118,7 +110,6 @@ const AddProduct = () => {
   const [directionsToUse, setDirectionsToUse]     = useState('')
   const [preparationMethod, setPreparationMethod] = useState('')
 
-  // ── Company ───────────────────────────────────────────────────────────────
   const [companyData, setCompanyData] = useState({
     brandOwner: '', marketedBy: '', manufacturedBy: '', packedBy: '', otherNotes: ''
   })
@@ -134,7 +125,6 @@ const AddProduct = () => {
   const [regulatoryText, setRegulatoryText]     = useState('')
   const [otherImportantText, setOtherImportantText] = useState('')
 
-  // ── Copy helper ───────────────────────────────────────────────────────────
   const [copiedField, setCopiedField] = useState(null)
   const copyToClipboard = (text, fieldName) => {
     if (!text) return
@@ -157,7 +147,6 @@ const AddProduct = () => {
     </button>
   )
 
-  // ── Reusable chip-list helpers ─────────────────────────────────────────────
   const inputClass = "w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
   const textareaClass = "w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary resize-none"
   const addBtnClass  = "bg-[#b455a0] h-10 px-4 py-2 rounded-md font-ibm-plex font-medium text-sm text-white hover:bg-[#a04890] transition-colors"
@@ -170,7 +159,6 @@ const AddProduct = () => {
     { id: 'company',     label: 'Company'      }
   ]
 
-  // ── Image handlers ─────────────────────────────────────────────────────────
   const handleAddMoreImages = () => {
     if (images.length < 10)
       setImages([...images, { id: images.length + 1, label: `Image ${images.length + 1}`, file: null, dataUrl: null }])
@@ -182,7 +170,6 @@ const AddProduct = () => {
     setImages(updated)
   }
 
-  // ── Extraction ─────────────────────────────────────────────────────────────
   const handleSubmitImages = async () => {
     if (isExtracting) return
     const uploaded = images.filter(img => img.dataUrl !== null)
@@ -205,7 +192,7 @@ const AddProduct = () => {
   }
 
   const populateFormFromExtraction = (data) => {
-    // Basic info
+
     if (data.basic) {
       setFormData(prev => ({
         ...prev,
@@ -229,7 +216,6 @@ const AddProduct = () => {
       }))
     }
 
-    // Dates fallback
     if (data.dates) {
       setFormData(prev => ({
         ...prev,
@@ -239,7 +225,6 @@ const AddProduct = () => {
       }))
     }
 
-    // Nutrition — new format: data.nutrition = { table: [], notes: [] }
     const nutritionSrc = data.nutrition || {}
     const tableArr = Array.isArray(nutritionSrc) ? nutritionSrc
                    : Array.isArray(nutritionSrc.table) ? nutritionSrc.table : []
@@ -257,7 +242,6 @@ const AddProduct = () => {
       setNutritionNotes(nutritionSrc.notes.filter(Boolean))
     }
 
-    // Composition
     if (data.composition) {
       const comp = data.composition
       if (comp.ingredients) {
@@ -281,7 +265,7 @@ const AddProduct = () => {
       if (Array.isArray(comp.claims)) {
         setClaims(comp.claims.filter(c => c && c !== 'not specified'))
       }
-      // Storage instructions (array or string)
+
       if (comp.storageInstructions) {
         const si = comp.storageInstructions
         setStorageData(prev => ({
@@ -289,7 +273,7 @@ const AddProduct = () => {
           storageCondition: Array.isArray(si) ? si.join('\n') : (si !== 'not specified' ? si : '')
         }))
       }
-      // Usage instructions
+
       if (comp.usageInstructions) {
         const ui = comp.usageInstructions
         if (typeof ui === 'object') {
@@ -301,7 +285,6 @@ const AddProduct = () => {
       }
     }
 
-    // Company
     if (data.company) {
       const co = data.company
       if (Array.isArray(co.manufacturerDetails) && co.manufacturerDetails.length > 0) {
@@ -349,7 +332,6 @@ const AddProduct = () => {
       }
     }
 
-    // Batch (transformer emits camelCase; older payloads used snake_case)
     if (data.batch) {
       setBatchData({
         lotNumber:   data.batch.lotNumber   || data.batch.lot_number   || '',
@@ -358,14 +340,12 @@ const AddProduct = () => {
       })
     }
 
-    // Regulatory / other
     if (Array.isArray(data.regulatory) && data.regulatory.length > 0)
       setRegulatoryText(data.regulatory.join('\n'))
     if (Array.isArray(data.other) && data.other.length > 0)
       setOtherImportantText(data.other.join('\n'))
   }
 
-  // ── Nutrition row helpers ──────────────────────────────────────────────────
   const handleAddNutritionRow = () => {
     const emptyValues = {}
     valueColumns.forEach(k => { emptyValues[k] = '' })
@@ -378,7 +358,6 @@ const AddProduct = () => {
   const handleRemoveNutritionRow = (id) =>
     setNutritionRows(nutritionRows.filter(r => r.id !== id))
 
-  // ── Chip-list helpers ──────────────────────────────────────────────────────
   const makeChipAdder = (list, setList, newVal, setNew) => () => {
     if (newVal.trim()) { setList([...list, newVal.trim()]); setNew('') }
   }
@@ -400,7 +379,6 @@ const AddProduct = () => {
   const handleRemoveBarcode     = makeChipRemover(barcodes,      setBarcodes)
   const handleRemoveCert        = makeChipRemover(certifications, setCertifications)
 
-  // ── Duplicate check helpers ──────────────────────────────────────────────
   const normalize = (s) => s.replace(/[®™©]/g, '').replace(/\s+/g, ' ').toLowerCase().trim()
 
   const diceSimilarity = (a, b) => {
@@ -471,7 +449,6 @@ const AddProduct = () => {
     return null
   }
 
-  // ── Save ───────────────────────────────────────────────────────────────────
   const handleSaveProduct = async () => {
     if (!formData.productName || !formData.brand) { alert('Please fill in all required fields (*)'); return }
     if (nutritionRows.length > 0 && standardizedNames.length > 0) {
@@ -582,7 +559,6 @@ const AddProduct = () => {
     }
   }
 
-  // ── Chip list renderer ─────────────────────────────────────────────────────
   const ChipList = ({ items, onRemove, colorClass = 'bg-primary/10 border-primary/20 text-[#0f1729]' }) => (
     <div className="flex flex-wrap gap-2 mt-3">
       {items.map((item, idx) => (
@@ -613,7 +589,6 @@ const AddProduct = () => {
     </div>
   )
 
-  // ══════════════════════════════════════════════════════════════════════════
   return (
     <Layout>
       {!hasPermission ? (
@@ -622,7 +597,6 @@ const AddProduct = () => {
         <div className="overflow-y-auto h-full">
           <div className="max-w-6xl mx-auto p-4 md:p-6">
 
-            {/* Header */}
             <div className="flex flex-col sm:flex-row items-start gap-4 mb-6">
               <button onClick={() => navigate('/products')}
                 className="w-10 h-10 flex items-center justify-center rounded-md hover:bg-gray-100 transition-colors sm:mt-1">
@@ -639,7 +613,6 @@ const AddProduct = () => {
               </button>
             </div>
 
-            {/* Product Images */}
             <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6 mb-4 md:mb-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 pb-2 border-b border-[#e1e7ef]">
                 <div>
@@ -704,7 +677,6 @@ const AddProduct = () => {
               </p>
             </div>
 
-            {/* Tabs */}
             <div className="bg-[#ebebeb] rounded-md p-1 mb-4 md:mb-6 overflow-x-auto">
               <div className="flex gap-1 min-w-max sm:min-w-0">
                 {tabs.map(tab => (
@@ -717,7 +689,6 @@ const AddProduct = () => {
               </div>
             </div>
 
-            {/* ══════════════ BASIC INFO TAB ══════════════ */}
             {activeTab === 'basic' && (
               <div className="space-y-6">
                 <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
@@ -744,7 +715,6 @@ const AddProduct = () => {
                       </div>
                     ))}
 
-                    {/* MRP */}
                     <div>
                       <label className={labelClass}>MRP</label>
                       <div className="relative">
@@ -755,7 +725,6 @@ const AddProduct = () => {
                       </div>
                     </div>
 
-                    {/* USPF */}
                     <div>
                       <label className={labelClass}>USPF — Unit Selling Price Format</label>
                       <div className="relative">
@@ -767,7 +736,6 @@ const AddProduct = () => {
                       </div>
                     </div>
 
-                    {/* Packing Format — user choice only; not from AI extraction */}
                     <div>
                       <label className={labelClass}>Packing Format</label>
                       <div className="relative">
@@ -783,7 +751,6 @@ const AddProduct = () => {
                       </div>
                     </div>
 
-                    {/* Manufacturing Date */}
                     <div>
                       <label className={labelClass}>Manufacturing Date</label>
                       <div className="relative">
@@ -794,7 +761,6 @@ const AddProduct = () => {
                       </div>
                     </div>
 
-                    {/* Expiry Date */}
                     <div>
                       <label className={labelClass}>Expiry Date</label>
                       <div className="relative">
@@ -805,7 +771,6 @@ const AddProduct = () => {
                       </div>
                     </div>
 
-                    {/* Shelf Life */}
                     <div>
                       <label className={labelClass}>Shelf Life</label>
                       <div className="relative">
@@ -816,7 +781,6 @@ const AddProduct = () => {
                       </div>
                     </div>
 
-                    {/* Category */}
                     <div>
                       <label className={labelClass}>Category</label>
                       <div className="relative">
@@ -830,7 +794,6 @@ const AddProduct = () => {
                       </div>
                     </div>
 
-                    {/* Veg/Non-Veg */}
                     <div>
                       <label className={labelClass}>Veg / Non-Veg</label>
                       <div className="relative">
@@ -849,7 +812,6 @@ const AddProduct = () => {
                   </div>
                 </div>
 
-                {/* Claims */}
                 <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                   <SectionHeader title="Claims on Pack" copyValue={claims.join(', ')} copyField="add_claims" />
                   <ChipInput value={newClaim} onChange={setNewClaim} onAdd={handleAddClaim} placeholder="Add a claim" />
@@ -859,7 +821,6 @@ const AddProduct = () => {
               </div>
             )}
 
-            {/* ══════════════ NUTRITION TAB ══════════════ */}
             {activeTab === 'nutrition' && (
               <div className="space-y-6">
                 <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
@@ -939,7 +900,6 @@ const AddProduct = () => {
                   )}
                 </div>
 
-                {/* Nutrition Notes */}
                 <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                   <SectionHeader title="Nutrition Notes" copyValue={nutritionNotes.join(' | ')} copyField="add_nutNotes" />
                   <p className="text-xs text-[#65758b] mb-3">Footnotes, %RDA references, or disclaimers printed below the nutrition table.</p>
@@ -951,10 +911,9 @@ const AddProduct = () => {
               </div>
             )}
 
-            {/* ══════════════ COMPOSITION TAB ══════════════ */}
             {activeTab === 'composition' && (
               <div className="space-y-6">
-                {/* Ingredients */}
+
                 <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                   <SectionHeader title="Ingredients" copyValue={ingredients.join(', ')} copyField="add_ingredients" />
                   <ChipInput value={newIngredient} onChange={setNewIngredient} onAdd={handleAddIngredient} placeholder="Add an ingredient" />
@@ -963,7 +922,6 @@ const AddProduct = () => {
                   )}
                 </div>
 
-                {/* Allergens */}
                 <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                   <SectionHeader title="Allergen Information" copyValue={allergens.join(', ')} copyField="add_allergens" />
                   <ChipInput value={newAllergen} onChange={setNewAllergen} onAdd={handleAddAllergen} placeholder="Add an allergen" />
@@ -972,7 +930,6 @@ const AddProduct = () => {
                   )}
                 </div>
 
-                {/* Storage & Usage */}
                 <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                   <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Storage & Usage</h3>
 
@@ -1014,10 +971,9 @@ const AddProduct = () => {
               </div>
             )}
 
-            {/* ══════════════ COMPANY TAB ══════════════ */}
             {activeTab === 'company' && (
               <div className="space-y-4 md:space-y-6">
-                {/* Company Information */}
+
                 <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                   <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Company Information</h3>
                   {[
@@ -1037,7 +993,6 @@ const AddProduct = () => {
                   ))}
                 </div>
 
-                {/* Batch Information */}
                 <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                   <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Batch Information</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mb-4">
@@ -1071,7 +1026,6 @@ const AddProduct = () => {
                   </div>
                 </div>
 
-                {/* Packaging Information */}
                 <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                   <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Packaging Information</h3>
                   <div className="mb-3 md:mb-4">
@@ -1095,7 +1049,6 @@ const AddProduct = () => {
                   </div>
                 </div>
 
-                {/* FSSAI & Barcodes */}
                 <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                   <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Regulatory Information</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1116,7 +1069,6 @@ const AddProduct = () => {
                   </div>
                 </div>
 
-                {/* Certifications */}
                 <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                   <SectionHeader title="Certifications" copyValue={certifications.join(', ')} copyField="add_certs" />
                   <ChipInput value={newCertification} onChange={setNewCertification} onAdd={handleAddCert} placeholder="e.g., FSSAI, ISO 22000, HACCP" />
@@ -1125,7 +1077,6 @@ const AddProduct = () => {
                   )}
                 </div>
 
-                {/* Customer Care */}
                 <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                   <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Customer Care</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mb-4">
@@ -1170,7 +1121,6 @@ const AddProduct = () => {
                   </div>
                 </div>
 
-                {/* Regulatory / Other Text */}
                 <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                   <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Additional Notes & Regulatory</h3>
                   <div className="space-y-4">

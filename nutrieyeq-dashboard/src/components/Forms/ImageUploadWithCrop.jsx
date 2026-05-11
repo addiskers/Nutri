@@ -3,9 +3,6 @@ import ReactCrop from 'react-image-crop'
 import 'react-image-crop/dist/ReactCrop.css'
 import { Upload, X, Crop, AlertCircle } from 'lucide-react'
 
-// Mirrors backend `MAX_UPLOAD_FILE_SIZE_MB` (10 MB). Reject oversize uploads
-// before reading them into a data URL so we don't blow up RAM on huge files
-// just to have the server return a 413.
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 const ALLOWED_UPLOAD_TYPES = new Set([
   'image/jpeg',
@@ -59,7 +56,7 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
       setShowCropper(true)
     })
     reader.readAsDataURL(file)
-    // Reset input so the same file can be re-selected
+
     e.target.value = ''
   }
 
@@ -70,7 +67,6 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
     const scaleX = image.naturalWidth / image.width
     const scaleY = image.naturalHeight / image.height
 
-    // Use completedCrop if available, otherwise use full image
     const cropArea = completedCrop && completedCrop.width > 0 && completedCrop.height > 0
       ? completedCrop
       : { x: 0, y: 0, width: image.width, height: image.height }
@@ -166,12 +162,10 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
         </div>
       )}
 
-      {/* Cropper Modal */}
       {showCropper && imageSrc && (
         <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4">
           <div className="bg-white rounded-lg p-6 max-w-4xl w-full flex flex-col max-h-[92vh]">
 
-            {/* Header – never scrolls away */}
             <div className="flex items-center justify-between mb-4 flex-shrink-0">
               <h3 className="text-lg font-ibm-plex font-semibold text-[#0f1729]">
                 Crop Image – {label}
@@ -184,7 +178,6 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
               </button>
             </div>
 
-            {/* Image crop area — no scroll so mouse events reach ReactCrop uninterrupted */}
             <div className="bg-gray-100 rounded-lg p-4 flex items-center justify-center flex-1 min-h-0 overflow-hidden">
               <ReactCrop
                 crop={crop}
@@ -200,8 +193,7 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
                   onLoad={(e) => {
                     const el = e.currentTarget
                     imgRef.current = el
-                    // Imperative sizing avoids CSP style-src block and works regardless of
-                    // ReactCrop wrapper's lack of a definite height.
+
                     el.style.maxWidth = '100%'
                     el.style.maxHeight = 'calc(92vh - 240px)'
                     const { width, height } = el
@@ -218,7 +210,6 @@ const ImageUploadWithCrop = ({ label, onImageCropped, onRemove }) => {
               </ReactCrop>
             </div>
 
-            {/* Footer – never scrolls away */}
             <div className="flex-shrink-0 mt-4">
               <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
                 <p className="text-xs font-ibm-plex text-blue-800">

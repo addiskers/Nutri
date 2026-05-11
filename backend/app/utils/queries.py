@@ -8,12 +8,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import HTTPException, status
 
-
-# MongoDB `$regex` evaluates user input as a regex. Without escaping, callers
-# could inject ReDoS patterns or glob over unrelated fields. Length is bounded
-# so a massive "search" query can't monopolise CPU.
 _MAX_SEARCH_LEN = 100
-
 
 def safe_regex(value: str) -> str:
     """Return a MongoDB-safe, case-insensitive substring regex for `value`.
@@ -26,9 +21,6 @@ def safe_regex(value: str) -> str:
     trimmed = value.strip()[:_MAX_SEARCH_LEN]
     return re.escape(trimmed)
 
-
-# bson.ObjectId raises InvalidId on malformed strings. Map that to 400
-# instead of letting it become an uninformative 500.
 def parse_object_id(raw: str, *, field: str = "id") -> ObjectId:
     try:
         return ObjectId(raw)
@@ -38,12 +30,8 @@ def parse_object_id(raw: str, *, field: str = "id") -> ObjectId:
             detail=f"Invalid {field}",
         )
 
-
-# List endpoints accept `skip`/`limit` (or `page`/`page_size`). Without an
-# upper bound a caller can request millions of rows and cheaply DoS Mongo.
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 100
-
 
 def normalize_pagination(
     skip: int = 0,
@@ -59,7 +47,6 @@ def normalize_pagination(
     if safe_limit > max_limit:
         safe_limit = max_limit
     return safe_skip, safe_limit
-
 
 def normalize_page(
     page: int = 1,

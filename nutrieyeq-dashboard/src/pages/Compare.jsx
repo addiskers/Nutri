@@ -8,11 +8,6 @@ import ProductPreviewModal from '../components/Modals/ProductPreviewModal'
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts'
 import authService, { productService } from '../services/api'
 
-// Hosts we are willing to fetch product images from when building the
-// Excel export. Anything else (arbitrary `https://...` URLs from product
-// data) is skipped — otherwise an attacker who can write to product image
-// fields could coerce a privileged user's browser into making cross-origin
-// GETs against internal/third-party hosts when they click "Export".
 const _ALLOWED_IMAGE_ORIGINS = (() => {
   const origins = new Set()
   try { if (typeof window !== 'undefined') origins.add(window.location.origin) } catch {}
@@ -34,7 +29,7 @@ const isAllowedImageUrl = (url) => {
 const Compare = () => {
   const hasPermission = authService.hasPermission('run_comparisons')
   const [selectedProducts, setSelectedProducts] = useState([])
-  const [viewMode, setViewMode] = useState('table') // 'table' or 'charts'
+  const [viewMode, setViewMode] = useState('table')
   const [activeTab, setActiveTab] = useState('basic')
   const [searchQuery, setSearchQuery] = useState('')
   const [showSidebar, setShowSidebar] = useState(true)
@@ -49,7 +44,6 @@ const Compare = () => {
   const [previewProduct, setPreviewProduct] = useState(null)
   const [imageIndices, setImageIndices] = useState({})
 
-  // Detect mobile screen
   useEffect(() => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth < 1024)
@@ -65,14 +59,13 @@ const Compare = () => {
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
-  // Fetch all products from API
   useEffect(() => {
     const fetchProducts = async () => {
       try {
         setLoadingProducts(true)
         const data = await productService.getProducts({ limit: 200 })
         if (data && data.products) {
-          // Sort by created_at descending (newest first) and limit to 15
+
           const sorted = [...data.products].sort((a, b) => {
             const dateA = new Date(a.created_at || 0)
             const dateB = new Date(b.created_at || 0)
@@ -89,9 +82,8 @@ const Compare = () => {
     fetchProducts()
   }, [])
 
-  // Transform API product detail to comparison-friendly format
   const transformProduct = (p) => {
-    // Parse ingredients string to array
+
     let ingredientsArr = []
     if (typeof p.ingredients === 'string' && p.ingredients) {
       ingredientsArr = p.ingredients.split(',').map(i => i.trim()).filter(Boolean)
@@ -99,7 +91,6 @@ const Compare = () => {
       ingredientsArr = p.ingredients
     }
 
-    // Parse allergens — new schema uses allergen_information
     const allergenRaw = p.allergen_information || p.allergen_info || ''
     let allergensArr = []
     if (typeof allergenRaw === 'string' && allergenRaw) {
@@ -108,8 +99,6 @@ const Compare = () => {
       allergensArr = allergenRaw
     }
 
-    // Parse nutrition_table — use nutrient_name (standardized/mapped) as the key
-    // so "Energy^" and "Energy" both merge under "Energy (kcal)"
     const nutritionRows = []
     if (Array.isArray(p.nutrition_table)) {
       p.nutrition_table.forEach(row => {
@@ -135,7 +124,6 @@ const Compare = () => {
     }
     const nutritionNotes = Array.isArray(p.nutrition_notes) ? p.nutrition_notes : []
 
-    // Extract manufacturer info — support multiple entries per type
     const marketed = [], manufactured = [], packed = []
     const mfrs = p.manufacturer_information || p.manufacturer_details || []
     if (Array.isArray(mfrs)) {
@@ -149,26 +137,21 @@ const Compare = () => {
       })
     }
 
-    // FSSAI
     const fssaiInfo = p.fssai_information || {}
     const fssaiNumbers = Array.isArray(fssaiInfo.license_numbers) ? fssaiInfo.license_numbers : (Array.isArray(p.fssai_licenses) ? p.fssai_licenses : [])
 
-    // Usage instructions
     const usage = p.usage_instructions || {}
     const directionsToUse = Array.isArray(usage.directions_to_use) ? usage.directions_to_use.join('\n') : ''
     const preparationMethod = Array.isArray(usage.preparation_method) ? usage.preparation_method.join('\n') : ''
 
-    // Storage
     const storageArr = Array.isArray(p.storage_instructions) ? p.storage_instructions : (typeof p.storage_instructions === 'string' ? [p.storage_instructions] : [])
 
-    // Batch
     const batch = p.batch_information || {}
-    // Packaging
+
     const packaging = p.packaging_information || {}
-    // Customer care
+
     const cc = p.customer_care || {}
 
-    // Get first image
     const firstImage = (Array.isArray(p.images) && p.images.length > 0) ? p.images[0] : null
 
     return {
@@ -191,44 +174,43 @@ const Compare = () => {
       category: p.category || '',
       vegNonVeg: p.veg_nonveg || '',
       claims: Array.isArray(p.claims) ? p.claims : [],
-      // Nutrition
+
       nutritionRows,
       nutritionNotes,
-      // Composition
+
       ingredients: ingredientsArr,
       allergens: allergensArr,
-      // Storage & Usage
+
       storageCondition: storageArr.join('\n'),
       directionsToUse,
       preparationMethod,
-      // Company
+
       brandOwner: p.brand_owner || '',
       marketedBy: marketed.join('\n\n'),
       manufacturedBy: manufactured.join('\n\n'),
       packedBy: packed.join('\n\n'),
-      // Batch
+
       lotNumber: batch.lot_number || '',
       machineCode: batch.machine_code || '',
       otherCodes: Array.isArray(batch.other_codes) ? batch.other_codes.join('\n') : '',
-      // Packaging
+
       packagingManufacturer: packaging.packaging_material_manufacturer || '',
       packagingCodes: Array.isArray(packaging.packaging_codes) ? packaging.packaging_codes.join('\n') : '',
-      // Regulatory
+
       fssaiNumbers,
       barcodes: Array.isArray(p.barcodes) ? p.barcodes : (p.barcode ? [p.barcode] : []),
       certifications: Array.isArray(p.certifications) ? p.certifications : [],
-      // Customer Care
+
       customerCarePhone: Array.isArray(cc.phone) ? cc.phone.join(', ') : (cc.phone || ''),
       customerCareEmail: cc.email || '',
       customerCareWebsite: cc.website || '',
       customerCareAddress: cc.address || '',
-      // Additional Notes
+
       regulatoryText: Array.isArray(p.regulatory_text) ? p.regulatory_text.join('\n') : '',
       otherImportantText: Array.isArray(p.other_important_text) ? p.other_important_text.join('\n') : '',
     }
   }
 
-  // Get unique brands and categories for filters
   const uniqueBrands = ['All Brands', ...new Set(allProducts.map(p => p.parent_brand).filter(Boolean).sort())]
   const uniqueCategories = ['All Categories', ...new Set(allProducts.map(p => p.category).filter(Boolean).sort())]
 
@@ -274,7 +256,6 @@ const Compare = () => {
     wb.creator = 'NutriEyeQ'
     wb.created = new Date()
 
-    // ---- Sheet 1: Product Info (Image + Basic + Composition + Company) ----
     const ws1 = wb.addWorksheet('Product Info')
 
     const sheet1Fields = [
@@ -320,13 +301,11 @@ const Compare = () => {
       { label: 'Other Important Text', key: 'otherImportantText' },
     ]
 
-    // Set column widths
     ws1.getColumn(1).width = 28
     selectedProducts.forEach((_, i) => {
       ws1.getColumn(i + 2).width = 32
     })
 
-    // Header row
     const headerRow = ws1.addRow(['Field', ...selectedProducts.map(p => p.productName)])
     headerRow.font = { bold: true, size: 11 }
     headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8EDF5' } }
@@ -336,7 +315,7 @@ const Compare = () => {
     let imageRowNumber = null
 
     sheet1Fields.forEach(field => {
-      // Section header
+
       if (field.section && field.section !== currentSection) {
         currentSection = field.section
         const sectionRow = ws1.addRow([`--- ${currentSection} ---`])
@@ -345,7 +324,7 @@ const Compare = () => {
       }
 
       if (field.key === '_image') {
-        // Image row — add placeholder text, images added after
+
         const imgRow = ws1.addRow(['Product Image', ...selectedProducts.map(p => p.firstImage ? '' : 'No Image')])
         imgRow.height = 120
         imgRow.alignment = { vertical: 'middle', horizontal: 'center' }
@@ -363,12 +342,11 @@ const Compare = () => {
         })
         const dataRow = ws1.addRow(row)
         dataRow.alignment = { vertical: 'middle', wrapText: true }
-        // Bold the field label
+
         dataRow.getCell(1).font = { bold: true }
       }
     })
 
-    // Embed images into the image row — use the currently visible image (from carousel)
     if (imageRowNumber) {
       for (let colIndex = 0; colIndex < selectedProducts.length; colIndex++) {
         const product = selectedProducts[colIndex]
@@ -406,7 +384,6 @@ const Compare = () => {
       }
     }
 
-    // ---- Sheet 2: Nutrition ----
     const ws2 = wb.addWorksheet('Nutrition')
 
     const exportNutrients = [...new Set(
@@ -420,7 +397,6 @@ const Compare = () => {
       ws2.getColumn(i + 2).width = 36
     })
 
-    // Nutrition Notes section
     const notesHeaderRow = ws2.addRow(['Nutrition Notes', ...selectedProducts.map(p => p.productName)])
     notesHeaderRow.font = { bold: true, size: 11 }
     notesHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8EDF5' } }
@@ -429,10 +405,8 @@ const Compare = () => {
     notesRow.getCell(1).font = { bold: true }
     notesRow.alignment = { vertical: 'middle', wrapText: true }
 
-    // Blank separator
     ws2.addRow([])
 
-    // Header
     const nutHeaderRow = ws2.addRow(['Nutrient', ...selectedProducts.map(p => p.productName)])
     nutHeaderRow.font = { bold: true, size: 11 }
     nutHeaderRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8EDF5' } }
@@ -457,28 +431,26 @@ const Compare = () => {
       const dataRow = ws2.addRow(row)
       dataRow.getCell(1).font = { bold: true }
       dataRow.alignment = { vertical: 'top', wrapText: true }
-      // Auto-height: count max lines across all product cells for this nutrient
+
       const maxLines = Math.max(...row.slice(1).map(cell => (cell || '').split('\n').length), 1)
       dataRow.height = Math.max(30, maxLines * 16)
     })
 
-    // Download
     const buffer = await wb.xlsx.writeBuffer()
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
     saveAs(blob, `Product_Comparison_${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
 
-  // Light background colors for each product column
   const getProductColumnColor = (index) => {
     const colors = [
-      'bg-blue-50/50',      // Light blue
-      'bg-green-50/50',     // Light green
-      'bg-purple-50/50',    // Light purple
-      'bg-amber-50/50',     // Light amber
-      'bg-pink-50/50',      // Light pink
-      'bg-teal-50/50',      // Light teal
-      'bg-orange-50/50',    // Light orange
-      'bg-indigo-50/50'     // Light indigo
+      'bg-blue-50/50',
+      'bg-green-50/50',
+      'bg-purple-50/50',
+      'bg-amber-50/50',
+      'bg-pink-50/50',
+      'bg-teal-50/50',
+      'bg-orange-50/50',
+      'bg-indigo-50/50'
     ]
     return colors[index % colors.length]
   }
@@ -503,17 +475,13 @@ const Compare = () => {
     return ''
   }
 
-  // Helper: parse a nutrition value string to a number, stripping <, >, ~ prefixes and non-numeric chars
   const parseNutritionNum = (val) => {
     if (!val || val === '-' || val === 'NA' || val === 'not specified') return NaN
-    // Strip leading < > ~ ≈ and any spaces, then parse
+
     const cleaned = val.toString().replace(/^[<>~≈\s]+/, '').replace(/[^0-9.-]/g, '')
     return parseFloat(cleaned)
   }
 
-  // Helper: find first numeric value from a product's nutrition rows matching any of the given nutrient names
-  // Matches against both stdName (standardized from DB) and nutrient (original display name)
-  // For charts: treats all "per 100g" / "Approx. per 100 g" / "Per 100 g" keys as equivalent
   const findNutrientValue = (product, names) => {
     for (const name of names) {
       const lc = name.toLowerCase()
@@ -522,7 +490,7 @@ const Compare = () => {
       )
       if (row) {
         const vals = row.values || {}
-        // Find any key containing "100" (per 100g in any format)
+
         const per100Key = Object.keys(vals).find(k => k.toLowerCase().replace(/\s/g, '').includes('100'))
         const key = per100Key || Object.keys(vals)[0]
         if (key && vals[key]) {
@@ -534,7 +502,6 @@ const Compare = () => {
     return 0
   }
 
-  // Prepare radar chart data - try multiple key formats from standardized API
   const nutrientKeyMap = {
     'Protein': ['Protein', 'Protein (g)'],
     'Carbs': ['Total Carbohydrates', 'Carbohydrates (g)', 'Carbohydrate (g)'],
@@ -550,16 +517,15 @@ const Compare = () => {
     return dataPoint
   })
 
-
   return (
     <Layout>
       {!hasPermission ? (
         <NoPermissionContent pageName="Compare Page" />
       ) : (
         <div className="flex h-full relative">
-          {/* Main Content */}
+
           <div className={`flex flex-col overflow-hidden transition-all duration-300 ${showSidebar ? 'flex-1' : 'w-full'}`}>
-            {/* Header */}
+
             <div className="p-4 md:p-6 border-b border-[#e1e7ef] bg-white">
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-4">
                 <div className="flex-1">
@@ -623,7 +589,6 @@ const Compare = () => {
               </div>
             </div>
 
-            {/* Tabs */}
             {viewMode === 'table' && (
               <div className="bg-[#f3f3f3] rounded-md p-1 overflow-x-auto">
                 <div className="flex gap-1 min-w-max sm:min-w-0">
@@ -645,7 +610,6 @@ const Compare = () => {
             )}
           </div>
 
-          {/* Content Area */}
           <div className="flex-1 overflow-auto p-4 md:p-6">
             {selectedProducts.length < 2 ? (
               <div className="flex items-center justify-center h-full">
@@ -657,9 +621,9 @@ const Compare = () => {
                 </div>
               </div>
             ) : viewMode === 'charts' ? (
-              /* Charts View */
+
               <div className="space-y-4 md:space-y-6">
-                {/* Radar — Nutrition Profile */}
+
                 <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                   <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-4 md:mb-6">
                     Nutrition Profile Comparison
@@ -685,7 +649,7 @@ const Compare = () => {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-                  {/* Energy (kcal) Comparison */}
+
                   <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                     <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-4 md:mb-6">
                       Energy (kcal per 100g)
@@ -704,7 +668,6 @@ const Compare = () => {
                     </ResponsiveContainer>
                   </div>
 
-                  {/* MRP Comparison */}
                   <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                     <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-4 md:mb-6">
                       MRP Comparison (₹)
@@ -723,7 +686,6 @@ const Compare = () => {
                     </ResponsiveContainer>
                   </div>
 
-                  {/* Sugar vs Protein */}
                   <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                     <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-4 md:mb-6">
                       Sugar vs Protein (g per 100g)
@@ -747,7 +709,6 @@ const Compare = () => {
                     </ResponsiveContainer>
                   </div>
 
-                  {/* Sodium & Cholesterol */}
                   <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                     <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-4 md:mb-6">
                       Sodium & Cholesterol (per 100g)
@@ -771,9 +732,9 @@ const Compare = () => {
                 </div>
               </div>
             ) : (
-              /* Table View */
+
               <div className="bg-white border border-[#e1e7ef] rounded-lg overflow-hidden">
-                {/* ═══ Product Image Carousel Row ═══ */}
+
                 <div className="overflow-x-auto -mx-4 md:mx-0 border-b border-[#e1e7ef]">
                   <div className="inline-block min-w-full align-middle px-4 md:px-0">
                     <table className="min-w-full">
@@ -858,7 +819,7 @@ const Compare = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#e1e7ef]">
-                        {/* ═══ Basic Info Tab ═══ */}
+
                         {activeTab === 'basic' && (
                           <>
                             <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Basic Information</span></td></tr>
@@ -897,7 +858,7 @@ const Compare = () => {
                                 })}
                               </tr>
                             ))}
-                            {/* Claims on Pack */}
+
                             <tr>
                               <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
                                 Claims on Pack
@@ -911,9 +872,8 @@ const Compare = () => {
                           </>
                         )}
 
-                        {/* ═══ Nutrition Tab ═══ */}
                         {activeTab === 'nutrition' && (() => {
-                          // Collect union of all nutrient names
+
                           const allNutrients = [...new Set(
                             selectedProducts.flatMap(p =>
                               (p.nutritionRows || []).map(r => r.nutrient)
@@ -921,7 +881,7 @@ const Compare = () => {
                           )]
                           return (
                             <>
-                              {/* Nutrition Notes on top */}
+
                               <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Nutrition Notes</span></td></tr>
                               <tr>
                                 <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
@@ -933,7 +893,7 @@ const Compare = () => {
                                   </td>
                                 ))}
                               </tr>
-                              {/* Dynamic nutrition table */}
+
                               <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Nutrient Table</span></td></tr>
                               {allNutrients.map((nutrient) => {
                                 return (
@@ -953,7 +913,7 @@ const Compare = () => {
                                       const unit = row.unit || ''
                                       const vals = row.values || {}
                                       const entries = Object.entries(vals).filter(([, v]) => v && v !== '-' && v !== 'not specified')
-                                      // First numeric value for highlighting
+
                                       const firstNum = entries.length > 0 ? entries[0][1] : null
                                       const allFirstNums = selectedProducts.map(p => {
                                         const r = (p.nutritionRows || []).find(r2 => r2.nutrient === nutrient)
@@ -995,7 +955,6 @@ const Compare = () => {
                           )
                         })()}
 
-                        {/* ═══ Composition Tab ═══ */}
                         {activeTab === 'composition' && (
                           <>
                             <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Ingredients</span></td></tr>
@@ -1040,7 +999,6 @@ const Compare = () => {
                           </>
                         )}
 
-                        {/* ═══ Company Tab ═══ */}
                         {activeTab === 'company' && (
                           <>
                             <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Company Information</span></td></tr>
@@ -1095,7 +1053,7 @@ const Compare = () => {
                               </tr>
                             ))}
                             <tr><td colSpan={selectedProducts.length + 1} className="px-2 md:px-4 py-2 bg-gray-50 sticky left-0"><span className="text-xs font-ibm-plex font-semibold text-[#65758b] uppercase">Regulatory Information</span></td></tr>
-                            {/* FSSAI Numbers */}
+
                             <tr>
                               <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
                                 FSSAI License No.
@@ -1106,7 +1064,7 @@ const Compare = () => {
                                 </td>
                               ))}
                             </tr>
-                            {/* Barcodes */}
+
                             <tr>
                               <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
                                 Barcodes / EAN
@@ -1117,7 +1075,7 @@ const Compare = () => {
                                 </td>
                               ))}
                             </tr>
-                            {/* Certifications */}
+
                             <tr>
                               <td className="px-2 md:px-4 py-2 md:py-3 text-xs md:text-sm font-ibm-plex text-[#0f1729] font-medium sticky left-0 bg-white z-10">
                                 Certifications
@@ -1173,7 +1131,6 @@ const Compare = () => {
           </div>
         </div>
 
-        {/* Overlay for mobile */}
         {isMobile && showSidebar && (
           <div
             className="fixed inset-0 bg-black/50 z-40 lg:hidden"
@@ -1181,7 +1138,6 @@ const Compare = () => {
           />
         )}
 
-        {/* Right Sidebar - Product Selector */}
         {(showSidebar || isMobile) && (
           <div className={`
             ${isMobile ? `fixed right-0 top-0 h-full z-50 w-full max-w-sm shadow-2xl ${showSidebar ? 'translate-x-0' : 'translate-x-full'}` : 'w-80 border-l'}
@@ -1201,7 +1157,6 @@ const Compare = () => {
             )}
           </div>
 
-          {/* Selected Products */}
           {selectedProducts.length > 0 && (
             <div className="mb-4 space-y-2">
               {selectedProducts.map((product) => (
@@ -1223,7 +1178,6 @@ const Compare = () => {
             </div>
           )}
 
-          {/* Search */}
           <div className="mb-3">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#65758b]" />
@@ -1237,9 +1191,8 @@ const Compare = () => {
             </div>
           </div>
 
-          {/* Brand & Category Filters */}
           <div className="flex gap-2 mb-3">
-            {/* Brand Filter */}
+
             <div className="relative flex-1">
               <button
                 onClick={() => {
@@ -1276,7 +1229,6 @@ const Compare = () => {
               )}
             </div>
 
-            {/* Category Filter */}
             <div className="relative flex-1">
               <button
                 onClick={() => {
@@ -1320,7 +1272,6 @@ const Compare = () => {
               : `Select ${8 - selectedProducts.length} more product${8 - selectedProducts.length !== 1 ? 's' : ''} (max 8)`}
           </p>
 
-          {/* Available Products */}
           <div className="space-y-2">
             {loadingProducts ? (
               <div className="flex items-center justify-center py-8">
@@ -1332,13 +1283,13 @@ const Compare = () => {
                 const name = p.product_name || ''
                 const brand = p.parent_brand || ''
                 const category = p.category || ''
-                // Search filter
+
                 const matchesSearch = searchQuery === '' ||
                   name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                   brand.toLowerCase().includes(searchQuery.toLowerCase())
-                // Brand filter
+
                 const matchesBrand = filterBrand === 'All Brands' || brand === filterBrand
-                // Category filter
+
                 const matchesCategory = filterCategory === 'All Categories' || category === filterCategory
                 return matchesSearch && matchesBrand && matchesCategory
               })
@@ -1392,12 +1343,10 @@ const getHighlightClass = (value, allValues, field) => {
     return 'bg-gray-50 text-gray-500'
   }
 
-  // For text fields, check if all values are the same
   const uniqueValues = [...new Set(allValues.filter(v => v && v !== 'Not specified'))]
   
-  if (uniqueValues.length === 1) return '' // All same, no highlighting
+  if (uniqueValues.length === 1) return ''
 
-  // For numeric fields, highlight best value
   const numValue = parseFloat(value.toString().replace(/[^0-9.-]/g, ''))
   if (!isNaN(numValue)) {
     const allNums = allValues
@@ -1413,5 +1362,4 @@ const getHighlightClass = (value, allValues, field) => {
 }
 
 export default Compare
-
 

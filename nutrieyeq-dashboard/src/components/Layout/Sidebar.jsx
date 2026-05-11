@@ -59,7 +59,7 @@ const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
           )}
           <div className="space-y-1">
             {mainMenuItems.map((item) => {
-              // Check permission - if permission is null, show to everyone
+
               if (item.permission && !authService.hasPermission(item.permission)) {
                 return null
               }
@@ -99,7 +99,7 @@ const Sidebar = ({ isCollapsed, setIsCollapsed }) => {
           )}
           <div className="space-y-1">
             {managementMenuItems.map((item) => {
-              // Check permission - if permission is null, show to everyone
+
               if (item.permission && !authService.hasPermission(item.permission)) {
                 return null
               }

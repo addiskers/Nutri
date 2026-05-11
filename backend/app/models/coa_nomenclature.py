@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 from beanie import Document
 from pydantic import Field
 
-
 class COANomenclatureMapping(Document):
     standardized_name: str = Field(..., min_length=1, max_length=100)
     raw_names: List[str] = Field(default_factory=list)

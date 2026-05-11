@@ -32,15 +32,14 @@ const AddCategoryModal = ({ isOpen, onClose, onSave }) => {
 
   return (
     <>
-      {/* Overlay */}
+
       <div 
         className="fixed inset-0 bg-black/80 z-50"
         onClick={handleCancel}
       />
 
-      {/* Modal */}
       <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#f9fafb] border border-[#e1e7ef] rounded-lg shadow-xl z-50 w-full max-w-xl">
-        {/* Header */}
+
         <div className="p-6 border-b border-[#e1e7ef]">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-lg font-ibm-plex font-semibold text-[#0f1729] tracking-tight">
@@ -58,9 +57,8 @@ const AddCategoryModal = ({ isOpen, onClose, onSave }) => {
           </p>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {/* Category Name */}
+
           <div>
             <label className="text-sm font-ibm-plex font-medium text-[#0f1729] mb-2 block">
               Category Name
@@ -86,7 +84,6 @@ const AddCategoryModal = ({ isOpen, onClose, onSave }) => {
             )}
           </div>
 
-          {/* Description */}
           <div>
             <label className="text-sm font-ibm-plex font-medium text-[#0f1729] mb-2 block">
               Description (Optional)
@@ -100,7 +97,6 @@ const AddCategoryModal = ({ isOpen, onClose, onSave }) => {
             />
           </div>
 
-          {/* Buttons */}
           <div className="flex gap-3 pt-2">
             <button
               type="button"
@@ -124,11 +120,4 @@ const AddCategoryModal = ({ isOpen, onClose, onSave }) => {
 }
 
 export default AddCategoryModal
-
-
-
-
-
-
-
 

@@ -4,9 +4,6 @@ import Layout from '../components/Layout/Layout'
 import { Upload, Plus, Trash2, Sparkles, Save, Loader2, Check, AlertCircle, FileText } from 'lucide-react'
 import { coaService } from '../services/api'
 
-// Mirrors backend `MAX_UPLOAD_FILE_SIZE_MB` (10 MB). Reject oversize uploads
-// in the browser so users get instant feedback instead of waiting for a 413
-// after the bytes are already on the wire.
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 const MAX_TOTAL_SIZE_BYTES = 50 * 1024 * 1024
 const ALLOWED_UPLOAD_TYPES = new Set([
@@ -21,7 +18,7 @@ const ALLOWED_UPLOAD_TYPES = new Set([
 const AddCOA = () => {
   const navigate = useNavigate()
   
-  // Basic Information State
+
   const [ingredientName, setIngredientName] = useState('')
   const [productDescription, setProductDescription] = useState('')
   const [productCode, setProductCode] = useState('')
@@ -37,7 +34,7 @@ const AddCOA = () => {
   const [dragActive, setDragActive] = useState(false)
   const [uploadedFiles, setUploadedFiles] = useState([])
   
-  // Extraction and saving states
+
   const [isExtracting, setIsExtracting] = useState(false)
   const [extractionComplete, setExtractionComplete] = useState(false)
   const [extractionError, setExtractionError] = useState(null)
@@ -45,11 +42,10 @@ const AddCOA = () => {
   const [isSaving, setIsSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
   
-  // Initial empty nutrient rows
+
   const [nutrients, setNutrients] = useState([])
   const [nextId, setNextId] = useState(1)
 
-  // Add new nutrient row
   const addNutrient = () => {
     setNutrients([
       ...nutrients,
@@ -68,21 +64,18 @@ const AddCOA = () => {
     setNextId(nextId + 1)
   }
 
-  // Remove nutrient row
   const removeNutrient = (id) => {
     if (nutrients.length > 0) {
       setNutrients(nutrients.filter(nutrient => nutrient.id !== id))
     }
   }
 
-  // Update nutrient field
   const updateNutrient = (id, field, value) => {
     setNutrients(prev => prev.map(nutrient =>
       nutrient.id === id ? { ...nutrient, [field]: value } : nutrient
     ))
   }
 
-  // Handle file drag events
   const handleDrag = (e) => {
     e.preventDefault()
     e.stopPropagation()
@@ -93,7 +86,6 @@ const AddCOA = () => {
     }
   }
 
-  // Handle file drop
   const handleDrop = (e) => {
     e.preventDefault()
     e.stopPropagation()
@@ -104,14 +96,12 @@ const AddCOA = () => {
     }
   }
 
-  // Handle file selection
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
       handleFiles(e.target.files)
     }
   }
 
-  // Process selected files
   const handleFiles = (files) => {
     const fileArray = Array.from(files)
 
@@ -146,12 +136,11 @@ const AddCOA = () => {
     }
 
     setUploadedFiles(prev => [...prev, ...fileArray])
-    // Reset extraction state when new files are added
+
     setExtractionComplete(false)
     setExtractionError(null)
   }
 
-  // Extract data from COA files
   const handleExtractData = async () => {
     if (uploadedFiles.length === 0) {
       setExtractionError('Please upload at least one COA file')
@@ -166,7 +155,7 @@ const AddCOA = () => {
       const result = await coaService.extractFromImages(uploadedFiles)
       
       if (result.success && result.data) {
-        // Populate form with extracted data
+
         populateFormFromExtraction(result.data)
         setExtractionComplete(true)
         setExtractionCost(result.cost)
@@ -180,10 +169,9 @@ const AddCOA = () => {
     }
   }
 
-  // Populate form from extracted data
   const populateFormFromExtraction = (data) => {
     
-    // Populate ingredient info
+
     if (data.ingredient_info) {
       const info = data.ingredient_info
       setIngredientName(info.ingredient_name || '')
@@ -199,7 +187,7 @@ const AddCOA = () => {
       setAnalysisMethod(data.analysis_method || '')
     }
     
-    // Populate nutritional data
+
     if (data.nutritional_data && Array.isArray(data.nutritional_data)) {
       const nutrientRows = data.nutritional_data.map((item, index) => ({
         id: index + 1,
@@ -218,7 +206,6 @@ const AddCOA = () => {
     }
   }
 
-  // Save COA data
   const handleSaveCOA = async () => {
     if (!ingredientName.trim()) {
       alert('Please enter Ingredient Name')
@@ -229,7 +216,7 @@ const AddCOA = () => {
     setSaveSuccess(false)
     
     try {
-      // Convert uploaded files to base64 for storage
+
       const fileBase64Promises = uploadedFiles.map(file => {
         return new Promise((resolve) => {
           const reader = new FileReader()
@@ -240,7 +227,6 @@ const AddCOA = () => {
       })
       const documentImages = (await Promise.all(fileBase64Promises)).filter(Boolean)
 
-      // Build nutritional_data array for API
       const nutritionalData = nutrients
         .filter(n => n.name.trim())
         .map(n => ({
@@ -280,7 +266,7 @@ const AddCOA = () => {
       
       if (result.success) {
         setSaveSuccess(true)
-        // Clear form after 2 seconds
+
         setTimeout(() => {
           clearForm()
           setSaveSuccess(false)
@@ -295,7 +281,6 @@ const AddCOA = () => {
     }
   }
 
-  // Clear form
   const clearForm = () => {
     setIngredientName('')
     setProductDescription('')
@@ -314,11 +299,10 @@ const AddCOA = () => {
     setExtractionCost(null)
   }
 
-
   return (
     <Layout>
       <div className="p-4 md:p-6 h-full flex flex-col overflow-y-auto">
-        {/* Header */}
+
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
           <div className="flex-1">
             <h1 className="text-xl md:text-2xl font-ibm-plex font-bold text-[#0f1729] mb-1">
@@ -366,7 +350,6 @@ const AddCOA = () => {
           </div>
         </div>
 
-        {/* Status Messages */}
         {extractionComplete && (
           <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4 flex items-start gap-3">
             <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
@@ -426,7 +409,6 @@ const AddCOA = () => {
           </div>
         )}
 
-        {/* File Upload Area */}
         <div className="bg-white border border-[#e1e7ef] rounded-lg shadow-sm p-6 mb-6">
           <div
             className={`border-2 border-dashed rounded-xl p-12 transition-colors ${
@@ -464,7 +446,7 @@ const AddCOA = () => {
             </div>
           </div>
           
-          {/* Display uploaded files */}
+
           {uploadedFiles.length > 0 && (
             <div className="mt-4">
               <p className="text-sm font-ibm-plex font-medium text-[#0f1729] mb-2">
@@ -491,7 +473,6 @@ const AddCOA = () => {
           )}
         </div>
 
-        {/* Basic Information */}
         <div className="bg-white border border-[#e1e7ef] rounded-lg p-6 mb-6">
           <div className="border-b border-[#e1e7ef] pb-2 mb-4">
             <h2 className="text-lg font-ibm-plex font-semibold text-[#0f1729]">
@@ -634,7 +615,6 @@ const AddCOA = () => {
           </div>
         </div>
 
-        {/* Nutritional Data Table */}
         <div className="bg-white border border-[#e1e7ef] rounded-lg shadow-sm mb-6">
           <div className="p-4 border-b border-[#e1e7ef] flex items-center justify-between">
             <h2 className="text-lg font-ibm-plex font-semibold text-[#0f1729]">
@@ -771,7 +751,7 @@ const AddCOA = () => {
                 </table>
               </div>
               
-              {/* Add Row Button */}
+
               <div className="border-t border-[#e1e7ef] p-4">
                 <button
                   onClick={addNutrient}

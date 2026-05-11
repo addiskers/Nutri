@@ -15,17 +15,14 @@ import logging
 from datetime import datetime
 from typing import Any, Optional
 
-
 _logger = logging.getLogger("nutrieyeq.audit")
 if not _logger.handlers:
-    # Attach a single stream handler so audit events aren't swallowed when
-    # the root logger isn't configured.
+
     _handler = logging.StreamHandler()
     _handler.setFormatter(logging.Formatter("%(message)s"))
     _logger.addHandler(_handler)
     _logger.setLevel(logging.INFO)
     _logger.propagate = False
-
 
 def audit_event(
     action: str,

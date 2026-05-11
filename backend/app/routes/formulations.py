@@ -8,14 +8,11 @@ from app.utils.audit import audit_event
 
 router = APIRouter(prefix="/formulations", tags=["Formulations"])
 
-
 def _is_admin(user: User) -> bool:
     return user.role in (UserRole.ADMIN, UserRole.SUPER_ADMIN)
 
-
 def _owns(user: User, formulation: SavedFormulation) -> bool:
     return (formulation.created_by or "").lower() == (user.email or "").lower()
-
 
 @router.post("/save")
 async def save_formulation(
@@ -26,15 +23,15 @@ async def save_formulation(
         name = data.get("name", "").strip()
         if not name:
             raise HTTPException(status_code=400, detail="Formulation name is required")
-        
+
         ingredients = data.get("ingredients", [])
         if not ingredients:
             raise HTTPException(status_code=400, detail="At least one ingredient is required")
-        
+
         serve_size = data.get("serve_size", 30.0)
         nutrient_selections = data.get("nutrient_selections", {})
         custom_values = data.get("custom_values", {})
-        
+
         formulation = SavedFormulation(
             name=name,
             ingredients=ingredients,
@@ -46,9 +43,9 @@ async def save_formulation(
             updated_at=datetime.utcnow(),
             status="active"
         )
-        
+
         await formulation.insert()
-        
+
         return {
             "success": True,
             "message": f"Formulation '{name}' saved successfully",
@@ -59,7 +56,6 @@ async def save_formulation(
     except Exception as e:
         print(f"[ERROR] Save formulation failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to save formulation")
-
 
 @router.get("/list")
 async def list_formulations(
@@ -80,7 +76,7 @@ async def list_formulations(
 
         formulations = await base.sort("-created_at").skip(skip).limit(limit).to_list()
         total = await base.count()
-        
+
         result = []
         for f in formulations:
             result.append({
@@ -92,7 +88,7 @@ async def list_formulations(
                 "created_at": f.created_at.isoformat() if f.created_at else None,
                 "updated_at": f.updated_at.isoformat() if f.updated_at else None,
             })
-        
+
         return {
             "formulations": result,
             "total": total
@@ -100,7 +96,6 @@ async def list_formulations(
     except Exception as e:
         print(f"[ERROR] List formulations failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to list formulations")
-
 
 @router.get("/{formulation_id}")
 async def get_formulation(
@@ -114,8 +109,6 @@ async def get_formulation(
         if not formulation:
             raise HTTPException(status_code=404, detail="Formulation not found")
 
-        # Return 404 (not 403) so we don't leak the existence of records owned
-        # by other users.
         if not _is_admin(current_user) and not _owns(current_user, formulation):
             raise HTTPException(status_code=404, detail="Formulation not found")
 
@@ -135,7 +128,6 @@ async def get_formulation(
     except Exception as e:
         print(f"[ERROR] Get formulation failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch formulation")
-
 
 @router.delete("/{formulation_id}")
 async def delete_formulation(

@@ -16,7 +16,6 @@ const Navbar = ({
   const menuRef = useRef(null)
   const currentUser = authService.getCurrentUser()
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (menuRef.current && !menuRef.current.contains(event.target)) {
@@ -39,7 +38,7 @@ const Navbar = ({
 
   return (
     <header className="bg-white border-b border-[#e1e7ef] h-16 flex items-center justify-between px-6">
-      {/* Branded Title */}
+
       <div className="flex items-center gap-4">
         <h1 className="text-2xl sm:text-[32px] font-ibm-plex font-bold leading-8">
           <span className="text-[#009da5]">Zydus </span>
@@ -50,9 +49,8 @@ const Navbar = ({
         </h1>
       </div>
 
-      {/* User Menu */}
       <div className="flex items-center relative" ref={menuRef}>
-        {/* User Avatar */}
+
         <button 
           onClick={() => setShowUserMenu(!showUserMenu)}
           className="w-10 h-10 bg-[#2463eb] rounded-full flex items-center justify-center text-white font-medium text-sm hover:bg-[#1d4fd8] transition-colors"
@@ -60,10 +58,9 @@ const Navbar = ({
           <span className="text-sm font-ibm-plex">{getUserInitials()}</span>
         </button>
 
-        {/* Dropdown Menu */}
         {showUserMenu && (
           <div className="absolute right-0 top-12 w-64 bg-white border border-[#e1e7ef] rounded-lg shadow-lg z-50 py-2">
-            {/* User Info */}
+
             {currentUser && (
               <div className="px-4 py-3 border-b border-[#e1e7ef]">
                 <p className="text-sm font-ibm-plex font-semibold text-[#0f1729]">
@@ -78,7 +75,6 @@ const Navbar = ({
               </div>
             )}
 
-            {/* Menu Items */}
             <div className="py-1">
               <button
                 onClick={() => {

@@ -3,24 +3,17 @@ from pydantic import field_validator, model_validator
 from typing import Optional
 import secrets
 
-
 class Settings(BaseSettings):
     MONGODB_URL: str = "mongodb://localhost:27017"
     DATABASE_NAME: str = "nutrieyeq"
-    # Must be supplied via env in production. None => validator either fills
-    # an ephemeral key (DEBUG=True) or raises (DEBUG=False).
+
     SECRET_KEY: Optional[str] = None
-    # Accepted as a fallback when `decode_token` validates a JWT, so an
-    # operator can rotate SECRET_KEY without forcing every active session to
-    # 401 at once. Set this to the old SECRET_KEY during the rotation window,
-    # then clear it after outstanding refresh tokens expire.
+
     PREVIOUS_SECRET_KEY: Optional[str] = None
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-    # JWT `iss`/`aud` claims. Hardcoded pair so `jwt.decode(..., audience=,
-    # issuer=)` rejects tokens minted by any other service that happens to
-    # share the signing key (defence-in-depth against key-confusion attacks).
+
     JWT_ISSUER: str = "nutrieyeq-api"
     JWT_AUDIENCE: str = "nutrieyeq-dashboard"
     ALLOWED_EMAIL_DOMAINS: str = ""
@@ -31,7 +24,7 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     FROM_EMAIL: str = ""
     FROM_NAME: str = "NutriEyeQ Dashboard"
-    # Legacy (kept for back-compat); new code reads PASSWORD_RESET_OTP_EXPIRE_MINUTES.
+
     PASSWORD_RESET_TOKEN_EXPIRE_HOURS: int = 24
     PASSWORD_RESET_OTP_EXPIRE_MINUTES: int = 15
     LOGIN_OTP_EXPIRE_MINUTES: int = 10
@@ -39,19 +32,17 @@ class Settings(BaseSettings):
     OTP_LOCKOUT_MINUTES: int = 15
     MAX_UPLOAD_FILE_SIZE_MB: int = 10
     MAX_UPLOAD_TOTAL_SIZE_MB: int = 50
-    # Global cap on any incoming request body. Set above the total extract cap
-    # so multipart overhead fits, but low enough to stop resource exhaustion.
+
     MAX_REQUEST_BODY_SIZE_MB: int = 100
     FRONTEND_URL: str = "http://localhost:5173/"
     RATE_LIMIT_PER_MINUTE: int = 60
-    # Per-user extract throttle — these hit a paid Gemini endpoint, so a valid
-    # session must not be usable as a billing DoS.
+
     EXTRACT_RATE_LIMIT: str = "10/minute"
     APP_NAME: str = "NutriEyeQ Dashboard"
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
     GEMINI_API_KEY: Optional[str] = None
-    
+
     @field_validator('DEBUG', mode='before')
     @classmethod
     def parse_debug(cls, v):
@@ -63,12 +54,10 @@ class Settings(BaseSettings):
             elif v.lower() in ('false', '0', 'no', 'off', 'warn', 'info', 'error'):
                 return False
         return bool(v)
-    
+
     @model_validator(mode='after')
     def _validate_secret_key(self):
-        # Fail fast when SECRET_KEY is missing in production. In DEBUG we
-        # substitute an ephemeral key (sessions invalidate on every restart)
-        # and warn loudly.
+
         if not self.SECRET_KEY or self.SECRET_KEY.startswith("your-super-secret"):
             if self.DEBUG:
                 object.__setattr__(self, 'SECRET_KEY', secrets.token_hex(32))
@@ -89,16 +78,15 @@ class Settings(BaseSettings):
         if not self.ALLOWED_EMAIL_DOMAINS:
             return []
         return [d.strip() for d in self.ALLOWED_EMAIL_DOMAINS.split(',') if d.strip()]
-    
+
     def get_super_admin_emails(self) -> list:
         if not self.SUPER_ADMIN_EMAILS:
             return []
         return [e.strip().lower() for e in self.SUPER_ADMIN_EMAILS.split(',') if e.strip()]
-    
+
     class Config:
         env_file = ".env"
         case_sensitive = False
         extra = "ignore"
-
 
 settings = Settings()

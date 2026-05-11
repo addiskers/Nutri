@@ -120,7 +120,6 @@ const EditProduct = () => {
     </button>
   )
 
-  // ── Shared style tokens & chip helpers (mirrors AddProduct) ────────────────
   const inputClass    = "w-full h-10 px-3 pr-9 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary"
   const textareaClass = "w-full px-3 py-2 bg-[#f9fafb] border border-[#e1e7ef] rounded-md text-sm font-ibm-plex text-[#0f1729] placeholder:text-[#65758b] focus:outline-none focus:ring-2 focus:ring-primary resize-none"
   const labelClass    = "text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block"
@@ -272,11 +271,10 @@ const EditProduct = () => {
           setDirectionsToUse(dirs.join('\n'))
           setPreparationMethod(prep.join('\n'))
         } else if (typeof product.instructions_to_use === 'string' && product.instructions_to_use) {
-          // legacy fallback for older records that only have a flat string
+
           setDirectionsToUse(product.instructions_to_use)
         }
 
-        // ── Manufacturer / Marketed / Packed (split into multiple blocks) ──
         const manufacturers = Array.isArray(product.manufacturer_information)
           ? product.manufacturer_information
           : (Array.isArray(product.manufacturer_details) ? product.manufacturer_details : [])
@@ -300,7 +298,6 @@ const EditProduct = () => {
           otherNotes: ''
         })
 
-        // ── Batch information ──
         const batch = product.batch_information || {}
         setBatchData({
           lotNumber:   batch.lot_number   || '',
@@ -308,32 +305,27 @@ const EditProduct = () => {
           otherCodes:  Array.isArray(batch.other_codes) ? batch.other_codes.join('\n') : (batch.other_codes || '')
         })
 
-        // ── Packaging information ──
         const packaging = product.packaging_information || {}
         setPackagingData({
           manufacturer: packaging.packaging_material_manufacturer || '',
           codes:        Array.isArray(packaging.packaging_codes) ? packaging.packaging_codes.join('\n') : (packaging.packaging_codes || '')
         })
 
-        // ── FSSAI license numbers (canonical + legacy fallback) ──
         const fssaiInfo = product.fssai_information || {}
         const fssaiList = Array.isArray(fssaiInfo.license_numbers)
           ? fssaiInfo.license_numbers
           : (Array.isArray(product.fssai_licenses) ? product.fssai_licenses : [])
         setFssaiNumbers(fssaiList.filter(Boolean))
 
-        // ── Barcodes (canonical list + legacy scalar fallback) ──
         const barcodeList = Array.isArray(product.barcodes) && product.barcodes.length
           ? product.barcodes
           : (product.barcode ? [product.barcode] : [])
         setBarcodes(barcodeList.filter(Boolean))
 
-        // ── Certifications ──
         if (Array.isArray(product.certifications)) {
           setCertifications(product.certifications.filter(Boolean))
         }
 
-        // ── Customer care ──
         const cc = product.customer_care || {}
         const phones = Array.isArray(cc.phone) ? cc.phone : (cc.phone ? [cc.phone] : [])
         setCustomerCareData({
@@ -343,7 +335,6 @@ const EditProduct = () => {
           address: cc.address || ''
         })
 
-        // ── Regulatory / Other text ──
         if (Array.isArray(product.regulatory_text)) {
           setRegulatoryText(product.regulatory_text.join('\n'))
         } else if (typeof product.regulatory_text === 'string') {
@@ -400,7 +391,6 @@ const EditProduct = () => {
     setAllergens(allergens.filter((_, i) => i !== index))
   }
 
-  // ── Nomenclature (mirrors AddProduct) ────────────────────────────────────
   const loadNomenclature = async () => {
     try {
       const data = await nomenclatureService.getBuildMap()
@@ -432,7 +422,6 @@ const EditProduct = () => {
     }
   }
 
-  // Compute dynamic value column headers from all nutrition rows
   const valueColumns = (() => {
     const colSet = new Set()
     nutritionRows.forEach(r => {
@@ -483,9 +472,6 @@ const EditProduct = () => {
         values:        row.values || {},
       }))
 
-      // Build manufacturer entries the same way Add Product does: each
-      // textarea block becomes one entry under its type. The Compare page
-      // joins name + address + license back together for display.
       const buildEntries = (text, type) => text
         .split(/\n\s*\n+/)
         .map(s => s.trim())
@@ -525,7 +511,7 @@ const EditProduct = () => {
           preparation_method: preparationMethod.split('\n').map(s => s.trim()).filter(Boolean),
         },
         shelf_life: formData.shelfLife || storageData.shelfLife || null,
-        // Canonical company-tab payload (mirrors AddProduct):
+
         manufacturer_information: manufacturerInformation,
         brand_owner: companyData.brandOwner || null,
         batch_information: {
@@ -580,7 +566,7 @@ const EditProduct = () => {
     <Layout>
       <div className="overflow-y-auto h-full">
         <div className="max-w-6xl mx-auto p-4 md:p-6">
-          {/* Header */}
+
           <div className="flex flex-col sm:flex-row items-start gap-4 mb-6">
             <button
               onClick={() => navigate('/products')}
@@ -607,7 +593,6 @@ const EditProduct = () => {
             </button>
           </div>
 
-          {/* Tabs */}
           <div className="bg-[#ebebeb] rounded-md p-1 mb-4 md:mb-6 overflow-x-auto">
             <div className="flex gap-1 min-w-max sm:min-w-0">
               {tabs.map((tab) => (
@@ -626,17 +611,16 @@ const EditProduct = () => {
             </div>
           </div>
 
-          {/* Tab Content */}
           {activeTab === 'basic' && (
             <div className="space-y-6">
-              {/* Basic Information */}
+
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                 <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">
                   Basic Information
                 </h3>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-                  {/* Product Name */}
+
                   <div>
                     <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
                       Product Name *
@@ -654,7 +638,6 @@ const EditProduct = () => {
                     </div>
                   </div>
 
-                  {/* Brand */}
                   <div>
                     <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
                       Brand *
@@ -672,7 +655,6 @@ const EditProduct = () => {
                     </div>
                   </div>
 
-                  {/* Sub Brand */}
                   <div>
                     <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
                       Sub Brand
@@ -689,7 +671,6 @@ const EditProduct = () => {
                     </div>
                   </div>
 
-                  {/* Variant */}
                   <div>
                     <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
                       Variant
@@ -706,7 +687,6 @@ const EditProduct = () => {
                     </div>
                   </div>
 
-                  {/* Pack Size */}
                   <div>
                     <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
                       Net Weight / Pack Size
@@ -723,7 +703,6 @@ const EditProduct = () => {
                     </div>
                   </div>
 
-                  {/* Serve Size */}
                   <div>
                     <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
                       Serve Size
@@ -740,7 +719,6 @@ const EditProduct = () => {
                     </div>
                   </div>
 
-                  {/* Servings Per Pack */}
                   <div>
                     <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
                       Servings Per Pack
@@ -757,7 +735,6 @@ const EditProduct = () => {
                     </div>
                   </div>
 
-                  {/* MRP */}
                   <div>
                     <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
                       MRP (₹)
@@ -774,7 +751,6 @@ const EditProduct = () => {
                     </div>
                   </div>
 
-                  {/* USPF */}
                   <div>
                     <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
                       USPF — Unit Selling Price Format
@@ -791,7 +767,6 @@ const EditProduct = () => {
                     </div>
                   </div>
 
-                  {/* Packing Format — user choice only; not from AI */}
                   <div>
                     <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
                       Packing Format
@@ -811,7 +786,6 @@ const EditProduct = () => {
                     </div>
                   </div>
 
-                  {/* Manufacturing Date */}
                   <div>
                     <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
                       Manufacturing Date
@@ -828,7 +802,6 @@ const EditProduct = () => {
                     </div>
                   </div>
 
-                  {/* Expiry Date */}
                   <div>
                     <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
                       Expiry Date
@@ -845,7 +818,6 @@ const EditProduct = () => {
                     </div>
                   </div>
 
-                  {/* Shelf Life */}
                   <div>
                     <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
                       Shelf Life
@@ -862,7 +834,6 @@ const EditProduct = () => {
                     </div>
                   </div>
 
-                  {/* Category */}
                   <div>
                     <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
                       Category
@@ -884,7 +855,6 @@ const EditProduct = () => {
                     </div>
                   </div>
 
-                  {/* Veg/Non-Veg */}
                   <div>
                     <label className="text-xs md:text-sm font-ibm-plex font-medium text-[#0f1729] mb-1.5 md:mb-2 block">
                       Veg/Non-Veg
@@ -907,7 +877,6 @@ const EditProduct = () => {
                 </div>
               </div>
 
-              {/* Claims on Pack */}
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                 <div className="flex items-center justify-between mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">
                   <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729]">
@@ -960,7 +929,6 @@ const EditProduct = () => {
             </div>
           )}
 
-          {/* Nutrition Tab */}
           {activeTab === 'nutrition' && (
             <div className="space-y-6">
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
@@ -1041,7 +1009,6 @@ const EditProduct = () => {
                 )}
               </div>
 
-              {/* Nutrition Notes */}
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                 <SectionHeader title="Nutrition Notes" copyValue={nutritionNotes.join(' | ')} copyField="edit_nutNotes" />
                 <p className="text-xs text-[#65758b] mb-3">Footnotes, %RDA references, or disclaimers printed below the nutrition table.</p>
@@ -1055,10 +1022,9 @@ const EditProduct = () => {
             </div>
           )}
 
-          {/* Composition Tab */}
           {activeTab === 'composition' && (
             <div className="space-y-6">
-              {/* Ingredients */}
+
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                 <div className="flex items-center justify-between mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">
                   <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729]">
@@ -1108,7 +1074,6 @@ const EditProduct = () => {
                 )}
               </div>
 
-              {/* Allergens */}
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                 <div className="flex items-center justify-between mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">
                   <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729]">
@@ -1158,7 +1123,6 @@ const EditProduct = () => {
                 )}
               </div>
 
-              {/* Storage & Usage */}
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                 <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">
                   Storage & Usage
@@ -1219,10 +1183,9 @@ const EditProduct = () => {
             </div>
           )}
 
-          {/* Company Tab */}
           {activeTab === 'company' && (
             <div className="space-y-4 md:space-y-6">
-              {/* Company Information */}
+
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                 <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Company Information</h3>
                 {[
@@ -1242,7 +1205,6 @@ const EditProduct = () => {
                 ))}
               </div>
 
-              {/* Batch Information */}
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                 <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Batch Information</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mb-4">
@@ -1276,7 +1238,6 @@ const EditProduct = () => {
                 </div>
               </div>
 
-              {/* Packaging Information */}
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                 <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Packaging Information</h3>
                 <div className="mb-3 md:mb-4">
@@ -1300,7 +1261,6 @@ const EditProduct = () => {
                 </div>
               </div>
 
-              {/* Regulatory Information (multi FSSAI + Barcodes) */}
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                 <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Regulatory Information</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1325,7 +1285,6 @@ const EditProduct = () => {
                 </div>
               </div>
 
-              {/* Certifications */}
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                 <SectionHeader title="Certifications" copyValue={certifications.join(', ')} copyField="edit_certs" />
                 <ChipInput value={newCertification} onChange={setNewCertification} onAdd={handleAddCert}
@@ -1336,7 +1295,6 @@ const EditProduct = () => {
                 )}
               </div>
 
-              {/* Customer Care */}
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                 <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Customer Care</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mb-4">
@@ -1381,7 +1339,6 @@ const EditProduct = () => {
                 </div>
               </div>
 
-              {/* Additional Notes & Regulatory Text */}
               <div className="bg-white border border-[#e1e7ef] rounded-lg p-4 md:p-6">
                 <h3 className="text-base md:text-lg font-ibm-plex font-semibold text-[#0f1729] mb-3 md:mb-4 pb-2 border-b border-[#e1e7ef]">Additional Notes & Regulatory</h3>
                 <div className="space-y-4">
@@ -1414,6 +1371,4 @@ const EditProduct = () => {
 }
 
 export default EditProduct
-
-
 

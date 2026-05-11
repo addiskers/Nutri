@@ -8,28 +8,17 @@ from config.settings import settings
 import secrets
 import uuid
 
-
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
 
-# Key ID derived from first 8 chars of key hash (identifies which key signed a token)
 _CURRENT_KID = sha256(settings.SECRET_KEY.encode()).hexdigest()[:8]
-
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
-
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
-
-# Pre-computed bcrypt hash of an unguessable random string. Used by login
-# flows to spend the same wall-clock time on a missing-user path as a
-# real-user path, removing the user-enumeration timing oracle. The hash
-# value itself is never compared against any real password – only the
-# bcrypt CPU cost matters here.
 _DUMMY_VERIFY_HASH = pwd_context.hash(secrets.token_urlsafe(32))
-
 
 def verify_dummy_password(plain_password: str) -> None:
     """Spend a bcrypt verify against a fixed dummy hash to mask timing.
@@ -43,7 +32,6 @@ def verify_dummy_password(plain_password: str) -> None:
     except (ValueError, TypeError):
         pass
 
-
 def verify_dummy_otp(plain_otp: str) -> None:
     """Same shape as ``verify_dummy_password`` but named for the OTP paths.
 
@@ -56,7 +44,6 @@ def verify_dummy_otp(plain_otp: str) -> None:
         pwd_context.verify(plain_otp or "", _DUMMY_VERIFY_HASH)
     except (ValueError, TypeError):
         pass
-
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
@@ -83,7 +70,6 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     )
     return encoded_jwt
 
-
 def create_refresh_token(data: dict) -> str:
     to_encode = data.copy()
     now = datetime.now(timezone.utc)
@@ -105,7 +91,6 @@ def create_refresh_token(data: dict) -> str:
     )
     return encoded_jwt
 
-
 def decode_token(token: str) -> Optional[Dict]:
     """Decode JWT, trying current key first then previous key (for rotation)."""
     keys_to_try = [settings.SECRET_KEY]
@@ -125,32 +110,25 @@ def decode_token(token: str) -> Optional[Dict]:
             continue
     return None
 
-
 async def deny_token(jti: str, expires_at: datetime) -> None:
     from app.models.token_denylist import DeniedToken
     await DeniedToken(jti=jti, expires_at=expires_at).insert()
-
 
 async def is_token_denied(jti: str) -> bool:
     from app.models.token_denylist import DeniedToken
     return await DeniedToken.find_one(DeniedToken.jti == jti) is not None
 
-
 def generate_password_reset_token() -> str:
     return secrets.token_urlsafe(32)
-
 
 def generate_otp(length: int = 8) -> str:
     return ''.join([str(secrets.randbelow(10)) for _ in range(length)])
 
-
 def hash_otp(otp: str) -> str:
     return pwd_context.hash(otp)
 
-
 def verify_otp(plain_otp: str, hashed_otp: str) -> bool:
-    # Guard against legacy plaintext rows or otherwise malformed values
-    # so callers always get a clean boolean instead of a passlib exception.
+
     if not plain_otp or not hashed_otp:
         return False
     try:
@@ -158,23 +136,22 @@ def verify_otp(plain_otp: str, hashed_otp: str) -> bool:
     except (ValueError, TypeError):
         return False
 
-
 def validate_password_strength(password: str) -> tuple[bool, str]:
     if len(password) < 12:
         return False, "Password must be at least 12 characters long"
-    
+
     if not any(c.isupper() for c in password):
         return False, "Password must contain at least one uppercase letter"
-    
+
     if not any(c.islower() for c in password):
         return False, "Password must contain at least one lowercase letter"
-    
+
     if not any(c.isdigit() for c in password):
         return False, "Password must contain at least one number"
-    
+
     special_chars = "!@#$%^&*()_+-=[]{}|;:,.<>?"
     if not any(c in special_chars for c in password):
         return False, "Password must contain at least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)"
-    
+
     return True, ""
 

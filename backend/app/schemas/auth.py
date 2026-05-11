@@ -2,13 +2,12 @@ from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
 from datetime import datetime
 
-
 class UserRegister(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
     email: EmailStr
     password: str = Field(..., min_length=12)
     department: Optional[str] = None
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -19,11 +18,10 @@ class UserRegister(BaseModel):
             }
         }
 
-
 class UserLogin(BaseModel):
     email: EmailStr
     password: str = Field(..., max_length=128)
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -31,7 +29,6 @@ class UserLogin(BaseModel):
                 "password": "SecurePass123"
             }
         }
-
 
 class VerifyLoginOTP(BaseModel):
     email: EmailStr
@@ -45,17 +42,15 @@ class VerifyLoginOTP(BaseModel):
             }
         }
 
-
 class ForgotPassword(BaseModel):
     email: EmailStr
-    
+
     class Config:
         json_schema_extra = {
             "example": {
                 "email": "aisha@wellnessco.com"
             }
         }
-
 
 class ResetPassword(BaseModel):
     email: EmailStr
@@ -71,11 +66,10 @@ class ResetPassword(BaseModel):
             }
         }
 
-
 class ChangePassword(BaseModel):
     current_password: str = Field(..., max_length=128)
     new_password: str = Field(..., min_length=12, max_length=128)
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -84,14 +78,12 @@ class ChangePassword(BaseModel):
             }
         }
 
-
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
     user: 'UserResponse'
-
 
 class RefreshTokenRequest(BaseModel):
     """Body for POST /auth/refresh. The refresh token is accepted from the
@@ -103,13 +95,11 @@ class RefreshTokenRequest(BaseModel):
             "example": {"refresh_token": "eyJhbGciOi..."}
         }
 
-
 class RefreshTokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
-
 
 class UserResponse(BaseModel):
     id: str
@@ -158,7 +148,6 @@ class UserResponse(BaseModel):
             }
         }
 
-
 class LogoutRequest(BaseModel):
     refresh_token: Optional[str] = None
 
@@ -169,11 +158,10 @@ class LogoutRequest(BaseModel):
             }
         }
 
-
 class MessageResponse(BaseModel):
     message: str
     success: bool = True
-    
+
     class Config:
         json_schema_extra = {
             "example": {

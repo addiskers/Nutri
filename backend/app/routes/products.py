@@ -21,9 +21,6 @@ router = APIRouter(prefix="/products", tags=["Products"])
 
 from config.settings import settings
 
-
-# Hard caps for AI extract uploads so a single caller can't exhaust memory
-# with a massive payload. Content-type is also whitelisted.
 _ALLOWED_IMAGE_CONTENT_TYPES = {
     "image/jpeg",
     "image/jpg",
@@ -31,7 +28,6 @@ _ALLOWED_IMAGE_CONTENT_TYPES = {
     "image/webp",
     "image/gif",
 }
-
 
 def _validate_uploads(files, allowed_types, max_files):
     """Shared pre-flight upload validation. Raises 400/413 early so we never
@@ -152,7 +148,6 @@ NOMENCLATURE_MAP = {
     "vitamin k": "Vitamin K",
 }
 
-
 def standardize_nutrition_table(nutrition_table):
     if not nutrition_table:
         return []
@@ -160,20 +155,20 @@ def standardize_nutrition_table(nutrition_table):
     standardized = []
     for nutrient in nutrition_table:
         original_name_raw = nutrient.get("nutrient_name", "")
-        
+
         if not original_name_raw or not isinstance(original_name_raw, str):
             continue
-            
+
         original_name = original_name_raw.strip().lower()
         if not original_name:
             continue
-            
+
         standardized_name = NOMENCLATURE_MAP.get(original_name, original_name_raw)
-        
+
         values = nutrient.get("values", {})
         if not values or not any(values.values()):
             continue
-            
+
         standardized.append({
             "nutrient_name": standardized_name,
             "values": values,
@@ -181,7 +176,6 @@ def standardize_nutrition_table(nutrition_table):
         })
 
     return standardized
-
 
 def extract_numeric_mrp(mrp_value):
     if not mrp_value or mrp_value == "not specified":
@@ -202,7 +196,6 @@ def extract_numeric_mrp(mrp_value):
             return None
     return None
 
-
 def validate_dates(text):
     if not isinstance(text, str):
         text = str(text) if text else ""
@@ -221,12 +214,10 @@ def validate_dates(text):
     exp_date = valid_dates[-1].strftime("%d/%m/%Y") if len(valid_dates) > 1 else None
     return mfg_date, exp_date
 
-
 def validate_fssai(text):
     if not isinstance(text, str):
         text = str(text) if text else ""
     return list(set(re.findall(r"\b\d{14}\b", text)))
-
 
 def calculate_cost(input_tokens, output_tokens):
     input_cost = (input_tokens / 1_000_000) * PRICING["input"]
@@ -239,7 +230,6 @@ def calculate_cost(input_tokens, output_tokens):
         "total_cost": input_cost + output_cost,
     }
 
-
 EXTRACTION_PROMPT = """Extract complete product packaging data from these images.
 
 CRITICAL: Return ONLY raw JSON. DO NOT wrap in markdown code fences. Start with { and end with }.
@@ -249,7 +239,7 @@ PRODUCT TYPE:
 - "parent_child": Multi-variant pack
 
 BRAND & PRODUCT:
-- parent_brand: Main company name ( owner of the product) not name of product 
+- parent_brand: Main company name ( owner of the product) not name of product
 - sub_brand: Product line or "not specified" ( brand of the product)
 - product_name: Full product name + variant ( name of the product)
 - variant: Flavor/type
@@ -262,7 +252,6 @@ WEIGHT & SIZE:
 
 PRICING:
 - mrp: NUMBER ONLY (e.g., 40.00 not "₹ 40")
-
 
 NUTRITION TABLE - CRITICAL:
 
@@ -305,7 +294,7 @@ MANUFACTURER:
 
 DATES:
 - manufacturing_date: in dd/mm/yyyy format
-- expiry_date: in dd/mm/yyyy format  
+- expiry_date: in dd/mm/yyyy format
 - shelf_life: Extract if printed on pack (e.g., "18 months", "2 years"). If not visible, calculate from manufacturing to expiry date difference and express in months (e.g., if mfg is 15/03/2023 and expiry is 14/09/2023, shelf_life is "6 months")
 
 JSON STRUCTURE:
@@ -344,21 +333,19 @@ JSON STRUCTURE:
 
 Return ONLY the JSON."""
 
-
 class ExtractedProductData(BaseModel):
     success: bool
     data: Optional[dict] = None
     error: Optional[str] = None
     cost: Optional[dict] = None
 
-
 class ProductCreate(BaseModel):
     product_name: str
     parent_brand: str
     sub_brand: Optional[str] = None
     variant: Optional[str] = None
-    net_weight: Optional[str] = None      # legacy alias
-    net_quantity: Optional[str] = None    # canonical
+    net_weight: Optional[str] = None
+    net_quantity: Optional[str] = None
     pack_size: Optional[str] = None
     serving_size: Optional[str] = None
     servings_per_pack: Optional[str] = None
@@ -373,24 +360,24 @@ class ProductCreate(BaseModel):
     allergen_info: Optional[str] = None
     allergen_information: Optional[str] = None
     claims: List[str] = []
-    # Canonical fields preferred. Legacy single-string forms still accepted.
+
     storage_instructions: Optional[Union[List[str], str]] = None
-    instructions_to_use: Optional[str] = None  # legacy, superseded by usage_instructions
+    instructions_to_use: Optional[str] = None
     usage_instructions: Optional[Dict[str, Any]] = None
     shelf_life: Optional[str] = None
-    # Manufacturer / company information.
-    manufacturer_details: Optional[List[dict]] = None      # legacy alias
-    manufacturer_information: Optional[List[dict]] = None  # canonical
+
+    manufacturer_details: Optional[List[dict]] = None
+    manufacturer_information: Optional[List[dict]] = None
     brand_owner: Optional[str] = None
     manufacturing_date: Optional[str] = None
     expiry_date: Optional[str] = None
-    # Identifiers / regulatory.
-    barcode: Optional[str] = None                # legacy scalar
-    barcodes: Optional[List[str]] = None         # canonical list
+
+    barcode: Optional[str] = None
+    barcodes: Optional[List[str]] = None
     certifications: List[str] = []
-    fssai_licenses: Optional[List[str]] = None   # legacy
-    fssai_information: Optional[Dict[str, Any]] = None  # canonical: {license_numbers: []}
-    # Operational metadata.
+    fssai_licenses: Optional[List[str]] = None
+    fssai_information: Optional[Dict[str, Any]] = None
+
     batch_information: Optional[Dict[str, Any]] = None
     packaging_information: Optional[Dict[str, Any]] = None
     medical_information: Optional[Dict[str, Any]] = None
@@ -401,7 +388,6 @@ class ProductCreate(BaseModel):
     images: List[str] = []
     status: str = "draft"
 
-
 class ProductResponse(BaseModel):
     id: str
     product_name: str
@@ -411,7 +397,6 @@ class ProductResponse(BaseModel):
     category: Optional[str]
     status: str
     created_at: datetime
-
 
 @router.post("/extract", response_model=ExtractedProductData)
 @limiter.limit(settings.EXTRACT_RATE_LIMIT)
@@ -428,14 +413,13 @@ async def extract_product_from_images(
                 print(msg.encode('ascii', 'replace').decode('ascii'))
             except:
                 print("[LOG] (message contains special characters)")
-    
+
     safe_print("\n" + "="*60)
     safe_print("[EXTRACTION] ===== NEW EXTRACTION REQUEST =====")
     safe_print("="*60)
-    
+
     try:
-        # Log only the actor id and aggregate counts – never the email or
-        # user-supplied filenames – so logs don't double as a PII channel.
+
         safe_print(f"[EXTRACTION] actor_id={current_user.id} files={len(images)}")
         for idx, img in enumerate(images):
             safe_print(f"[EXTRACTION] file[{idx + 1}] content_type={img.content_type}")
@@ -444,13 +428,12 @@ async def extract_product_from_images(
         if not api_key:
             safe_print("[ERROR] Gemini API key not configured")
             raise HTTPException(
-                status_code=500, 
+                status_code=500,
                 detail="Gemini API key not configured. Please set GEMINI_API_KEY in environment."
             )
-        
+
         safe_print("[EXTRACTION] API key configured")
 
-        # Enforce count / size / content-type caps before reading bytes.
         _validate_uploads(images, _ALLOWED_IMAGE_CONTENT_TYPES, max_files=10)
 
         safe_print(f"[EXTRACTION] Processing {len(images)} images")
@@ -464,8 +447,7 @@ async def extract_product_from_images(
             position_label = f"file at position {idx + 1}"
             try:
                 safe_print(f"[EXTRACTION] Loading file[{idx + 1}]/{len(images)}")
-                # Stream-read with hard caps so a hostile client that omits
-                # Content-Length / `size` can't exhaust memory.
+
                 content = await read_upload_capped(
                     img,
                     per_file_cap_bytes=per_file_cap,
@@ -479,25 +461,24 @@ async def extract_product_from_images(
             except HTTPException:
                 raise
             except Exception as e:
-                # Echo the position, not the filename, to keep logs PII-clean.
+
                 safe_print(f"[ERROR] Failed to load file[{idx + 1}]: {type(e).__name__}")
                 raise HTTPException(
                     status_code=400,
                     detail=f"Invalid image file at position {idx + 1}",
                 )
-        
-        # Call Gemini API
+
         safe_print("[EXTRACTION] Initializing Gemini client...")
         from google import genai
-        
+
         client = genai.Client(api_key=api_key)
         safe_print("[EXTRACTION] Client initialized successfully")
-        
+
         content = [EXTRACTION_PROMPT] + pil_images
-        
+
         safe_print(f"[EXTRACTION] Calling Gemini API with model: {GEMINI_MODEL}")
         safe_print(f"[EXTRACTION] This may take 10-30 seconds for {len(images)} images...")
-        
+
         response = client.models.generate_content(
             model=GEMINI_MODEL,
             contents=content,
@@ -508,13 +489,13 @@ async def extract_product_from_images(
                 "response_mime_type": "application/json",
             },
         )
-        
+
         safe_print("[EXTRACTION] Response received from Gemini API")
 
         usage = response.usage_metadata
         safe_print(f"[EXTRACTION] Token usage - Input: {usage.prompt_token_count}, Output: {usage.candidates_token_count}")
         cost_info = calculate_cost(
-            usage.prompt_token_count, 
+            usage.prompt_token_count,
             usage.candidates_token_count
         )
         safe_print(f"[EXTRACTION] Estimated cost: ${cost_info['total_cost']:.4f}")
@@ -530,17 +511,17 @@ async def extract_product_from_images(
             if "```" in raw_json:
                 last_fence = raw_json.rfind("```")
                 raw_json = raw_json[:last_fence].rstrip()
-        
+
         if not raw_json.startswith("{"):
             first_brace = raw_json.find("{")
             if first_brace != -1:
                 raw_json = raw_json[first_brace:]
-        
+
         if not raw_json.endswith("}"):
             last_brace = raw_json.rfind("}")
             if last_brace != -1:
                 raw_json = raw_json[:last_brace + 1]
-        
+
         safe_print("[EXTRACTION] Parsing JSON response...")
         product_data = json.loads(raw_json)
         safe_print("[EXTRACTION] JSON parsed successfully")
@@ -558,7 +539,6 @@ async def extract_product_from_images(
             if numeric_mrp is not None:
                 parent["pricing"]["mrp"] = numeric_mrp
 
-        # packing_format is chosen by the user in the dashboard, not by AI.
         parent.pop("packing_format", None)
 
         mfg_date, exp_date = validate_dates(raw_json)
@@ -589,7 +569,6 @@ async def extract_product_from_images(
                 except:
                     pass
 
-        # Store shelf_life in both locations for compatibility with older readers.
         if shelf_life:
             parent["shelf_life"] = shelf_life
             if "dates" in parent:
@@ -642,14 +621,14 @@ async def extract_product_from_images(
             "other": parent.get("other_important_text", []),
             "raw": product_data,
         }
-        
+
         safe_print("[EXTRACTION] SUCCESS - Extraction completed successfully!")
         return ExtractedProductData(
             success=True,
             data=transformed_data,
             cost=cost_info
         )
-        
+
     except json.JSONDecodeError as e:
         safe_print(f"[ERROR] JSON parsing failed: {str(e)}")
         safe_print(f"[ERROR] Raw response preview: {raw_json[:500] if 'raw_json' in locals() else 'N/A'}")
@@ -687,20 +666,13 @@ async def extract_product_from_images(
             error="Extraction failed. Please try again or contact support."
         )
 
-
 @router.post("", response_model=dict)
 async def create_product(
     product: ProductCreate,
     current_user: User = Depends(require_permission(UserPermissions.ADD_PRODUCTS.value))
 ):
     try:
-        # ── Translate frontend payload to the canonical Product model shape. ──
-        # The Product model uses: net_quantity, allergen_information,
-        # manufacturer_information, barcodes (list), fssai_information
-        # (dict), usage_instructions (dict), storage_instructions (list).
-        # The frontend may still send the legacy aliases, so accept both.
 
-        # Storage & Usage
         if isinstance(product.storage_instructions, list):
             storage_list = [s for s in product.storage_instructions if s]
         elif isinstance(product.storage_instructions, str) and product.storage_instructions:
@@ -715,7 +687,6 @@ async def create_product(
                 "preparation_method": [],
             }
 
-        # Manufacturer / barcodes / FSSAI: prefer canonical, fall back to legacy.
         manufacturer_info = (
             product.manufacturer_information
             if product.manufacturer_information is not None
@@ -733,14 +704,12 @@ async def create_product(
         else:
             fssai_info = {}
 
-        # Allergen alias.
         allergen_information = (
             product.allergen_information
             if product.allergen_information is not None
             else product.allergen_info
         )
 
-        # Free-text lists may arrive as a single string from older callers.
         def _to_list(v):
             if isinstance(v, list):
                 return [s for s in v if s]
@@ -790,7 +759,7 @@ async def create_product(
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )
-        
+
         await new_product.insert()
 
         audit_event(
@@ -810,7 +779,6 @@ async def create_product(
     except Exception as e:
         print(f"[ERROR] create_product failed: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Failed to create product")
-
 
 @router.get("", response_model=dict)
 async def list_products(
@@ -842,8 +810,6 @@ async def list_products(
         products = await Product.find(query).skip(skip).limit(limit).to_list()
         total = await Product.find(query).count()
 
-        # `net_weight` was renamed to `net_quantity` on the model; use getattr
-        # with a fallback so legacy rows and the current frontend key both work.
         return {
             "products": [
                 {
@@ -873,9 +839,6 @@ async def list_products(
         print(f"[ERROR] list_products failed: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Failed to fetch products")
 
-
-# NOTE: must be declared before `GET /{product_id}` — otherwise FastAPI matches
-# "dashboard-stats" as a product_id and the ObjectId parser 400s.
 @router.get("/dashboard-stats", response_model=dict)
 async def dashboard_stats(
     current_user: User = Depends(require_permission(UserPermissions.VIEW_PRODUCTS.value))
@@ -895,8 +858,6 @@ async def dashboard_stats(
             {"created_at": {"$gte": two_weeks_ago, "$lt": week_ago}}
         ).count()
 
-        # Aggregated category counts — done server-side so we avoid shipping
-        # every product row just to compute a pie chart.
         breakdown_cursor = Product.get_motor_collection().aggregate([
             {"$match": {"category": {"$ne": None, "$exists": True}}},
             {"$group": {"_id": "$category", "count": {"$sum": 1}}},
@@ -939,9 +900,6 @@ async def dashboard_stats(
         print(f"[ERROR] dashboard_stats failed: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Failed to fetch dashboard stats")
 
-
-# NOTE: must be declared before `GET /{product_id}` — otherwise FastAPI matches
-# "brands" as a product_id and the ObjectId parser 400s.
 @router.get("/brands", response_model=dict)
 async def list_brands(
     current_user: User = Depends(require_permission(UserPermissions.VIEW_PRODUCTS.value))
@@ -954,7 +912,6 @@ async def list_brands(
         print(f"[ERROR] list_brands failed: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Failed to fetch brands")
 
-
 @router.get("/{product_id}", response_model=dict)
 async def get_product(
     product_id: str,
@@ -962,17 +919,10 @@ async def get_product(
 ):
     try:
         product = await Product.get(parse_object_id(product_id, field="product_id"))
-        
+
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
 
-        # The Product model was renamed (net_weight -> net_quantity,
-        # allergen_info -> allergen_information, manufacturer_details ->
-        # manufacturer_information, barcode -> barcodes, fssai_licenses ->
-        # fssai_information.license_numbers, instructions_to_use ->
-        # usage_instructions). The frontend still reads the legacy names, so
-        # we expose both shapes here until the UI is migrated. `getattr` with
-        # a default silently tolerates whichever names exist on a given row.
         manufacturer_info = getattr(product, "manufacturer_information", None) or []
         fssai_info = getattr(product, "fssai_information", None) or {}
         usage_info = getattr(product, "usage_instructions", None) or {}
@@ -992,7 +942,7 @@ async def get_product(
             "parent_brand": product.parent_brand,
             "sub_brand": product.sub_brand,
             "variant": product.variant,
-            # legacy + canonical field names for pack weight
+
             "net_weight": net_quantity,
             "net_quantity": net_quantity,
             "pack_size": product.pack_size,
@@ -1006,26 +956,26 @@ async def get_product(
             "nutrition_table": product.nutrition_table,
             "nutrition_notes": getattr(product, "nutrition_notes", []) or [],
             "ingredients": product.ingredients,
-            # legacy alias -> new field
+
             "allergen_info": allergen_information,
             "allergen_information": allergen_information,
             "claims": product.claims,
             "storage_instructions": product.storage_instructions,
-            # legacy flat alias -> new structured dict
+
             "instructions_to_use": directions_to_use,
             "usage_instructions": usage_info,
             "shelf_life": product.shelf_life,
-            # legacy alias -> new field
+
             "manufacturer_details": manufacturer_info,
             "manufacturer_information": manufacturer_info,
             "brand_owner": product.brand_owner,
             "manufacturing_date": product.manufacturing_date,
             "expiry_date": product.expiry_date,
-            # legacy scalar + new list
+
             "barcode": barcodes_list[0] if barcodes_list else None,
             "barcodes": barcodes_list,
             "certifications": product.certifications,
-            # legacy alias -> nested list
+
             "fssai_licenses": fssai_license_numbers,
             "fssai_information": fssai_info,
             "customer_care": product.customer_care,
@@ -1040,13 +990,12 @@ async def get_product(
             "created_at": product.created_at.isoformat() if product.created_at else None,
             "updated_at": product.updated_at.isoformat() if product.updated_at else None,
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         print(f"[ERROR] get_product failed: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch product")
-
 
 @router.put("/{product_id}", response_model=dict)
 async def update_product(
@@ -1056,22 +1005,13 @@ async def update_product(
 ):
     try:
         product = await Product.get(parse_object_id(product_id, field="product_id"))
-        
+
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
-        
+
         update_data = product_update.model_dump(exclude_unset=True)
         update_data["updated_at"] = datetime.utcnow()
 
-        # Translate the (legacy + canonical) frontend payload to the
-        # canonical Product model shape. Without this, fields that don't
-        # exist on the model (manufacturer_details, instructions_to_use,
-        # allergen_info, barcode, fssai_licenses, net_weight) are set as
-        # phantom attributes by `setattr` and silently dropped by Beanie
-        # when saving — meaning Edit Product appeared to save but nothing
-        # actually persisted.
-
-        # Storage & Usage
         if "storage_instructions" in update_data:
             si = update_data["storage_instructions"]
             if isinstance(si, list):
@@ -1090,39 +1030,33 @@ async def update_product(
         elif "instructions_to_use" in update_data:
             update_data.pop("instructions_to_use", None)
 
-        # Pack details: legacy net_weight → canonical net_quantity.
         if "net_weight" in update_data and "net_quantity" not in update_data:
             update_data["net_quantity"] = update_data.pop("net_weight")
         else:
             update_data.pop("net_weight", None)
 
-        # Allergen: legacy allergen_info → canonical allergen_information.
         if "allergen_info" in update_data and "allergen_information" not in update_data:
             update_data["allergen_information"] = update_data.pop("allergen_info")
         else:
             update_data.pop("allergen_info", None)
 
-        # Manufacturer: legacy manufacturer_details → canonical manufacturer_information.
         if "manufacturer_details" in update_data and "manufacturer_information" not in update_data:
             update_data["manufacturer_information"] = update_data.pop("manufacturer_details") or []
         else:
             update_data.pop("manufacturer_details", None)
 
-        # Barcodes: legacy scalar `barcode` → canonical list `barcodes`.
         if "barcode" in update_data and "barcodes" not in update_data:
             single = update_data.pop("barcode")
             update_data["barcodes"] = [single] if single else []
         else:
             update_data.pop("barcode", None)
 
-        # FSSAI: legacy `fssai_licenses` (list) → canonical `fssai_information.license_numbers`.
         if "fssai_information" not in update_data and "fssai_licenses" in update_data:
             licenses = update_data.pop("fssai_licenses") or []
             update_data["fssai_information"] = {"license_numbers": licenses}
         else:
             update_data.pop("fssai_licenses", None)
 
-        # Free-text list fields may arrive as a single string from old clients.
         for key in ("regulatory_text", "other_important_text", "nutrition_notes"):
             if key in update_data:
                 v = update_data[key]
@@ -1159,7 +1093,6 @@ async def update_product(
         print(f"[ERROR] update_product failed: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="Failed to update product")
 
-
 @router.delete("/{product_id}", response_model=dict)
 async def delete_product(
     product_id: str,
@@ -1167,10 +1100,10 @@ async def delete_product(
 ):
     try:
         product = await Product.get(parse_object_id(product_id, field="product_id"))
-        
+
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
-        
+
         await product.delete()
 
         audit_event(

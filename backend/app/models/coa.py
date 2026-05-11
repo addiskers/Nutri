@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 from beanie import Document
 from pydantic import Field
 
-
 class NutrientData(Dict):
     nutrient_name: str
     nutrient_name_raw: str
@@ -17,7 +16,6 @@ class NutrientData(Dict):
     category: Optional[str] = None
     source_section: Optional[str] = None
     notes: Optional[str] = None
-
 
 class COA(Document):
     ingredient_name: str
@@ -52,7 +50,7 @@ class COA(Document):
             "status",
             "created_by",
         ]
-        
+
     class Config:
         json_schema_extra = {
             "example": {

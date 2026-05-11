@@ -10,21 +10,15 @@ from app.utils.audit import audit_event
 
 router = APIRouter(prefix="/categories", tags=["Categories"])
 
-
-# Categories are shared taxonomy across the whole product catalog. Writes are
-# restricted to Admin+ (there is no finer-grained permission).
 _admin_or_above = require_role(UserRole.ADMIN)
-
 
 class CategoryCreate(BaseModel):
     name: str
     description: Optional[str] = None
 
-
 class CategoryUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-
 
 @router.post("", response_model=dict)
 async def create_category(
@@ -70,7 +64,6 @@ async def create_category(
             detail="Failed to create category"
         )
 
-
 @router.get("", response_model=dict)
 async def list_categories(
     skip: int = 0,
@@ -103,7 +96,6 @@ async def list_categories(
             detail="Failed to fetch categories"
         )
 
-
 @router.get("/{category_id}", response_model=dict)
 async def get_category(
     category_id: str,
@@ -131,7 +123,6 @@ async def get_category(
             status_code=500,
             detail="Failed to fetch category"
         )
-
 
 @router.put("/{category_id}", response_model=dict)
 async def update_category(
@@ -188,7 +179,6 @@ async def update_category(
             status_code=500,
             detail="Failed to update category"
         )
-
 
 @router.delete("/{category_id}", response_model=dict)
 async def delete_category(

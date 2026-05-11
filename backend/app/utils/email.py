@@ -4,14 +4,12 @@ from email.mime.multipart import MIMEMultipart
 from jinja2 import Template
 from config.settings import settings
 
-
 def _mask_email(value: str) -> str:
     """Log only the email domain, never the local-part."""
     if not value or "@" not in value:
         return "<invalid>"
     local, _, domain = value.partition("@")
     return f"***@{domain}"
-
 
 async def send_email(to_email: str, subject: str, html_content: str) -> bool:
     if not settings.SMTP_USER or not settings.SMTP_PASSWORD:
@@ -39,14 +37,13 @@ async def send_email(to_email: str, subject: str, html_content: str) -> bool:
         print(f"[INFO] Email sent to {_mask_email(to_email)}")
         return True
     except Exception as e:
-        # Avoid logging SMTP error detail — may contain addresses or banners.
+
         print(f"[ERROR] Failed to send email to {_mask_email(to_email)}: {type(e).__name__}")
         return False
 
-
 async def send_password_reset_email(to_email: str, reset_token: str, user_name: str) -> bool:
-    otp_code = reset_token 
-    
+    otp_code = reset_token
+
     html_template = Template("""
     <!DOCTYPE html>
     <html>
@@ -72,16 +69,16 @@ async def send_password_reset_email(to_email: str, reset_token: str, user_name: 
                 <h2>Hello {{ user_name }},</h2>
                 <p>You requested to reset your password for your NutriEyeQ Dashboard account.</p>
                 <p>Use this One-Time Password (OTP) to reset your password:</p>
-                
+
                 <div class="otp-box">
                     <p style="margin: 0 0 10px 0; font-size: 14px; color: #65758b;">Your OTP Code:</p>
                     <div class="otp-code">{{ otp_code }}</div>
                 </div>
-                
+
                 <p style="text-align: center; font-size: 14px; color: #65758b;">
                     Enter this code on the password reset page along with your new password.
                 </p>
-                
+
                 <div class="warning">
                     <strong>Security Notice:</strong>
                     <ul style="margin: 5px 0; padding-left: 20px;">
@@ -90,7 +87,7 @@ async def send_password_reset_email(to_email: str, reset_token: str, user_name: 
                         <li>Never share this OTP with anyone</li>
                     </ul>
                 </div>
-                
+
                 <p style="color: #65758b; font-size: 14px; margin-top: 20px;">
                     Best regards,<br>
                     The NutriEyeQ Team
@@ -104,7 +101,7 @@ async def send_password_reset_email(to_email: str, reset_token: str, user_name: 
     </body>
     </html>
     """)
-    
+
     html_content = html_template.render(
         user_name=user_name,
         otp_code=otp_code,
@@ -112,13 +109,12 @@ async def send_password_reset_email(to_email: str, reset_token: str, user_name: 
     )
 
     subject = "Your NutriEyeQ Password Reset OTP"
-    
-    return await send_email(to_email, subject, html_content)
 
+    return await send_email(to_email, subject, html_content)
 
 async def send_welcome_email(to_email: str, user_name: str, temp_password: str) -> bool:
     login_link = f"{settings.FRONTEND_URL}/login"
-    
+
     html_template = Template("""
     <!DOCTYPE html>
     <html>
@@ -142,19 +138,19 @@ async def send_welcome_email(to_email: str, user_name: str, temp_password: str) 
             <div class="content">
                 <h2>Hello {{ user_name }},</h2>
                 <p>Your NutriEyeQ Dashboard account has been created successfully!</p>
-                
+
                 <div class="credentials">
                     <p><strong>Your Login Credentials:</strong></p>
                     <p>📧 <strong>Email:</strong> {{ email }}</p>
                     <p>🔑 <strong>Temporary Password:</strong> <code style="background: white; padding: 4px 8px; border-radius: 4px;">{{ temp_password }}</code></p>
                 </div>
-                
+
                 <p>⚠️ <strong>Important:</strong> Please change your password after your first login for security.</p>
-                
+
                 <div style="text-align: center;">
                     <a href="{{ login_link }}" class="button">Login to Dashboard</a>
                 </div>
-                
+
                 <p style="color: #65758b; font-size: 14px; margin-top: 20px;">
                     Best regards,<br>
                     The NutriEyeQ Team
@@ -168,23 +164,22 @@ async def send_welcome_email(to_email: str, user_name: str, temp_password: str) 
     </body>
     </html>
     """)
-    
+
     html_content = html_template.render(
         user_name=user_name,
         email=to_email,
         temp_password=temp_password,
         login_link=login_link
     )
-    
+
     subject = "🎉 Welcome to NutriEyeQ Dashboard"
-    
+
     return await send_email(to_email, subject, html_content)
 
-
-async def send_user_approval_email(admin_email: str, admin_name: str, new_user_name: str, 
+async def send_user_approval_email(admin_email: str, admin_name: str, new_user_name: str,
                                    new_user_email: str, new_user_id: str, department: str) -> bool:
     approval_link = f"{settings.FRONTEND_URL}/users?approve={new_user_id}"
-    
+
     html_template = Template("""
     <!DOCTYPE html>
     <html>
@@ -208,20 +203,20 @@ async def send_user_approval_email(admin_email: str, admin_name: str, new_user_n
             <div class="content">
                 <h2>Hello {{ admin_name }},</h2>
                 <p>A new user has registered and is waiting for your approval:</p>
-                
+
                 <div class="user-info">
                     <p><strong>Name:</strong> {{ new_user_name }}</p>
                     <p><strong>Email:</strong> {{ new_user_email }}</p>
                     <p><strong>Department:</strong> {{ department }}</p>
                     <p><strong>Requested Role:</strong> Researcher</p>
                 </div>
-                
+
                 <p>Please review and approve this user in the NutriEyeQ Dashboard.</p>
-                
+
                 <div style="text-align: center;">
                     <a href="{{ approval_link }}" class="button">Review & Approve User</a>
                 </div>
-                
+
                 <p style="color: #65758b; font-size: 14px; margin-top: 20px;">
                     Or login to the dashboard and go to Users page to approve.<br><br>
                     Best regards,<br>
@@ -236,7 +231,7 @@ async def send_user_approval_email(admin_email: str, admin_name: str, new_user_n
     </body>
     </html>
     """)
-    
+
     html_content = html_template.render(
         admin_name=admin_name,
         new_user_name=new_user_name,
@@ -244,11 +239,10 @@ async def send_user_approval_email(admin_email: str, admin_name: str, new_user_n
         department=department,
         approval_link=approval_link
     )
-    
-    subject = "New User Registration - Approval Required"
-    
-    return await send_email(admin_email, subject, html_content)
 
+    subject = "New User Registration - Approval Required"
+
+    return await send_email(admin_email, subject, html_content)
 
 async def send_login_otp_email(to_email: str, otp_code: str, user_name: str) -> bool:
     html_template = Template("""
@@ -276,16 +270,16 @@ async def send_login_otp_email(to_email: str, otp_code: str, user_name: str) -> 
                 <h2>Hello {{ user_name }},</h2>
                 <p>A login attempt was made on your NutriEyeQ Dashboard account.</p>
                 <p>Use this One-Time Password (OTP) to complete your login:</p>
-                
+
                 <div class="otp-box">
                     <p style="margin: 0 0 10px 0; font-size: 14px; color: #65758b;">Your Login OTP:</p>
                     <div class="otp-code">{{ otp_code }}</div>
                 </div>
-                
+
                 <p style="text-align: center; font-size: 14px; color: #65758b;">
                     Enter this code on the login page to verify your identity.
                 </p>
-                
+
                 <div class="warning">
                     <strong>Security Notice:</strong>
                     <ul style="margin: 5px 0; padding-left: 20px;">
@@ -294,7 +288,7 @@ async def send_login_otp_email(to_email: str, otp_code: str, user_name: str) -> 
                         <li>Never share this OTP with anyone</li>
                     </ul>
                 </div>
-                
+
                 <p style="color: #65758b; font-size: 14px; margin-top: 20px;">
                     Best regards,<br>
                     The NutriEyeQ Team
@@ -308,7 +302,7 @@ async def send_login_otp_email(to_email: str, otp_code: str, user_name: str) -> 
     </body>
     </html>
     """)
-    
+
     html_content = html_template.render(
         user_name=user_name,
         otp_code=otp_code,
@@ -316,6 +310,6 @@ async def send_login_otp_email(to_email: str, otp_code: str, user_name: str) -> 
     )
 
     subject = "Your NutriEyeQ Login Verification OTP"
-    
+
     return await send_email(to_email, subject, html_content)
 

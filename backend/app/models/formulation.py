@@ -3,13 +3,11 @@ from datetime import datetime, timezone
 from beanie import Document
 from pydantic import Field
 
-
 class FormulationIngredient(Dict):
     coa_id: str
     coa_name: str
     percentage: float
     nutritional_data: Dict[str, Any] = {}
-
 
 class SavedFormulation(Document):
     name: str
@@ -17,7 +15,7 @@ class SavedFormulation(Document):
     nutrient_selections: Dict[str, str] = Field(default_factory=dict)
     custom_values: Dict[str, float] = Field(default_factory=dict)
     serve_size: float = 30.0
-    created_by: Optional[str] = None  # Stores user ID (str(user.id)); legacy records may contain email
+    created_by: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     status: str = "active"
@@ -28,7 +26,7 @@ class SavedFormulation(Document):
             "status",
             "created_by",
         ]
-        
+
     class Config:
         json_schema_extra = {
             "example": {

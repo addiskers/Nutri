@@ -17,8 +17,6 @@ const RULE_LABELS = {
   collapse_variants: 'Variants',
 }
 
-// ── Inline Modals ──────────────────────────────────────────────────────────
-
 const NodeModal = ({ isOpen, onClose, onSave, initialData, parentName, allNodes, nomenclatureNames }) => {
   const [name, setName] = useState('')
   const [nameSearch, setNameSearch] = useState('')
@@ -365,15 +363,11 @@ const DeleteModal = ({ isOpen, onClose, onConfirm, node, hasChildren }) => {
   )
 }
 
-// ── Tree Node Component ────────────────────────────────────────────────────
-
 const TreeNode = ({ node, depth, expanded, onToggle, onEdit, onDelete, onAddChild, onManageVariants, searchQuery }) => {
   const hasChildren = node.children && node.children.length > 0
   const isExpanded = expanded[node.id]
   const isMatch = searchQuery && node.nutrient_name.toLowerCase().includes(searchQuery.toLowerCase())
 
-  // Apply depth-based indentation via the Element.style API to avoid CSP
-  // `style-src 'unsafe-inline'`.
   const rowRef = useRef(null)
   useEffect(() => {
     if (rowRef.current) rowRef.current.style.paddingLeft = `${12 + depth * 24}px`
@@ -478,8 +472,6 @@ const TreeNode = ({ node, depth, expanded, onToggle, onEdit, onDelete, onAddChil
   )
 }
 
-// ── Main Page ──────────────────────────────────────────────────────────────
-
 const NutrientHierarchyMap = () => {
   const [tree, setTree] = useState([])
   const [flatNodes, setFlatNodes] = useState([])
@@ -529,7 +521,6 @@ const NutrientHierarchyMap = () => {
       .catch(err => console.error('Failed to load COA nomenclature names:', err))
   }, [fetchHierarchy])
 
-  // Auto-expand all on search
   useEffect(() => {
     if (searchQuery) {
       const allIds = {}
@@ -549,8 +540,6 @@ const NutrientHierarchyMap = () => {
   }
 
   const collapseAll = () => setExpanded({})
-
-  // ── CRUD handlers ──
 
   const handleSeed = async () => {
     setIsSeeding(true)
@@ -639,8 +628,6 @@ const NutrientHierarchyMap = () => {
     await fetchHierarchy()
   }
 
-  // ── Filter tree by search ──
-
   const filterTree = (nodes, query) => {
     if (!query) return nodes
     const lq = query.toLowerCase()
@@ -727,7 +714,7 @@ const NutrientHierarchyMap = () => {
               </div>
             ) : (
               <div>
-                {/* Header */}
+
                 <div className="flex items-center justify-between px-4 py-2.5 bg-[#f1f5f9] border-b border-[#e1e7ef]">
                   <span className="text-xs font-ibm-plex font-medium text-[#65758b] uppercase tracking-wider">
                     Nutrient
